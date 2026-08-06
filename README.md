@@ -24,3 +24,5 @@ For a native Linux development build, run `npm run tauri:build`; its executable 
 ## Desktop architecture
 
 The desktop build runs the established `recallstack.html` interface directly. A Tauri compatibility layer implements its browser File System Access handles with native Rust commands, so the existing notes, tasks, calendar, assets, outputs, themes, and navigation remain available without redesigning the application. Markdown remains canonical in the selected workspace.
+
+Themes are loaded from the editable `<workspace>/Apps/themes.json` catalog. RecallStack creates the file from its bundled defaults when it is missing. See [docs/themes.md](docs/themes.md) for the schema and instructions for adding themes.

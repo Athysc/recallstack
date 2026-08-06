@@ -1,0 +1,22 @@
+{
+  "recordedAt": "2026-08-06",
+  "fixture": {
+    "kind": "generated-temporary-workspace",
+    "notes": 1000,
+    "folders": 20,
+    "privateData": false
+  },
+  "environment": {
+    "os": "Linux 7.1.5-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 9 9900X 12-Core Processor",
+    "logicalCpus": 24,
+    "buildProfile": "cargo test (debug)",
+    "cargo": "1.97.1"
+  },
+  "nativeIndex": {
+    "coldMs": 172,
+    "coldChangedFiles": 1000,
+    "warmMs": 3,
+    "warmChangedFiles": 0
+  }
+}

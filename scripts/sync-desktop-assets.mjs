@@ -18,3 +18,4 @@ for (const [source, destination] of files) {
   await copyFile(resolve(root, source), resolve(output, destination));
 }
 await copyFile(resolve(root, "desktop-shim.js"), resolve(root, "public", "desktop-shim.js"));
+await copyFile(resolve(root, "themes.json"), resolve(root, "public", "themes.json"));
