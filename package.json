@@ -1,0 +1,37 @@
+{
+  "name": "recallstack-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "sync:desktop-assets": "node scripts/sync-desktop-assets.mjs",
+    "predev": "npm run sync:desktop-assets",
+    "dev": "vite",
+    "prebuild": "npm run sync:desktop-assets",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build --no-bundle",
+    "tauri:build:windows": "tauri build --target x86_64-pc-windows-msvc --no-bundle"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.8.1",
+    "@codemirror/lang-markdown": "^6.3.3",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.36.5",
+    "@highlightjs/cdn-assets": "^11.11.1",
+    "@tauri-apps/api": "^2.4.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "@tauri-apps/plugin-opener": "^2.2.5",
+    "highlight.js": "^11.11.1",
+    "marked": "^15.0.7",
+    "mermaid": "^11.16.1",
+    "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.4.1",
+    "typescript": "~5.7.3",
+    "vite": "^6.1.0"
+  }
+}
