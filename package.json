@@ -27,7 +27,9 @@
     "build:linux": "tauri build --no-bundle -- --locked",
     "build:linux:appimage": "NO_STRIP=1 tauri build --bundles appimage --ci --no-sign -- --locked",
     "package:linux:tar": "node scripts/package-release.mjs linux-tar",
-    "package:linux:appimage": "node scripts/package-release.mjs linux-appimage"
+    "package:linux:appimage": "node scripts/package-release.mjs linux-appimage",
+    "build:macos:app": "tauri build --target universal-apple-darwin --bundles app --ci --no-sign -- --locked",
+    "package:macos:app": "node scripts/package-release.mjs macos-app"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

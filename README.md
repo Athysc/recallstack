@@ -22,9 +22,19 @@ npm run package:windows:portable
 
 The versioned raw executable, portable ZIP, SHA-256 files, and artifact manifest are written to `release/`. It can be copied and run directly; workspace data stays in the selected workspace and app settings/recent-workspace list live in the user app-data directory. RecallStack relies on the Microsoft Edge WebView2 Evergreen Runtime included with supported Windows 10/11 systems.
 
+RecallStack also builds a portable, unsigned universal `.app` for macOS (Apple Silicon and Intel in one binary) with:
+
+```bash
+npm run build:macos:app
+npm run package:macos:app
+```
+
+The macOS build must run natively on a Mac. Because the app is unsigned and unnotarized, Gatekeeper blocks the first launch until the user right-clicks → Open (or clears the quarantine attribute with `xattr -cr`); this is documented in the packaged `README.txt`.
+
 For complete Arch Linux dependency installation and local build instructions,
-Linux tarball and AppImage commands, runtime requirements, upgrade policy, and
-release verification, see [docs/distribution.md](docs/distribution.md#build-locally-on-arch-linux).
+Linux tarball and AppImage commands, macOS build and Gatekeeper notes, runtime
+requirements, upgrade policy, and release verification, see
+[docs/distribution.md](docs/distribution.md#build-locally-on-arch-linux).
 
 ## Desktop architecture
 

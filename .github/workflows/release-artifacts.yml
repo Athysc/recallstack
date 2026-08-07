@@ -52,3 +52,25 @@ jobs:
           name: recallstack-linux
           path: release/
           if-no-files-found: error
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - run: npm ci
+      - run: npm run release:verify
+      - run: npm run release:clean
+      - run: npm run build:macos:app
+      - run: npm run package:macos:app
+      - uses: actions/upload-artifact@v6
+        with:
+          name: recallstack-macos
+          path: release/
+          if-no-files-found: error

@@ -21,7 +21,8 @@ await mkdir(releaseDir, { recursive: true });
 if (mode === "windows-portable") await packageWindows();
 else if (mode === "linux-tar") await packageLinuxTar();
 else if (mode === "linux-appimage") await packageLinuxAppImage();
-else throw new Error("Usage: package-release.mjs clean|windows-portable|linux-tar|linux-appimage");
+else if (mode === "macos-app") await packageMacosApp();
+else throw new Error("Usage: package-release.mjs clean|windows-portable|linux-tar|linux-appimage|macos-app");
 
 await writeArtifactMetadata();
 
@@ -39,12 +40,7 @@ async function packageWindows() {
   await cp(resolve(root, "packaging/windows/README.txt"), resolve(stage, "README.txt"));
   await copyPortableDocuments(stage);
   const artifact = resolve(releaseDir, `RecallStack-${version}-windows-x86_64-portable.zip`);
-  await rm(artifact, { force: true });
-  if (process.platform === "win32") {
-    run("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path '${escapePowershell(stage)}\\*' -DestinationPath '${escapePowershell(artifact)}' -Force`]);
-  } else {
-    run("zip", ["-q", "-r", artifact, "."], stage);
-  }
+  await createZipArchive(stage, artifact);
   await rm(stage, { recursive: true, force: true });
   console.log(`Windows portable ZIP: ${artifact}`);
   console.log(`Windows portable executable: ${rawExecutable}`);
@@ -87,6 +83,31 @@ async function packageLinuxAppImage() {
   console.log(`Linux AppImage: ${artifact}`);
 }
 
+async function packageMacosApp() {
+  const appBundle = resolve(root, "src-tauri/target/universal-apple-darwin/release/bundle/macos/RecallStack.app");
+  await requireDir(appBundle, "Build the macOS app bundle first with npm run build:macos:app");
+  const stage = resolve(releaseDir, `.stage-macos-${version}`);
+  await rm(stage, { recursive: true, force: true });
+  await mkdir(stage, { recursive: true });
+  await cp(appBundle, resolve(stage, "RecallStack.app"), { recursive: true });
+  await cp(resolve(root, "LICENSE"), resolve(stage, "LICENSE"));
+  await cp(resolve(root, "packaging/macos/README.txt"), resolve(stage, "README.txt"));
+  await copyPortableDocuments(stage);
+  const artifact = resolve(releaseDir, `RecallStack-${version}-macos-universal.zip`);
+  await createZipArchive(stage, artifact);
+  await rm(stage, { recursive: true, force: true });
+  console.log(`macOS universal app ZIP: ${artifact}`);
+}
+
+async function createZipArchive(stage, artifact) {
+  await rm(artifact, { force: true });
+  if (process.platform === "win32") {
+    run("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path '${escapePowershell(stage)}\\*' -DestinationPath '${escapePowershell(artifact)}' -Force`]);
+  } else {
+    run("zip", ["-q", "-r", artifact, "."], stage);
+  }
+}
+
 async function writeArtifactMetadata() {
   const entries = [];
   for (const name of (await readdir(releaseDir)).sort()) {
@@ -110,6 +131,11 @@ async function copyPortableDocuments(destination) {
 
 async function requireFile(path, message) {
   try { if ((await stat(path)).isFile()) return; } catch { /* handled below */ }
+  throw new Error(`${message}\nMissing: ${path}`);
+}
+
+async function requireDir(path, message) {
+  try { if ((await stat(path)).isDirectory()) return; } catch { /* handled below */ }
   throw new Error(`${message}\nMissing: ${path}`);
 }
 

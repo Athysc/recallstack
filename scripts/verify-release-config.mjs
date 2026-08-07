@@ -7,6 +7,7 @@ const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "ut
 const tauri = JSON.parse(await readFile(resolve(root, "src-tauri/tauri.conf.json"), "utf8"));
 const workflow = await readFile(resolve(root, ".github/workflows/release-artifacts.yml"), "utf8");
 const windowsReadme = await readFile(resolve(root, "packaging/windows/README.txt"), "utf8");
+const macosReadme = await readFile(resolve(root, "packaging/macos/README.txt"), "utf8");
 const packageScript = await readFile(resolve(root, "scripts/package-release.mjs"), "utf8");
 
 assert.equal(tauri.productName, "RecallStack");
@@ -23,6 +24,13 @@ assert.match(packageScript, /portable\/changes\.md/);
 assert.match(packageScript, /themes\.json/);
 assert.match(windowsReadme, /No installation or administrator access is required/);
 assert.match(windowsReadme, /WebView2 Evergreen Runtime/);
+assert.match(packageJson.scripts["build:macos:app"], /universal-apple-darwin/);
+assert.match(packageJson.scripts["build:macos:app"], /--bundles app/);
+assert.doesNotMatch(packageJson.scripts["build:macos:app"], /dmg|pkg|installer/i);
+assert.match(packageJson.scripts["package:macos:app"], /macos-app/);
+assert.match(packageScript, /RecallStack\.app/);
+assert.match(macosReadme, /quarantine/i);
+assert.match(macosReadme, /xattr -cr/);
 assert.match(workflow, /workflow_dispatch/);
 assert.doesNotMatch(workflow, /^\s+push:/m, "release artifacts must not publish automatically from a push");
 assert.match(workflow, /actions\/checkout@v6/);
@@ -36,16 +44,19 @@ assert.doesNotMatch(
 );
 assert.match(workflow, /runs-on: windows-2022/);
 assert.match(workflow, /runs-on: ubuntu-22\.04/);
+assert.match(workflow, /runs-on: macos-14/);
 
 await Promise.all([
   "LICENSE",
   "CHANGELOG.md",
   "packaging/arch/PKGBUILD.template",
   "packaging/linux/com.recallstack.desktop.desktop",
+  "packaging/macos/README.txt",
   "portable/readme.md",
   "portable/changes.md",
   "src-tauri/icons/icon.png",
   "src-tauri/icons/icon.ico",
+  "src-tauri/icons/icon.icns",
 ].map((path) => access(resolve(root, path))));
 
-console.log("Release configuration verified: portable Windows only, native Windows/Linux CI, icons, metadata, and documentation present.");
+console.log("Release configuration verified: portable Windows/Linux/macOS artifacts, native Windows/Linux/macOS CI, icons, metadata, and documentation present.");
