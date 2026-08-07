@@ -25,7 +25,7 @@
     "build:windows:portable": "tauri build --target x86_64-pc-windows-msvc --no-bundle -- --locked",
     "package:windows:portable": "node scripts/package-release.mjs windows-portable",
     "build:linux": "tauri build --no-bundle -- --locked",
-    "build:linux:appimage": "tauri build --bundles appimage --ci --no-sign -- --locked",
+    "build:linux:appimage": "NO_STRIP=1 tauri build --bundles appimage --ci --no-sign -- --locked",
     "package:linux:tar": "node scripts/package-release.mjs linux-tar",
     "package:linux:appimage": "node scripts/package-release.mjs linux-appimage"
   },
