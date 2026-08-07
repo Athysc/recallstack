@@ -16,6 +16,7 @@ use tauri_plugin_dialog::DialogExt;
 use walkdir::WalkDir;
 
 const RECENTS_FILE: &str = "recent-workspaces.json";
+const MAX_RECENT_WORKSPACES: usize = 6;
 const DATA_DIR: &str = "Data";
 
 #[derive(Serialize, Clone)]
@@ -618,12 +619,28 @@ fn save_recent(app: &AppHandle, workspace: &Path) -> Result<(), String> {
         opened_at: Utc::now().timestamp(),
     });
     entries.sort_by_key(|x| (!x.pinned, -x.opened_at));
-    entries.truncate(12);
+    entries.truncate(MAX_RECENT_WORKSPACES);
     fs::write(
         path,
         serde_json::to_vec_pretty(&entries).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())
+}
+
+fn prepare_workspace(root: &Path) -> Result<(), String> {
+    let create_starter_tree = !data_path(root).exists();
+    fs::create_dir_all(data_path(root))
+        .map_err(|e| format!("Could not prepare the workspace Data directory: {e}"))?;
+    if create_starter_tree {
+        fs::create_dir_all(data_path(root).join("notes/mynotes/notes"))
+            .map_err(|e| format!("Could not prepare the starter notes directory: {e}"))?;
+        fs::create_dir_all(data_path(root).join("notes/mynotes/tasks"))
+            .map_err(|e| format!("Could not prepare the starter tasks directory: {e}"))?;
+    }
+    fs::create_dir_all(root.join("Apps"))
+        .map_err(|e| format!("Could not prepare the workspace Apps directory: {e}"))?;
+    drop(open_db(root)?);
+    Ok(())
 }
 
 fn normalized_event_kind(kind: &EventKind) -> Option<&'static str> {
@@ -846,14 +863,9 @@ pub fn set_workspace(
     if !root.is_dir() {
         return Err(err("The selected workspace is not a directory"));
     }
-    if !data_path(&root).is_dir() {
-        return Err(err("RecallStack workspaces must contain a Data/ directory"));
-    }
-    fs::create_dir_all(root.join("Apps"))
-        .map_err(|e| format!("Could not prepare the workspace Apps directory: {e}"))?;
+    prepare_workspace(&root)?;
     *state.workspace.lock() = Some(root.clone());
     save_recent(&app, &root)?;
-    drop(open_db(&root)?);
     watch_workspace(&app, state.inner(), root.clone())?;
     let result = summary(&root);
     let app_handle = app.clone();
@@ -905,6 +917,18 @@ pub fn recent_workspaces(app: AppHandle) -> Result<Vec<WorkspaceSummary>, String
             path.is_dir().then(|| summary(&path))
         })
         .collect())
+}
+
+#[tauri::command]
+pub fn remove_recent_workspace(app: AppHandle, path: String) -> Result<(), String> {
+    let recents_path = recents_path(&app)?;
+    let mut entries = load_recents(&app)?;
+    entries.retain(|item| item.path != path);
+    fs::write(
+        recents_path,
+        serde_json::to_vec_pretty(&entries).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1812,6 +1836,45 @@ mod tests {
         let root = std::env::temp_dir().join(unique);
         fs::create_dir_all(root.join("Data/notes")).expect("fixture directories");
         root
+    }
+
+    #[test]
+    fn preparing_an_empty_workspace_creates_required_structure() {
+        let root = temporary_workspace("empty-setup");
+        fs::remove_dir_all(root.join("Data")).expect("remove fixture Data directory");
+
+        prepare_workspace(&root).expect("prepare empty workspace");
+
+        assert!(root.join("Data").is_dir());
+        assert!(root.join("Data/notes/mynotes/notes").is_dir());
+        assert!(root.join("Data/notes/mynotes/tasks").is_dir());
+        assert!(root.join("DB").is_dir());
+        assert!(root.join("DB/index.db").is_file());
+        let db = Connection::open(root.join("DB/index.db")).expect("open prepared index");
+        let table_count: usize = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='rs_notes'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query prepared schema");
+        assert_eq!(table_count, 1);
+        drop(db);
+
+        fs::remove_dir_all(&root).expect("remove fixture");
+    }
+
+    #[test]
+    fn preparing_an_existing_workspace_does_not_add_starter_folders() {
+        let root = temporary_workspace("existing-setup");
+
+        prepare_workspace(&root).expect("prepare existing workspace");
+
+        assert!(root.join("Data/notes").is_dir());
+        assert!(!root.join("Data/notes/mynotes").exists());
+        assert!(root.join("DB/index.db").is_file());
+
+        fs::remove_dir_all(&root).expect("remove fixture");
     }
 
     #[test]

@@ -26,6 +26,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   const IDB_NAME    = 'recallstack';
   const IDB_STORE   = 'handles';
   const IDB_KEY     = 'workspace';
+  const IDB_RECENTS_KEY = 'recent-workspaces';
+  const MAX_RECENT_WORKSPACES = 6;
   const DATA_PATH   = ['Data'];            // path from workspace root to Data/
   const DB_PATH     = ['DB', 'index.db'];  // path from workspace root
   const DEFAULT_WORKSPACE_ROOT_PATH = '/home/scdev/notes';
@@ -111,6 +113,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   let workingSortMode = localStorage.getItem(WORKING_SORT_KEY) || 'alpha';
   if (!WORKING_SORT_MODES.has(workingSortMode)) workingSortMode = 'alpha';
   let workingTasksLoadId = 0;
+  let workspaceSessionGeneration = 0;
 
   // ── DOM refs ─────────────────────────────────────────────────────────────────
   const $id = id => document.getElementById(id);
@@ -125,6 +128,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   const searchInput   = $id('search-input');
   const btnSearch     = $id('btn-search');
   const btnSearchClear = $id('btn-search-clear');
+  const btnRefreshWorkspace = $id('btn-refresh-workspace');
   const btnSafetyTools = $id('btn-safety-tools');
   const editorView    = $id('editor-view');
   const listHeading  = $id('list-heading');
@@ -456,12 +460,57 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     if (window.__recallstackNative?.active) {
       return window.__recallstackNative.saveWorkspaceHandle(handle);
     }
+    const existing = await loadBrowserRecentWorkspaces();
+    const recents = [];
+    for (const item of existing) {
+      if (!item?.handle || await sameWorkspaceHandle(item.handle, handle)) continue;
+      recents.push(item);
+    }
+    recents.unshift({ handle, name: handle.name || 'Workspace', openedAt: Date.now() });
     const idb = await openIDB();
     return new Promise((resolve, reject) => {
       const tx = idb.transaction(IDB_STORE, 'readwrite');
       tx.objectStore(IDB_STORE).put(handle, IDB_KEY);
+      tx.objectStore(IDB_STORE).put(recents.slice(0, MAX_RECENT_WORKSPACES), IDB_RECENTS_KEY);
       tx.oncomplete = () => resolve();
       tx.onerror    = () => reject(tx.error);
+    });
+  }
+
+  async function readIDBValue(key) {
+    const idb = await openIDB();
+    return new Promise(resolve => {
+      const tx = idb.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    });
+  }
+
+  async function sameWorkspaceHandle(left, right) {
+    if (left === right) return true;
+    if (typeof left?.isSameEntry !== 'function') return false;
+    try { return await left.isSameEntry(right); } catch { return false; }
+  }
+
+  async function loadBrowserRecentWorkspaces() {
+    const entries = await readIDBValue(IDB_RECENTS_KEY);
+    return Array.isArray(entries) ? entries.slice(0, MAX_RECENT_WORKSPACES) : [];
+  }
+
+  async function removeBrowserRecentWorkspace(handle) {
+    const existing = await loadBrowserRecentWorkspaces();
+    const recents = [];
+    for (const item of existing) {
+      if (!item?.handle || await sameWorkspaceHandle(item.handle, handle)) continue;
+      recents.push(item);
+    }
+    const idb = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = idb.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(recents, IDB_RECENTS_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -496,6 +545,26 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       cur = await cur.getDirectoryHandle(part, { create });
     }
     return cur;
+  }
+
+  async function ensureWorkspaceStructure(root) {
+    let dataDir;
+    let createStarterTree = false;
+    try {
+      dataDir = await root.getDirectoryHandle('Data');
+    } catch (error) {
+      if (error?.name !== 'NotFoundError') throw error;
+      dataDir = await root.getDirectoryHandle('Data', { create: true });
+      createStarterTree = true;
+    }
+    if (createStarterTree) {
+      const notesWorkspace = await dataDir.getDirectoryHandle('notes', { create: true });
+      const mynotes = await notesWorkspace.getDirectoryHandle('mynotes', { create: true });
+      await mynotes.getDirectoryHandle('notes', { create: true });
+      await mynotes.getDirectoryHandle('tasks', { create: true });
+    }
+    const dbDir = await root.getDirectoryHandle('DB', { create: true });
+    await dbDir.getFileHandle('index.db', { create: true });
   }
 
   async function listDirs(dirHandle) {
@@ -543,6 +612,9 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       }
     }
 
+    if (!result.length && dataHandle) {
+      result.push({ name: 'Data', handle: dataHandle, dbPrefix: 'Data/' });
+    }
     return result;
   }
 
@@ -1243,8 +1315,65 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
 
   // ── Workspace init ────────────────────────────────────────────────────────────
 
-  async function openWorkspace(handle) {
+  function resetWorkspaceSessionState() {
+    workspaceSessionGeneration++;
+    listLoadGeneration++;
+    workingTasksLoadId++;
+    nativeFileVersions.clear();
+    removeExternalChangeBanner();
+    for (const url of assetBlobUrls.values()) URL.revokeObjectURL(url);
+    assetBlobUrls.clear();
+    clearTimeout(_previewTimer);
+    clearTimeout(_autoSaveTimer);
+    clearTimeout(_searchTimer);
+
+    currentWorkspace = null;
+    activeWorkspace = null;
+    notesHandle = null;
+    l1Active = null;
+    l2Active = null;
+    currentPath = null;
+    savedContent = null;
+    isNew = false;
+    archiveMode = false;
+    allTasksMode = false;
+    returnToAllTasks = false;
+    outputsMode = false;
+    outputsActiveFolder = null;
+    returnToOutputs = false;
+    isOutputsFile = false;
+    currentOutputsFh = null;
+    currentOutputsDirFh = null;
+    preSearchView = null;
+    searchIndex = [];
+    currentBacklinks = [];
+
+    navRow1.replaceChildren();
+    navRow2.replaceChildren();
+    navRow2.classList.add('hidden');
+    fileGrid.replaceChildren();
+    searchGrid.replaceChildren();
+    searchInput.value = '';
+    listHeading.textContent = 'Loading workspace…';
+    titleInput.value = '';
+    mdEditor.openDocument('', '', 0);
+    previewOut.replaceChildren();
+    workingTaskList.replaceChildren();
+    taskDateBar.classList.add('hidden');
+    taskCountBar.classList.add('hidden');
+    taskCountBar.replaceChildren();
+    showView('list');
+  }
+
+  async function openWorkspace(handle, options = {}) {
+    const freshRoot = options.freshRoot === true;
     try {
+      await ensureWorkspaceStructure(handle);
+      if (freshRoot) resetWorkspaceSessionState();
+      if (sqlDb?.close) sqlDb.close();
+      sqlDb = null;
+      dbFileHandle = null;
+      sqliteEnabled = false;
       rootHandle  = handle;
       workspaces  = await buildWorkspaceList(rootHandle);
       await loadWorkspaceThemes();
@@ -1303,20 +1432,47 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       appEl.classList.remove('hidden');
 
       // Pick the last-used workspace, or fall back to the first one
-      const savedWsName = localStorage.getItem('pkm-active-workspace');
+      const savedWsName = options.preferredWorkspaceName
+        ?? (freshRoot ? null : localStorage.getItem('pkm-active-workspace'));
       let ws = workspaces.find(w => w.name === savedWsName) || workspaces[0];
       if (!showSystemFolders && SYSTEM_WORKSPACES.has(ws.name)) {
         ws = workspaces.find(w => !SYSTEM_WORKSPACES.has(w.name)) || ws;
       }
-      await switchWorkspace(ws);
+      await switchWorkspace(ws, { restoreView: !freshRoot });
+      return true;
     } catch (e) {
       toast('Could not open workspace: ' + e.message, 'error');
       console.error(e);
+      return false;
     }
   }
 
-  async function switchWorkspace(ws) {
+  async function canSwitchWorkspaceRoot() {
+    if (!rootHandle) return true;
+    if (!await checkUnsavedNewNote()) return false;
+    return autoSaveIfDirty(true);
+  }
+
+  async function openChosenWorkspace(handle, leaveChecked = false) {
+    if (!leaveChecked && !await canSwitchWorkspaceRoot()) return false;
+    const opened = await openWorkspace(handle, { freshRoot: true });
+    if (opened) await saveWorkspaceHandle(handle);
+    return opened;
+  }
+
+  async function chooseAndOpenWorkspace() {
+    if (!await canSwitchWorkspaceRoot()) return false;
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    return openChosenWorkspace(handle, true);
+  }
+
+  async function switchWorkspace(ws, options = {}) {
     if (!await checkUnsavedNewNote()) return;
+    const changingWorkspace = !!currentWorkspace && currentWorkspace !== ws;
+    if (changingWorkspace) {
+      if (!await autoSaveIfDirty(true)) return;
+      resetWorkspaceSessionState();
+    }
     currentWorkspace = ws;
     activeWorkspace = ws.name;
     notesHandle     = ws.handle;
@@ -1338,7 +1494,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
 
     readmeLoaded    = false;
     changelogLoaded = false;
-    await initNav();
+    const restoreView = options.restoreView ?? !changingWorkspace;
+    await initNav({ restoreView });
     await buildSearchIndex();
     if (window.__recallstackNative?.active) renderSavedSearches().catch(error => console.warn('Could not load saved searches', error));
     performance.mark('recallstack:workspace-ui-ready');
@@ -1364,8 +1521,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       chip.textContent = ws.name;
       chip.addEventListener('click', async () => {
         try {
-          if (ws.name === activeWorkspace) await showActiveWorkspaceFolderListing();
-          else await switchWorkspace(ws);
+          await refreshAndSwitchWorkspace(ws.name);
         } catch (error) {
           toast('Could not open workspace listing: ' + (error.message || error), 'error');
         }
@@ -1374,21 +1530,37 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     });
   }
 
-  // Clicking the already-active workspace is navigation, not a workspace reload.
-  // Preserve its selected folder/subfolder and show that folder's normal listing.
-  async function showActiveWorkspaceFolderListing() {
-    if (!await checkUnsavedNewNote()) return;
-    if (!await autoSaveIfDirty(true)) return;
-    if (l2Active) {
-      await selectL2(l2Active);
-    } else if (l1Active) {
-      await selectRootFolder();
-    } else {
-      const folders = await listWorkspaceTopDirs();
-      if (folders.length) await selectL1(folders[0]);
-      else showView('list');
+  async function refreshAndSwitchWorkspace(workspaceName) {
+    if (!await canSwitchWorkspaceRoot()) return;
+    workspaces = await buildWorkspaceList(rootHandle);
+    let workspace = workspaces.find(item => item.name === workspaceName);
+    if (!workspace) {
+      workspace = workspaces.find(item => !SYSTEM_WORKSPACES.has(item.name)) || workspaces[0];
+      toast(`“${workspaceName}” is no longer available. Workspace folders were refreshed.`, 'error');
+    }
+    if (!workspace) return;
+    await switchWorkspace(workspace, { restoreView: false });
+  }
+
+  async function refreshEverything() {
+    if (!rootHandle || btnRefreshWorkspace.disabled) return;
+    if (!await canSwitchWorkspaceRoot()) return;
+    const handle = rootHandle;
+    const preferredWorkspaceName = activeWorkspace;
+    btnRefreshWorkspace.disabled = true;
+    btnRefreshWorkspace.classList.add('refreshing');
+    try {
+      const opened = await openWorkspace(handle, { freshRoot: true, preferredWorkspaceName });
+      if (opened) toast('Workspace refreshed');
+    } finally {
+      btnRefreshWorkspace.disabled = false;
+      btnRefreshWorkspace.classList.remove('refreshing');
     }
   }
+
+  btnRefreshWorkspace.addEventListener('click', () => {
+    refreshEverything().catch(error => toast('Could not refresh workspace: ' + (error?.message || error), 'error'));
+  });
 
   // ── Navigation ────────────────────────────────────────────────────────────────
 
@@ -1438,7 +1610,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     return true;
   }
 
-  async function initNav() {
+  async function initNav(options = {}) {
+    const restoreView = options.restoreView !== false;
     const folders = await listWorkspaceTopDirs();
     navRow1.innerHTML = '';
     navRow1.appendChild(mkNavNewBtn(1));
@@ -1455,12 +1628,24 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     } else if (navRow1Mode === 'combo') {
       navRow1.appendChild(mkNav1Combo(folders));
     } else {
-      folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => selectL1(f))));
+      folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => refreshFolderNavigation(f.name))));
+    }
+
+    if (options.preferredL1) {
+      const preferred = folders.find(folder => folder.name === options.preferredL1);
+      if (preferred) {
+        await selectL1(preferred, {
+          preferredL2: options.preferredL2,
+          preferRoot: options.preferRoot === true,
+        });
+        return;
+      }
+      toast(`“${options.preferredL1}” is no longer available. Folders were refreshed.`, 'error');
     }
 
     if (isManagedSystemWorkspace()) {
       if (folders.length) {
-        if (!await restoreLastView(folders)) await selectL1(folders[0]);
+        if (!restoreView || !await restoreLastView(folders)) await selectL1(folders[0]);
       } else {
         showView('list');
         listHeading.textContent = activeWorkspace;
@@ -1469,7 +1654,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       return;
     }
 
-    if (!await restoreLastView(folders)) {
+    if (!restoreView || !await restoreLastView(folders)) {
       if (allTasksEnabled) {
         selectAllTasks();
       } else if (folders.length) {
@@ -1478,7 +1663,13 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     }
   }
 
-  async function selectL1(folder) {
+  async function refreshFolderNavigation(l1Name, l2Name = null, preferRoot = false) {
+    if (!await checkUnsavedNewNote()) return;
+    if (!await autoSaveIfDirty(true)) return;
+    await initNav({ restoreView: false, preferredL1: l1Name, preferredL2: l2Name, preferRoot });
+  }
+
+  async function selectL1(folder, options = {}) {
     if (!await checkUnsavedNewNote()) return;
     allTasksMode        = false;
     returnToAllTasks    = false;
@@ -1508,7 +1699,14 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     const r1 = document.getElementById('btn-rename-folder-1');
     if (r1) r1.disabled = isManagedSystemWorkspace();
     populateNavRow2Contents(subs);
-    const firstFolder = subs.find(f => f.name === 'tasks') || subs[0];
+    const preferredFolder = options.preferredL2
+      ? subs.find(subfolder => subfolder.name === options.preferredL2)
+      : null;
+    if (options.preferredL2 && !preferredFolder) {
+      toast(`“${options.preferredL2}” is no longer available. Subfolders were refreshed.`, 'error');
+    }
+    const firstFolder = preferredFolder || subs.find(f => f.name === 'tasks') || subs[0];
+    if (options.preferRoot) return selectRootFolder();
     if (firstFolder) await selectL2(firstFolder);
     else await selectRootFolder();
   }
@@ -1616,7 +1814,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   }
 
   function mkRootNavBtn() {
-    const btn = mkNavBtn('root', selectRootFolder);
+    const btn = mkNavBtn('root', () => refreshFolderNavigation(l1Active?.name, null, true));
     btn.classList.add('nav-root-btn');
     btn.dataset.navKey = '__root__';
     btn.title = 'Files directly inside the selected top-level folder';
@@ -1934,7 +2132,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     select.value = l1Active ? l1Active.name : '';
     select.addEventListener('change', async () => {
       const selected = folders.find(f => f.name === select.value);
-      if (selected) await selectL1(selected);
+      if (selected) await refreshFolderNavigation(selected.name);
     });
     return select;
   }
@@ -1954,7 +2152,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       : (folders[0] ? folders[0].name : '');
     select.addEventListener('change', async () => {
       const selected = folders.find(f => f.name === select.value);
-      if (selected) await selectL2(selected);
+      if (selected) await refreshFolderNavigation(l1Active?.name, selected.name);
     });
     return select;
   }
@@ -1971,14 +2169,14 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     const tasksFolder  = subs.find(f => f.name === 'tasks');
     const otherFolders = subs.filter(f => f.name !== 'tasks');
     if (tasksFolder) {
-      navRow2.appendChild(mkNavBtn(tasksFolder.name, () => selectL2(tasksFolder)));
+      navRow2.appendChild(mkNavBtn(tasksFolder.name, () => refreshFolderNavigation(l1Active?.name, tasksFolder.name)));
       if (otherFolders.length > 0) navRow2.appendChild(mkNavSeparator());
     }
     if (otherFolders.length > 0) {
       if (navRow2Mode === 'combo') {
         navRow2.appendChild(mkNav2Combo(otherFolders));
       } else {
-        otherFolders.forEach(f => navRow2.appendChild(mkNavBtn(f.name, () => selectL2(f))));
+        otherFolders.forEach(f => navRow2.appendChild(mkNavBtn(f.name, () => refreshFolderNavigation(l1Active?.name, f.name))));
       }
     }
   }
@@ -1986,6 +2184,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   function updateNavModeBtns() {
     if (btnNav1Mode) btnNav1Mode.classList.toggle('active', navRow1Mode === 'combo');
     if (btnNav2Mode) btnNav2Mode.classList.toggle('active', navRow2Mode === 'combo');
+    if (btnNav1Mode) btnNav1Mode.setAttribute('aria-pressed', String(navRow1Mode === 'combo'));
+    if (btnNav2Mode) btnNav2Mode.setAttribute('aria-pressed', String(navRow2Mode === 'combo'));
   }
 
   function selectAllTasks() {
@@ -3609,7 +3809,6 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     splitPane.classList.toggle('three-pane', sideBySide);
     taskEditorResizer.classList.toggle('side-resizer', sideBySide);
     btnWorkingLayout.classList.toggle('active', workingPaneLayout === 'left');
-    btnWorkingLayout.classList.toggle('hidden', !isTasksAreaEditor());
     btnWorkingLayout.title = workingPaneLayout === 'left'
       ? 'Move Working Tasks back to the bottom pane'
       : 'Move Working Tasks to a left pane';
@@ -3874,7 +4073,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
         } else {
-          folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => selectL1(f))));
+          folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => refreshFolderNavigation(f.name))));
         }
         const newFolder = folders.find(f => f.name === name);
         await selectL1(newFolder || folders[0]);
@@ -4011,7 +4210,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
         } else {
-          folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => selectL1(f))));
+          folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => refreshFolderNavigation(f.name))));
         }
         setActive(navRow1, newName);
         const r1 = document.getElementById('btn-rename-folder-1');
@@ -4351,8 +4550,13 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   async function refreshBacklinks() {
     currentBacklinks = [];
     if (!window.__recallstackNative?.active || !currentPath || isOutputsFile) return;
+    const generation = workspaceSessionGeneration;
+    const path = currentPath;
     const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
-    try { currentBacklinks = await window.__recallstackNative.backlinks((prefix + currentPath).replace(/\/{2,}/g, '/')); }
+    try {
+      const backlinks = await window.__recallstackNative.backlinks((prefix + path).replace(/\/{2,}/g, '/'));
+      if (generation === workspaceSessionGeneration && path === currentPath) currentBacklinks = backlinks;
+    }
     catch (error) { console.warn('Could not load backlinks', error); }
   }
 
@@ -4713,11 +4917,13 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   // ── Search index ──────────────────────────────────────────────────────────────
 
   async function buildSearchIndex() {
-    searchIndex = [];
+    const generation = workspaceSessionGeneration;
+    const nextIndex = [];
     if (window.__recallstackNative?.active) {
       const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
       const notes = await window.__recallstackNative.indexedNotes(prefix);
       const prefixPattern = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?');
+      if (generation !== workspaceSessionGeneration) return;
       searchIndex = notes.map(note => ({
         notesRelPath: note.path.replace(prefixPattern, ''),
         name: note.name,
@@ -4731,23 +4937,27 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     const topDirs = currentWorkspace?.topLevelDirs;
     if (topDirs) {
       for (const dir of topDirs) {
-        await indexDirForSearch(dir.handle, dir.name + '/');
+        await indexDirForSearch(dir.handle, dir.name + '/', nextIndex, generation);
       }
+      if (generation === workspaceSessionGeneration) searchIndex = nextIndex;
       return;
     }
-    await indexDirForSearch(notesHandle, '');
+    await indexDirForSearch(notesHandle, '', nextIndex, generation);
+    if (generation === workspaceSessionGeneration) searchIndex = nextIndex;
   }
 
-  async function indexDirForSearch(dirHandle, prefix) {
+  async function indexDirForSearch(dirHandle, prefix, target = searchIndex, generation = workspaceSessionGeneration) {
+    if (generation !== workspaceSessionGeneration) return;
     for await (const entry of dirHandle.values()) {
+      if (generation !== workspaceSessionGeneration) return;
       if (entry.name.startsWith('.')) continue;
       if (entry.kind === 'directory') {
-        await indexDirForSearch(entry, prefix + entry.name + '/');
+        await indexDirForSearch(entry, prefix + entry.name + '/', target, generation);
       } else if (entry.kind === 'file' && entry.name.endsWith('.md')) {
         try {
           const file    = await entry.getFile();
           const content = await file.text();
-          searchIndex.push({ notesRelPath: prefix + entry.name, name: entry.name, content });
+          if (generation === workspaceSessionGeneration) target.push({ notesRelPath: prefix + entry.name, name: entry.name, content });
         } catch { /* skip unreadable */ }
       }
     }
@@ -4807,7 +5017,9 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   searchView.querySelector('.list-header')?.after(savedSearchBar);
   async function renderSavedSearches() {
     if (!window.__recallstackNative?.active) { savedSearchBar.replaceChildren(); return; }
+    const generation = workspaceSessionGeneration;
     const searches = await window.__recallstackNative.listSavedSearches();
+    if (generation !== workspaceSessionGeneration) return;
     savedSearchBar.replaceChildren();
     const save = document.createElement('button');
     save.className = 'btn btn-ghost'; save.textContent = 'Save Search'; save.disabled = !searchInput.value.trim();
@@ -4899,7 +5111,9 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         return;
       }
       try {
+        const generation = workspaceSessionGeneration;
         const results = await runSearch(query);
+        if (generation !== workspaceSessionGeneration || query !== searchInput.value.trim()) return;
         renderSearchResults(results, query);
         enterSearchView();
       } catch (error) {
@@ -5020,9 +5234,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
 
   $id('btn-open-workspace').addEventListener('click', async () => {
     try {
-      const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      await saveWorkspaceHandle(handle);
-      await openWorkspace(handle);
+      await chooseAndOpenWorkspace();
     } catch (e) {
       if (e.name !== 'AbortError') toast('Could not open folder: ' + e.message, 'error');
     }
@@ -6316,6 +6528,39 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   applyTheme('catppuccin', false); // default applied immediately; workspace theme set in switchWorkspace
   themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
 
+  // ── Display and navigation settings modal ──────────────────────────────────
+  const modalSettings = $id('modal-settings');
+  const btnSettings = $id('btn-settings');
+  const btnSettingsClose = $id('btn-settings-close');
+
+  function openSettings() {
+    applyWorkingPaneLayout(false);
+    modalSettings.classList.remove('hidden');
+    btnSettings.setAttribute('aria-expanded', 'true');
+    requestAnimationFrame(() => btnSettingsClose.focus());
+  }
+
+  function closeSettings() {
+    if (modalSettings.classList.contains('hidden')) return;
+    modalSettings.classList.add('hidden');
+    btnSettings.setAttribute('aria-expanded', 'false');
+    btnSettings.focus();
+  }
+
+  btnSettings.setAttribute('aria-haspopup', 'dialog');
+  btnSettings.setAttribute('aria-expanded', 'false');
+  btnSettings.addEventListener('click', openSettings);
+  btnSettingsClose.addEventListener('click', closeSettings);
+  modalSettings.addEventListener('click', event => {
+    if (event.target === modalSettings) closeSettings();
+  });
+  modalSettings.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeSettings();
+    }
+  });
+
   // ── Nav row mode toggle buttons ───────────────────────────────────────────────
   if (btnNav1Mode) {
     btnNav1Mode.addEventListener('click', async () => {
@@ -6333,7 +6578,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
         } else {
-          folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => selectL1(f))));
+          folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => refreshFolderNavigation(f.name))));
         }
       }
       // Restore active state
@@ -6372,6 +6617,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   let   wordWrapOn   = localStorage.getItem(WRAP_KEY) === 'on'; // default OFF
 
   function applyWordWrap() {
+    btnWordWrap.setAttribute('aria-pressed', String(wordWrapOn));
     if (wordWrapOn) {
       mdEditor.classList.remove('nowrap');
       mdEditor.setAttribute('wrap', 'soft');
@@ -6398,6 +6644,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   function applyLineNumbers() {
     mdEditor.setLineNumbers(lineNumbersOn);
     btnLineNumbers.classList.toggle('wrap-active', lineNumbersOn);
+    btnLineNumbers.setAttribute('aria-pressed', String(lineNumbersOn));
     btnLineNumbers.title = `Line Numbers: ${lineNumbersOn ? 'On' : 'Off'}`;
   }
   applyLineNumbers();
@@ -6413,6 +6660,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   let   cursorAtEnd     = localStorage.getItem(CURSOR_POS_KEY) === 'end'; // default: first line
 
   function applyCursorPos() {
+    btnCursorPos.setAttribute('aria-pressed', String(cursorAtEnd));
     if (cursorAtEnd) {
       btnCursorPos.classList.add('cursor-pos-active');
       btnCursorPos.title = 'Load Position: Last Line';
@@ -6435,6 +6683,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   let   collapseDefaultOn  = localStorage.getItem(COLLAPSE_KEY) === 'on'; // default: expanded
 
   function applyCollapseDefaultBtn() {
+    btnCollapseDefault.setAttribute('aria-pressed', String(collapseDefaultOn));
     if (collapseDefaultOn) {
       btnCollapseDefault.classList.add('collapse-default-active');
       btnCollapseDefault.title = 'Preview headings: collapsed by default';
@@ -6467,7 +6716,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   const EYE_OFF_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 
   function applyToggleSystemBtn() {
-    btnToggleSystem.innerHTML = showSystemFolders ? EYE_SVG : EYE_OFF_SVG;
+    btnToggleSystem.querySelector('.settings-tile-icon').innerHTML = showSystemFolders ? EYE_SVG : EYE_OFF_SVG;
+    btnToggleSystem.setAttribute('aria-pressed', String(showSystemFolders));
     btnToggleSystem.title = showSystemFolders
       ? `Hide system folders (${SYSTEM_WORKSPACES_LABEL})`
       : `Show system folders (${SYSTEM_WORKSPACES_LABEL})`;
@@ -6496,10 +6746,12 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   const LIST_CHECKS_OFF_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 18h8"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
 
   function applyToggleAllTasksBtn() {
-    btnToggleAllTasks.innerHTML = allTasksEnabled ? LIST_CHECKS_SVG : LIST_CHECKS_OFF_SVG;
+    btnToggleAllTasks.querySelector('.settings-tile-icon').innerHTML = allTasksEnabled ? LIST_CHECKS_SVG : LIST_CHECKS_OFF_SVG;
+    btnToggleAllTasks.setAttribute('aria-pressed', String(allTasksEnabled));
     btnToggleAllTasks.title = allTasksEnabled
       ? 'Disable "All Tasks" view'
       : 'Enable "All Tasks" view';
+    btnToggleAllTasks.classList.toggle('active', allTasksEnabled);
     btnToggleAllTasks.classList.toggle('all-tasks-disabled', !allTasksEnabled);
   }
   applyToggleAllTasksBtn();
@@ -6682,7 +6934,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   }
   function closeMdRefOnEsc(e) { if (e.key === 'Escape') closeMdRef(); }
 
-  btnMdRef.addEventListener('click', openMdRef);
+  btnMdRef.addEventListener('click', () => { closeSafetyTools(); openMdRef(); });
   btnMdRefClose.addEventListener('click', closeMdRef);
   modalMdRef.addEventListener('click', e => { if (e.target === modalMdRef) closeMdRef(); });
 
@@ -6727,7 +6979,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   }
   function closeReadmeOnEsc(e) { if (e.key === 'Escape') closeReadme(); }
 
-  btnReadme.addEventListener('click', openReadme);
+  btnReadme.addEventListener('click', () => { closeSafetyTools(); openReadme(); });
   btnReadmeClose.addEventListener('click', closeReadme);
   modalReadme.addEventListener('click', e => { if (e.target === modalReadme) closeReadme(); });
 
@@ -6799,13 +7051,14 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   }
   function closeChangelogOnEsc(e) { if (e.key === 'Escape') closeChangelog(); }
 
-  btnChangelog.addEventListener('click', openChangelog);
+  btnChangelog.addEventListener('click', () => { closeSafetyTools(); openChangelog(); });
   btnChangelogClose.addEventListener('click', closeChangelog);
   modalChangelog.addEventListener('click', e => { if (e.target === modalChangelog) closeChangelog(); });
 
   // ── Safety and workspace tools ───────────────────────────────────────────────
   const modalSafetyTools = $id('modal-safety-tools');
   const btnSafetyToolsClose = $id('btn-safety-tools-close');
+  const btnSwitchWorkspace = $id('btn-switch-workspace');
   const safetyToolsOutput = $id('safety-tools-output');
 
   function safetyText(value) {
@@ -6885,6 +7138,98 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     });
   }
 
+  async function loadRecentWorkspaceChoices() {
+    if (window.__recallstackNative?.active) {
+      const entries = await window.__recallstackNative.recentWorkspaces();
+      return entries.slice(0, MAX_RECENT_WORKSPACES).map(entry => ({ ...entry, native: true }));
+    }
+    return (await loadBrowserRecentWorkspaces()).map(entry => ({
+      name: entry.name || entry.handle?.name || 'Workspace',
+      handle: entry.handle,
+      native: false,
+    }));
+  }
+
+  async function removeRecentWorkspaceChoice(entry) {
+    if (entry.native) await window.__recallstackNative.removeRecentWorkspace(entry.path);
+    else await removeBrowserRecentWorkspace(entry.handle);
+  }
+
+  async function reopenWorkspaceChoice(entry) {
+    if (!await canSwitchWorkspaceRoot()) return false;
+    let handle;
+    if (entry.native) {
+      handle = await window.__recallstackNative.openWorkspacePath(entry.path);
+    } else {
+      const permitted = await verifyPermission(entry.handle);
+      if (!permitted) throw new Error('Permission to open this workspace was denied.');
+      handle = entry.handle;
+    }
+    return openChosenWorkspace(handle, true);
+  }
+
+  async function showWorkspaceChoices() {
+    safetyToolsOutput.replaceChildren();
+    const panel = document.createElement('div'); panel.className = 'workspace-choice-panel';
+    const heading = document.createElement('h3'); heading.className = 'workspace-choice-title'; heading.textContent = 'Switch Workspace';
+    const copy = document.createElement('p'); copy.className = 'workspace-choice-copy';
+    copy.textContent = 'Choose another folder or re-open one of your six most recent workspaces.';
+    const choose = document.createElement('button'); choose.className = 'btn btn-primary workspace-choice-browse';
+    choose.textContent = 'Choose a Different Workspace…';
+    choose.addEventListener('click', async () => {
+      choose.disabled = true;
+      try {
+        if (await chooseAndOpenWorkspace()) {
+          closeSafetyTools();
+          toast('Workspace switched');
+        }
+      } catch (error) {
+        if (error?.name !== 'AbortError') toast('Could not switch workspace: ' + (error?.message || error), 'error');
+      } finally { choose.disabled = false; }
+    });
+    const recentHeading = document.createElement('div'); recentHeading.className = 'workspace-recent-heading'; recentHeading.textContent = 'Recent workspaces';
+    const list = document.createElement('div'); list.className = 'workspace-recent-list';
+    panel.append(heading, copy, choose, recentHeading, list);
+    safetyToolsOutput.appendChild(panel);
+
+    const entries = await loadRecentWorkspaceChoices();
+    if (!entries.length) {
+      const empty = document.createElement('div'); empty.className = 'workspace-recent-empty'; empty.textContent = 'No recent workspaces yet.';
+      list.appendChild(empty);
+      return;
+    }
+    entries.forEach(entry => {
+      const row = document.createElement('div'); row.className = 'workspace-recent-row';
+      const details = document.createElement('div'); details.className = 'workspace-recent-details';
+      const name = document.createElement('strong'); name.className = 'workspace-recent-name'; name.textContent = entry.name;
+      const location = document.createElement('span'); location.className = 'workspace-recent-path';
+      location.textContent = entry.path || entry.handle?.name || '';
+      details.append(name, location);
+      const reopen = document.createElement('button'); reopen.className = 'btn btn-ghost workspace-reopen'; reopen.textContent = 'Re-Open';
+      reopen.addEventListener('click', async () => {
+        reopen.disabled = true;
+        try {
+          if (await reopenWorkspaceChoice(entry)) {
+            closeSafetyTools();
+            toast(`Opened ${entry.name}`);
+          }
+        } catch (error) {
+          toast('Could not re-open workspace: ' + (error?.message || error), 'error');
+          reopen.disabled = false;
+        }
+      });
+      const remove = document.createElement('button'); remove.className = 'workspace-recent-remove';
+      remove.type = 'button'; remove.title = `Remove ${entry.name} from recent workspaces`; remove.setAttribute('aria-label', remove.title);
+      remove.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>';
+      remove.addEventListener('click', async () => {
+        remove.disabled = true;
+        try { await removeRecentWorkspaceChoice(entry); row.remove(); }
+        catch (error) { remove.disabled = false; toast('Could not remove recent workspace: ' + (error?.message || error), 'error'); }
+      });
+      row.append(details, reopen, remove); list.appendChild(row);
+    });
+  }
+
   async function runSafetyAction(action) {
     if (!window.__recallstackNative?.active) { safetyText('Safety tools require the native desktop application.'); return; }
     safetyText('Working…');
@@ -6921,11 +7266,14 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
 
   function openSafetyTools() {
     modalSafetyTools.classList.remove('hidden');
-    modalSafetyTools.querySelector('[data-safety-action]')?.focus();
+    btnSwitchWorkspace?.focus();
+    showWorkspaceChoices().catch(error => safetyText('Could not load recent workspaces: ' + (error?.message || error)));
   }
   function closeSafetyTools() { modalSafetyTools.classList.add('hidden'); }
-  btnSafetyTools.classList.toggle('hidden', !window.__recallstackNative?.active);
   btnSafetyTools.addEventListener('click', openSafetyTools);
+  btnSwitchWorkspace.addEventListener('click', () => {
+    showWorkspaceChoices().catch(error => safetyText('Could not load recent workspaces: ' + (error?.message || error)));
+  });
   btnSafetyToolsClose.addEventListener('click', closeSafetyTools);
   modalSafetyTools.addEventListener('click', event => {
     if (event.target === modalSafetyTools) closeSafetyTools();
@@ -7021,7 +7369,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       // Check if permission is still granted without needing a user gesture
       const alreadyGranted = await saved.queryPermission({ mode: 'readwrite' }) === 'granted';
       if (alreadyGranted) {
-        await openWorkspace(saved);
+        if (await openWorkspace(saved)) await saveWorkspaceHandle(saved);
         return;
       }
       // Not auto-grantable — show a "Reopen" button the user must click
@@ -7035,7 +7383,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
             toast('Permission denied', 'error');
             return;
           }
-          await openWorkspace(saved);
+          await openChosenWorkspace(saved);
         } catch (e) {
           toast('Could not reopen workspace: ' + (e.message || e), 'error');
         }

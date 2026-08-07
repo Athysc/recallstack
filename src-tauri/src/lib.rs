@@ -85,6 +85,7 @@ pub fn run() {
             workspace::pick_workspace,
             workspace::set_workspace,
             workspace::recent_workspaces,
+            workspace::remove_recent_workspace,
             workspace::list_entries,
             workspace::read_note,
             workspace::write_note,

@@ -215,6 +215,7 @@
     },
     search(query, prefix = '') { return invoke('search_notes', { query, prefix }); },
     recentWorkspaces() { return invoke('recent_workspaces'); },
+    removeRecentWorkspace(path) { return invoke('remove_recent_workspace', { path }); },
     openWorkspacePath(path) { return activateWorkspace(path); },
     revealPath(path = null) { return invoke('reveal_path', { path }); },
     revealWorkspace() { return invoke('open_workspace_folder'); },

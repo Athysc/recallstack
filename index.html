@@ -29,6 +29,9 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
       </button>
       <span class="app-title" id="app-title">RecallStack</span>
+      <button class="btn-icon" id="btn-refresh-workspace" title="Refresh workspace folders and files" aria-label="Refresh workspace folders and files">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M4 18v-5h5"/><path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 11M4 13l2.4 4.6A7 7 0 0 0 17.9 15"/></svg>
+      </button>
       <div class="workspace-switcher" id="workspace-switcher"></div>
       <button class="btn-icon" id="btn-calendar" title="Calendar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -46,72 +49,8 @@
         <button class="btn-icon" id="btn-search" title="Search">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </button>
-        <select id="theme-select" title="Switch theme">
-          <option value="catppuccin">Catppuccin</option>
-        </select>
-        <button class="btn-icon nav-mode-btn" id="btn-nav1-mode" title="Folder nav: toggle buttons ↔ dropdown">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="7" width="8" height="10" rx="2"/>
-            <rect x="14" y="7" width="8" height="10" rx="2"/>
-            <line x1="2" y1="4" x2="22" y2="4"/>
-          </svg>
-        </button>
-        <button class="btn-icon nav-mode-btn" id="btn-nav2-mode" title="Subfolder nav: toggle buttons ↔ dropdown">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="3" width="8" height="8" rx="2"/>
-            <rect x="14" y="3" width="8" height="8" rx="2"/>
-            <rect x="6" y="15" width="12" height="6" rx="2"/>
-          </svg>
-        </button>
-        <button class="btn-icon" id="btn-word-wrap" title="Word Wrapping: Off">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="17 10 21 10"/><path d="M3 10h11a4 4 0 0 1 0 8h-1"/>
-            <polyline points="13 15 10 18 13 21"/>
-          </svg>
-        </button>
-        <button class="btn-icon" id="btn-line-numbers" title="Line Numbers: Off" aria-label="Toggle editor line numbers">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h12M9 12h12M9 18h12"/><path d="M3 6h1M3 12h1M3 18h1"/></svg>
-        </button>
-        <button class="btn-icon" id="btn-cursor-pos" title="Load Position: First Line">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="4" y1="4" x2="20" y2="4"/>
-            <line x1="12" y1="4" x2="12" y2="17"/>
-            <polyline points="7 9 12 4 17 9"/>
-          </svg>
-        </button>
-        <button class="btn-icon" id="btn-collapse-default" title="Preview headings: expanded by default">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="3" y1="6" x2="21" y2="6"/>
-            <line x1="3" y1="12" x2="14" y2="12"/>
-            <line x1="3" y1="18" x2="14" y2="18"/>
-            <polyline points="17 9 21 12 17 15"/>
-          </svg>
-        </button>
-        <button class="btn-icon" id="btn-toggle-system-folders" title="Show system folders (ai-team, openbrain, shared, openbrain-shared)"></button>
-        <button class="btn-icon" id="btn-toggle-all-tasks" title="Disable &quot;All Tasks&quot; view"></button>
-        <button class="btn-icon" id="btn-md-reference" title="Markdown Reference">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-            <line x1="9" y1="7" x2="15" y2="7"/>
-            <line x1="9" y1="11" x2="15" y2="11"/>
-            <line x1="9" y1="15" x2="12" y2="15"/>
-          </svg>
-        </button>
-        <button class="btn-icon" id="btn-readme" title="User Guide">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="16" x2="12" y2="12"/>
-            <line x1="12" y1="8" x2="12.01" y2="8"/>
-          </svg>
-        </button>
-        <button class="btn-icon" id="btn-changelog" title="What's New">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 3v5h5"/>
-            <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/>
-            <line x1="12" y1="7" x2="12" y2="12"/>
-            <line x1="12" y1="12" x2="15" y2="14"/>
-          </svg>
+        <button class="btn-icon" id="btn-settings" title="Display and navigation settings" aria-label="Open display and navigation settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--appbar-bg, var(--mantle))"/><circle cx="15" cy="12" r="2" fill="var(--appbar-bg, var(--mantle))"/><circle cx="11" cy="18" r="2" fill="var(--appbar-bg, var(--mantle))"/></svg>
         </button>
         <button class="btn-icon" id="btn-safety-tools" title="Safety and workspace tools" aria-label="Safety and workspace tools">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-5"/></svg>
@@ -267,7 +206,7 @@
         <div class="pane" id="editor-pane">
           <div class="task-editor-layout" id="task-editor-layout">
             <div class="task-editor-top" id="task-editor-top">
-              <div class="pane-label pane-label-row"><button class="btn-icon working-layout-toggle" id="btn-working-layout" title="Move Working Tasks to a left pane" aria-label="Move Working Tasks to a left pane"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg></button><button class="btn-icon" id="btn-toggle-working-pane" title="Show/hide Working Tasks">▣</button> MD <button type="button" class="task-kind-indicator hidden" id="task-kind-indicator"></button><span class="task-meta-summary" id="task-meta-summary"></span></div>
+              <div class="pane-label pane-label-row"><button class="btn-icon" id="btn-toggle-working-pane" title="Show/hide Working Tasks">▣</button> MD <button type="button" class="task-kind-indicator hidden" id="task-kind-indicator"></button><span class="task-meta-summary" id="task-meta-summary"></span></div>
               <div id="md-editor" data-placeholder="Write your note here…"></div>
             </div>
             <div class="task-editor-resizer" id="task-editor-resizer"></div>
@@ -343,6 +282,62 @@
   </footer>
 </div>
 
+<!-- Display and navigation settings -->
+<div id="modal-settings" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="settings-dialog">
+    <div class="settings-header">
+      <div>
+        <div class="settings-eyebrow">Preferences</div>
+        <h2 id="settings-title">Display &amp; Navigation</h2>
+      </div>
+      <button class="settings-close" id="btn-settings-close" title="Close" aria-label="Close settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="settings-content">
+      <div class="settings-grid">
+      <button class="btn-icon settings-tile working-layout-toggle" id="btn-working-layout" title="Move Working Tasks to a left pane" aria-label="Move Working Tasks to a left pane">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg>
+        <span class="settings-tile-title">Working Tasks Layout</span><span class="settings-tile-description">Left pane or bottom pane</span>
+      </button>
+      <button class="btn-icon settings-tile nav-mode-btn" id="btn-nav1-mode" title="Folder nav: toggle buttons ↔ dropdown">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="8" height="10" rx="2"/><rect x="14" y="7" width="8" height="10" rx="2"/><line x1="2" y1="4" x2="22" y2="4"/></svg>
+        <span class="settings-tile-title">Folder Navigation</span><span class="settings-tile-description">Buttons or dropdown menu</span>
+      </button>
+      <button class="btn-icon settings-tile nav-mode-btn" id="btn-nav2-mode" title="Subfolder nav: toggle buttons ↔ dropdown">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="8" height="8" rx="2"/><rect x="14" y="3" width="8" height="8" rx="2"/><rect x="6" y="15" width="12" height="6" rx="2"/></svg>
+        <span class="settings-tile-title">Subfolder Navigation</span><span class="settings-tile-description">Buttons or dropdown menu</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-word-wrap" title="Word Wrapping: Off">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 10 21 10"/><path d="M3 10h11a4 4 0 0 1 0 8h-1"/><polyline points="13 15 10 18 13 21"/></svg>
+        <span class="settings-tile-title">Word Wrapping</span><span class="settings-tile-description">Wrap long editor lines</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-line-numbers" title="Line Numbers: Off" aria-label="Toggle editor line numbers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h12M9 12h12M9 18h12"/><path d="M3 6h1M3 12h1M3 18h1"/></svg>
+        <span class="settings-tile-title">Line Numbers</span><span class="settings-tile-description">Number each editor line</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-cursor-pos" title="Load Position: First Line">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="4" x2="20" y2="4"/><line x1="12" y1="4" x2="12" y2="17"/><polyline points="7 9 12 4 17 9"/></svg>
+        <span class="settings-tile-title">Load Position</span><span class="settings-tile-description">Open at first or last line</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-collapse-default" title="Preview headings: expanded by default">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="14" y2="18"/><polyline points="17 9 21 12 17 15"/></svg>
+        <span class="settings-tile-title">Preview Headings</span><span class="settings-tile-description">Start expanded or collapsed</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-toggle-system-folders" title="Show system folders (ai-team, openbrain, shared, openbrain-shared)"><span class="settings-tile-icon" aria-hidden="true"></span><span class="settings-tile-title">System Folders</span><span class="settings-tile-description">Show hidden workspaces</span></button>
+      <button class="btn-icon settings-tile" id="btn-toggle-all-tasks" title="Disable &quot;All Tasks&quot; view"><span class="settings-tile-icon" aria-hidden="true"></span><span class="settings-tile-title">All Tasks</span><span class="settings-tile-description">Show the combined task view</span></button>
+      </div>
+      <section class="settings-theme-panel" aria-labelledby="settings-theme-title">
+        <div class="settings-theme-heading">
+          <span class="settings-theme-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c-2.5-2.2-2.5-15.8 0-18Z"/></svg></span>
+          <div><label id="settings-theme-title" for="theme-select">Theme</label><span>Choose the app colors</span></div>
+        </div>
+        <select id="theme-select" class="settings-theme-list" size="18" title="Switch theme" aria-label="Theme"><option value="catppuccin">Catppuccin</option></select>
+      </section>
+    </div>
+  </div>
+</div>
+
 <!-- Markdown Reference Modal -->
 <div id="modal-md-ref" class="hidden">
   <div class="md-ref-dialog">
@@ -390,6 +385,7 @@
     </div>
     <div class="safety-tools-body">
       <div class="safety-tools-actions">
+        <button class="btn btn-primary" id="btn-switch-workspace">Switch Workspace</button>
         <button class="btn btn-ghost" data-safety-action="validate">Validate Workspace</button>
         <button class="btn btn-ghost" data-safety-action="backup">Backup Workspace</button>
         <button class="btn btn-ghost" data-safety-action="verify-backup">Verify Backup</button>
@@ -397,6 +393,10 @@
         <button class="btn btn-ghost" data-safety-action="trash">Inspect Trash</button>
         <button class="btn btn-ghost" data-safety-action="versions">Current Note History</button>
         <button class="btn btn-ghost" data-safety-action="git">Git Status</button>
+        <div class="safety-tools-divider" role="separator"></div>
+        <button class="btn btn-ghost" id="btn-changelog">What's New</button>
+        <button class="btn btn-ghost" id="btn-md-reference">Markdown Reference</button>
+        <button class="btn btn-ghost" id="btn-readme">User Guide</button>
       </div>
       <div class="safety-tools-output" id="safety-tools-output">Choose a tool to inspect or protect the current workspace.</div>
     </div>
