@@ -25,6 +25,15 @@ assert.match(windowsReadme, /No installation or administrator access is required
 assert.match(windowsReadme, /WebView2 Evergreen Runtime/);
 assert.match(workflow, /workflow_dispatch/);
 assert.doesNotMatch(workflow, /^\s+push:/m, "release artifacts must not publish automatically from a push");
+assert.match(workflow, /actions\/checkout@v6/);
+assert.match(workflow, /actions\/setup-node@v6/);
+assert.match(workflow, /actions\/upload-artifact@v6/);
+assert.match(workflow, /node-version:\s*24/);
+assert.doesNotMatch(
+  workflow,
+  /actions\/(?:checkout|setup-node|upload-artifact)@v[1-4]\b/,
+  "release workflow must use Node 24-based GitHub actions",
+);
 assert.match(workflow, /runs-on: windows-2022/);
 assert.match(workflow, /runs-on: ubuntu-22\.04/);
 

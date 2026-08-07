@@ -10,8 +10,8 @@ jobs:
   windows-portable:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -23,7 +23,7 @@ jobs:
       - run: npm run release:clean
       - run: npm run build:windows:portable
       - run: npm run package:windows:portable
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: recallstack-windows-portable
           path: release/
@@ -32,10 +32,10 @@ jobs:
   linux:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: sudo apt-get update
       - run: sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -47,7 +47,7 @@ jobs:
       - run: npm run package:linux:tar
       - run: npm run build:linux:appimage
       - run: npm run package:linux:appimage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: recallstack-linux
           path: release/
