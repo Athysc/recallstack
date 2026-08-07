@@ -2,6 +2,34 @@
 
 ---
 
+## Version 0.1.1 — 2026-08-07
+
+### Editor and Preview Screen-Share Zoom
+
+The footer now includes an **Editor/Preview zoom** picker. Default keeps content
+at 100%; the ten additional increments enlarge Markdown editor text and the
+complete rendered preview from 110% through 200%. Preview images, Mermaid
+diagrams, tables, and code blocks scale with the text while pane headers,
+toolbars, navigation, Working Tasks, and the rest of the interface stay at their
+normal size. The selected zoom persists across application restarts. Preview
+content now uses the full current pane width and reflows when either divider is
+moved, including code blocks, tables, images, and Mermaid diagrams.
+
+### Reviewed Portable Builds
+
+The manually started GitHub Actions workflow now uses Node 24 throughout and
+produces separate Windows portable and Linux artifacts. Windows-specific release
+checks accept CRLF line endings, and native index tests close SQLite handles
+before cleaning up their temporary databases. These changes remove the
+cross-platform verification and file-in-use failures found during the first
+reviewed builds without enabling automatic releases from pushes.
+
+### Arch Linux Build Documentation
+
+The repository and User Guide now include the complete Arch Linux dependency
+installation, release verification, native tarball, AppImage, generated
+`PKGBUILD`, launch, and FUSE troubleshooting steps.
+
 ## Version 1.5 — 2026-08-06
 
 ### Safety, Commands, Editor, and Knowledge Search

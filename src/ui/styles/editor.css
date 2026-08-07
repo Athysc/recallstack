@@ -1,5 +1,7 @@
   /* ── Editor ───────────────────────────────────────────────────────────────── */
   #editor-view {
+    --content-editor-font-size: 13.5px;
+    --content-preview-font-size: 14px;
     flex: 1;
     overflow: hidden;
     display: flex;
@@ -121,7 +123,7 @@
   #md-editor .cm-scroller {
     overflow: auto;
     font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-    font-size: 13.5px;
+    font-size: var(--content-editor-font-size);
     line-height: 1.75;
   }
   #md-editor .cm-content { padding: 2px; caret-color: var(--mauve); }
@@ -145,7 +147,13 @@
     flex: 1;
     padding: 4px;
     overflow-y: auto;
+    overflow-x: hidden;
     background: var(--base);
+  }
+  .preview-zoom-surface {
+    width: 100%;
+    min-width: 0;
+    font-size: var(--content-preview-font-size);
   }
 
   /* ── Markdown preview ─────────────────────────────────────────────────────── */
@@ -210,6 +218,9 @@
     border-radius: 4px;
   }
   #preview-output pre {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     background: var(--mantle);
     border: 1px solid var(--surface0);
     border-radius: 8px;

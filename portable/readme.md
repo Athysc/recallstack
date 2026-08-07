@@ -2,6 +2,8 @@
 
 A portable Tauri 2 desktop Personal Knowledge Management (PKM) app for notes, tasks, and journaling. Markdown remains in the workspace you select; no installation is required on Windows.
 
+Current application version: **0.1.1**.
+
 ---
 
 ## Getting Started
@@ -34,6 +36,15 @@ Click **Open Workspace** and select your root folder. The app remembers your las
 ## Building and Deploying RecallStack
 
 Build from the RecallStack source directory. The release scripts use the version in `package.json`, verify that the Rust and Tauri versions match it, and write finished artifacts and SHA-256 checksums to `release/`.
+
+### GitHub Actions reviewed builds
+
+Open **Actions → Build reviewed release artifacts**, select **Run workflow** on
+`master`, and start a new run. The manual workflow uses Node.js 24 and builds the
+Windows portable and Linux artifacts independently. Download
+`recallstack-windows-portable` or `recallstack-linux` from the successful run's
+**Artifacts** section. After pushing a fix, start a new workflow run instead of
+rerunning an older job, because a rerun continues to use its original commit.
 
 ### Arch Linux
 
@@ -204,6 +215,19 @@ Each chip shows its source as **`(local)`** or **`(web)`**:
 - Red means the library failed to load.
 
 Any dependency error message appears as plain text after the final chip, not inside a chip.
+
+### Editor and Preview Zoom
+
+The right side of the footer contains an **Editor/Preview zoom** dropdown for
+screen sharing and high-resolution displays. **Default (100%)** restores the
+normal content size. The remaining choices increase the Markdown editor text
+and everything rendered inside Preview in 10% increments, up to **+100%
+(200%)**. Images, Mermaid diagrams, tables, and code blocks scale with preview
+text. Pane headers, toolbars, navigation, Working Tasks, and other application
+controls do not scale. Preview content always follows the current pane width, so
+paragraphs, code blocks, tables, images, and Mermaid diagrams reflow when a pane
+divider moves. The selected zoom is saved globally and restored the next time
+RecallStack starts.
 
 ### SQLite Source
 

@@ -3,6 +3,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   allTasksEnabled: "pkm-all-tasks-enabled",
   appTitle: "pkm-app-title",
   collapseDefault: "pkm-collapse-default",
+  contentZoom: "pkm-content-zoom",
   cursorLoadPosition: "pkm-cursor-load-pos",
   loadRemoteMedia: "pkm-load-remote-media",
   lineNumbers: "pkm-line-numbers",

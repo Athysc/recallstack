@@ -26,3 +26,7 @@ test("working pane layout and dimensions have stable persisted keys", () => {
   assert.equal(PREFERENCE_KEYS.workingPaneBottomRatio, "pkm-working-pane-bottom-ratio");
   assert.equal(PREFERENCE_KEYS.workingPaneWidths, "pkm-working-pane-widths");
 });
+
+test("editor and preview zoom has a stable global preference key", () => {
+  assert.equal(PREFERENCE_KEYS.contentZoom, "pkm-content-zoom");
+});

@@ -17,6 +17,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
 import { CommandRegistry } from "../features/commands/registry";
 import { paletteMode, rankCommands } from "../features/commands/ranking";
 import { createMarkdownEditor } from "../features/editor/markdown-editor";
+import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../features/editor/content-zoom";
 
 (() => {
   'use strict';
@@ -167,6 +168,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
   const toastEl      = $id('toast');
   const depStatusList = $id('dep-status-list');
   const depStatusErrorLine = $id('dep-status-error-line');
+  const contentZoomSelect = $id('content-zoom-select');
   const splitPane    = $id('split-pane');
   const editorPane   = $id('editor-pane');
   const resizerEl    = $id('resizer');
@@ -378,12 +380,58 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
 
   // ── Scaled-image button: recheck all images in preview when pane resizes ──────
   function updateScaledImages() {
+    const previewStyle = getComputedStyle(previewOut);
+    const availableWidth = Math.max(
+      0,
+      previewOut.clientWidth
+        - (Number.parseFloat(previewStyle.paddingLeft) || 0)
+        - (Number.parseFloat(previewStyle.paddingRight) || 0),
+    );
+    const scale = contentZoomScale(contentZoomPercent);
     previewOut.querySelectorAll('.img-wrap img').forEach(img => {
+      const targetWidth = scaledMediaWidth(img.naturalWidth, availableWidth, scale);
+      if (targetWidth > 0) {
+        img.style.width = `${targetWidth}px`;
+        img.style.height = 'auto';
+      }
       const btn = img.parentElement.querySelector('.img-open-btn');
       if (btn) btn.classList.toggle('scaled', img.naturalWidth > 0 && img.naturalWidth > img.offsetWidth);
     });
+    previewOut.querySelectorAll('.mermaid svg').forEach(svg => {
+      const viewBoxWidth = svg.viewBox?.baseVal?.width || 0;
+      let naturalWidth = Number.parseFloat(svg.dataset.zoomNaturalWidth || '0');
+      if (!(naturalWidth > 0)) {
+        naturalWidth = viewBoxWidth || svg.getBoundingClientRect().width;
+        if (naturalWidth > 0) svg.dataset.zoomNaturalWidth = String(naturalWidth);
+      }
+      const targetWidth = scaledMediaWidth(naturalWidth, availableWidth, scale);
+      if (targetWidth > 0) {
+        svg.style.width = `${targetWidth}px`;
+        svg.style.maxWidth = '100%';
+        svg.style.height = 'auto';
+      }
+    });
   }
   new ResizeObserver(updateScaledImages).observe(previewOut);
+
+  let contentZoomPercent = normalizeContentZoom(localStorage.getItem(PREFERENCE_KEYS.contentZoom));
+  function applyContentZoom(save = false) {
+    const scale = contentZoomScale(contentZoomPercent);
+    editorView.style.setProperty('--content-editor-font-size', `${13.5 * scale}px`);
+    editorView.style.setProperty('--content-preview-font-size', `${14 * scale}px`);
+    contentZoomSelect.value = String(contentZoomPercent);
+    contentZoomSelect.title = contentZoomPercent
+      ? `Editor and preview content: ${Math.round(scale * 100)}%`
+      : 'Editor and preview content: Default (100%)';
+    if (save) localStorage.setItem(PREFERENCE_KEYS.contentZoom, String(contentZoomPercent));
+    mdEditor.view.requestMeasure();
+    requestAnimationFrame(updateScaledImages);
+  }
+  contentZoomSelect.addEventListener('change', () => {
+    contentZoomPercent = normalizeContentZoom(contentZoomSelect.value);
+    applyContentZoom(true);
+  });
+  applyContentZoom();
 
   // ── Toast ─────────────────────────────────────────────────────────────────────
   let _toastTimer = null;
@@ -1819,7 +1867,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
       previewOut.innerHTML = '';
       previewOut.scrollTop = 0;
       clearTimeout(_previewTimer);
-      previewOut.innerHTML = renderMarkdown(content);
+      setPreviewMarkdown(content);
       postProcessPreview();
 
       btnDelete.classList.remove('hidden');
@@ -2795,7 +2843,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
       previewOut.innerHTML = '';
       previewOut.scrollTop = 0;
       clearTimeout(_previewTimer);
-      previewOut.innerHTML = renderMarkdown(mdEditor.value);
+      setPreviewMarkdown(mdEditor.value);
       postProcessPreview();
       refreshBacklinks().then(appendBacklinks);
       // Show restore button when viewing a file inside an archived/ subfolder
@@ -3374,7 +3422,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
     previewOut.innerHTML = '';
     previewOut.scrollTop = 0;
     clearTimeout(_previewTimer);
-    previewOut.innerHTML = renderMarkdown(newContent);
+    setPreviewMarkdown(newContent);
     postProcessPreview();
 
     btnArchive.innerHTML = SVG_ARCHIVE;
@@ -4205,7 +4253,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
   function renderPreview() {
     clearTimeout(_previewTimer);
     _previewTimer = setTimeout(() => {
-      previewOut.innerHTML = renderMarkdown(mdEditor.value);
+      setPreviewMarkdown(mdEditor.value);
       postProcessPreview();
       if (isTasksEditor()) syncDateInputsFromEditor();
     }, mdEditor.value.length > 500_000 ? 300 : 120);
@@ -4220,6 +4268,10 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
     } catch {
       return '<pre>' + esc(text) + '</pre>';
     }
+  }
+
+  function setPreviewMarkdown(text) {
+    previewOut.innerHTML = `<div class="preview-zoom-surface">${renderMarkdown(text)}</div>`;
   }
 
   // Allow [ ] / [x] at line-start without the `- ` list prefix
@@ -4315,7 +4367,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
       button.addEventListener('click', () => { const relative = link.sourcePath.replace(prefixPattern, ''); openFile(relative.split('/').at(-1), relative); });
       section.appendChild(button);
     });
-    previewOut.appendChild(section);
+    (previewOut.querySelector('.preview-zoom-surface') || previewOut).appendChild(section);
   }
 
   function postProcessPreview() {
@@ -4327,6 +4379,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
           const currentDiagrams = previewOut.querySelectorAll('div.mermaid:not([data-processed])');
           if (currentDiagrams.length) return renderer.run({ nodes: currentDiagrams });
         })
+        .then(() => requestAnimationFrame(updateScaledImages))
         .catch(error => console.warn('Mermaid rendering unavailable', error));
     }
     // ── Collapsible headings ──
@@ -4499,7 +4552,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
       wrapper.appendChild(openBtn);
 
       const checkScale = () => {
-        openBtn.classList.toggle('scaled', img.naturalWidth > 0 && img.naturalWidth > img.offsetWidth);
+        updateScaledImages();
       };
       img.addEventListener('load', checkScale);
       // For already-cached images that fire load synchronously
@@ -4521,6 +4574,7 @@ import { createMarkdownEditor } from "../features/editor/markdown-editor";
         a.rel    = 'noopener';
       }
     });
+    requestAnimationFrame(updateScaledImages);
     appendBacklinks();
   }
 

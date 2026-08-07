@@ -1,7 +1,7 @@
 {
   "name": "recallstack-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Sam Chiang <scdev@icloud.com>",
   "license": "UNLICENSED",
   "type": "module",

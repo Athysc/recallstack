@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.1 — 2026-08-07
+
+### Added
+
+- A persistent, right-aligned footer picker enlarges only CodeMirror content and the complete rendered preview from 110% through 200% for screen sharing and high-resolution displays.
+- Complete local Arch Linux dependency, verification, AppImage, tarball, and `PKGBUILD` instructions are now linked from the repository README.
+
+### Changed
+
+- Reviewed GitHub release jobs now use the Node 24–based `checkout`, `setup-node`, and `upload-artifact` actions.
+- Preview zoom now follows the full live pane width, so paragraphs, code blocks, tables, images, and Mermaid diagrams reflow when the divider moves.
+
+### Fixed
+
+- Windows release checks now accept CRLF line endings in `Cargo.lock`, the reference HTML, modular CSS, and production markup.
+- Windows Rust tests now close SQLite connections before deleting temporary index fixtures, avoiding file-in-use failures.
+- The reviewed release workflow remains manual-only after initial GitHub registration, preventing automatic publication from pushes.
+
 ## 0.1.0 — 2026-08-06
 
 ### Added
