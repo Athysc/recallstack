@@ -29,3 +29,9 @@ For Linux tarball and AppImage commands, runtime requirements, upgrade policy, a
 The desktop build runs the established interface through `index.html` and the TypeScript entry at `src/main.ts`. `recallstack.html` is retained only as a byte-parity reference and is not loaded or bundled. A Tauri compatibility layer implements browser File System Access handles with native Rust commands, so the existing notes, tasks, calendar, assets, outputs, themes, and navigation remain available without redesigning the application. Markdown remains canonical in the selected workspace.
 
 The in-app guide, change history, and editable theme catalog are loaded from `readme.md`, `changes.md`, and `theme.json` beside the executable. Embedded defaults and legacy workspace files provide fallbacks. See [docs/themes.md](docs/themes.md) for the theme schema.
+
+## Ownership and license
+
+Copyright © 2026 Sam Chiang. All rights reserved.
+
+RecallStack is publicly viewable source, not open-source software. No permission is granted to copy, modify, distribute, sublicense, or sell RecallStack except under a separate written agreement from the copyright holder. See [LICENSE](LICENSE). Third-party dependencies and bundled libraries remain subject to their respective licenses.

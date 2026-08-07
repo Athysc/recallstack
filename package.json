@@ -2,6 +2,8 @@
   "name": "recallstack-desktop",
   "private": true,
   "version": "0.1.0",
+  "author": "Sam Chiang <scdev@icloud.com>",
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "sync:desktop-assets": "node scripts/sync-desktop-assets.mjs",

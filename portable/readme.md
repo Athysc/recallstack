@@ -31,6 +31,140 @@ Click **Open Workspace** and select your root folder. The app remembers your las
 
 ---
 
+## Building and Deploying RecallStack
+
+Build from the RecallStack source directory. The release scripts use the version in `package.json`, verify that the Rust and Tauri versions match it, and write finished artifacts and SHA-256 checksums to `release/`.
+
+### Arch Linux
+
+#### Build prerequisites
+
+Install the native compiler toolchain, Tauri WebKit/GTK dependencies, AppImage support, Node.js with npm, and the stable Rust toolchain. On Arch Linux:
+
+```bash
+sudo pacman -S --needed base-devel nodejs npm gtk3 webkit2gtk-4.1 libayatana-appindicator librsvg patchelf fuse2 rustup
+rustup default stable
+```
+
+RecallStack's reviewed release workflow uses Node.js 24. After cloning or copying the source tree, install the locked JavaScript dependencies:
+
+```bash
+cd /path/to/RecallStack
+npm ci
+```
+
+#### Verify and build
+
+```bash
+npm run release:verify
+npm run release:clean
+npm run build:linux
+npm run package:linux:tar
+npm run build:linux:appimage
+npm run package:linux:appimage
+```
+
+The `release/` directory will contain:
+
+- `RecallStack-<version>-linux-x86_64.tar.gz` — portable Linux archive
+- `RecallStack-<version>-linux-x86_64.AppImage` — single-file Linux application
+- `PKGBUILD` — Arch package recipe pinned to the generated tarball checksum
+- `.sha256` files and `artifact-manifest.json` — integrity information
+
+#### Deploy the portable tarball
+
+Extract the archive somewhere writable and run the executable directly:
+
+```bash
+tar -xzf release/RecallStack-*-linux-x86_64.tar.gz
+cd RecallStack-*/
+./recallstack
+```
+
+Keep `readme.md`, `changes.md`, and `theme.json` beside `recallstack`. The archive also includes a desktop entry and application icon under `share/`; these can be copied to the equivalent paths below `~/.local/share/` if desktop-menu integration is wanted.
+
+#### Install as an Arch package
+
+Keep the generated `PKGBUILD` and its matching tarball together in `release/`, then build and install it as a normal user:
+
+```bash
+cd release
+makepkg -si
+```
+
+This installs the executable as `/usr/bin/recallstack` and installs its desktop entry, icon, and license through pacman. Use `pacman -R recallstack-bin` to remove that package later.
+
+#### Run the AppImage
+
+```bash
+chmod +x release/RecallStack-*-linux-x86_64.AppImage
+./release/RecallStack-*-linux-x86_64.AppImage
+```
+
+The AppImage does not require a package installation. `fuse2` may be required to launch it on Arch Linux.
+
+### Windows Portable
+
+Windows artifacts should be built natively on 64-bit Windows 10 or Windows 11. The supported build uses the MSVC toolchain; building the Windows release from Arch Linux is not part of the reviewed release process.
+
+#### Build prerequisites
+
+Install:
+
+- Node.js 24 with npm
+- Rust stable using `rustup` with the `x86_64-pc-windows-msvc` target
+- Visual Studio 2022 Build Tools with **Desktop development with C++**, MSVC v143, and a Windows 10 or 11 SDK
+- Microsoft Edge WebView2 Evergreen Runtime for launching and testing RecallStack
+
+In PowerShell, prepare the toolchain and dependencies:
+
+```powershell
+rustup default stable
+rustup target add x86_64-pc-windows-msvc
+cd C:\path\to\RecallStack
+npm ci
+```
+
+#### Verify, build, and package
+
+```powershell
+npm run release:verify
+npm run release:clean
+npm run build:windows:portable
+npm run package:windows:portable
+```
+
+The `release\` directory will contain:
+
+- `RecallStack-<version>-windows-x86_64-portable.exe` — raw portable executable
+- `RecallStack-<version>-windows-x86_64-portable.zip` — recommended complete portable package
+- `.sha256` files and `artifact-manifest.json` — integrity information
+
+No MSI, setup program, Windows service, registry installation, shortcut, or uninstaller is created.
+
+#### Deploy on Windows
+
+Copy the portable ZIP to the destination computer, extract the entire ZIP into a writable folder, and keep these files together:
+
+```text
+RecallStack.exe
+README.txt
+LICENSE
+readme.md
+changes.md
+theme.json
+```
+
+Run `RecallStack.exe`; administrator access is not required. If the application does not open, install or repair the Microsoft Edge WebView2 Evergreen Runtime. Unsigned local builds may display a Windows SmartScreen warning.
+
+To deploy an update, close RecallStack and replace the extracted application files with the new release. Workspace Markdown and `DB/index.db` remain in the user-selected workspace and are not stored beside the executable.
+
+### Release smoke test
+
+Before distributing either platform build, test opening a workspace, opening and saving notes, native search and reindexing, backup creation, application close/reopen, and paths containing spaces or non-ASCII characters. Test the Windows ZIP from a non-administrator account and test Linux under the display environments that will be supported.
+
+---
+
 ## Top Bar
 
 | Control | Description |
@@ -686,3 +820,11 @@ Theme preference is saved **per workspace**.
 ## Desktop Requirements
 
 Windows uses the Microsoft Edge WebView2 Evergreen Runtime normally supplied with supported Windows 10 and Windows 11 systems. Linux requires GTK 3 and WebKitGTK 4.1. RecallStack uses native Tauri filesystem commands; a separate browser is not required.
+
+---
+
+## Ownership and License
+
+Copyright © 2026 Sam Chiang. All rights reserved.
+
+RecallStack is publicly viewable source, not open-source software. No permission is granted to copy, modify, distribute, sublicense, or sell RecallStack except under a separate written agreement from the copyright holder. Third-party dependencies and bundled libraries remain subject to their respective licenses. See the `LICENSE` file distributed with RecallStack.

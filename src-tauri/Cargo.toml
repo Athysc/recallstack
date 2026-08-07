@@ -2,7 +2,8 @@
 name = "recallstack"
 version = "0.1.0"
 description = "Local-first Markdown workspace"
-authors = ["RecallStack contributors"]
+authors = ["Sam Chiang <scdev@icloud.com>"]
+license-file = "../LICENSE"
 edition = "2021"
 
 [lib]

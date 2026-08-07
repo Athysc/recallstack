@@ -26,7 +26,7 @@
     "category": "Productivity",
     "shortDescription": "Local-first Markdown workspace",
     "longDescription": "RecallStack is a local-first Markdown workspace for notes, tasks, calendars, outputs, and searchable knowledge.",
-    "copyright": "Copyright © 2026 RecallStack contributors",
+    "copyright": "Copyright © 2026 Sam Chiang. All rights reserved.",
     "icon": ["icons/icon.png", "icons/icon.ico"]
   }
 }
