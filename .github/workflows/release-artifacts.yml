@@ -2,11 +2,6 @@ name: Build reviewed release artifacts
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-    paths:
-      - .github/workflows/release-artifacts.yml
 
 permissions:
   contents: read
