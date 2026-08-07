@@ -6,6 +6,8 @@ interface RecallStackNativeBridge {
   recentWorkspaces(): Promise<Array<{ id: string; path: string; name: string }>>;
   removeRecentWorkspace(path: string): Promise<void>;
   openWorkspacePath(path: string): Promise<FileSystemDirectoryHandle>;
+  workspaceRootPath(): string | null;
+  writeClipboardText(text: string): Promise<void>;
   revealPath(path?: string | null): Promise<void>;
   revealWorkspace(): Promise<void>;
   knowledgeSearch(query: string, prefix?: string, limit?: number, offset?: number): Promise<{ results: Array<Record<string, any>>; total: number; offset: number; hasMore: boolean }>;

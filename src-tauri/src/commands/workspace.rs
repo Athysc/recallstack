@@ -839,10 +839,24 @@ pub async fn pick_workspace(app: AppHandle) -> Result<Option<String>, String> {
     .map_err(|e| e.to_string())?
 }
 
+// `fs::canonicalize` returns Windows' verbatim `\\?\C:\...` extended-length form.
+// That's fine for internal filesystem calls, but it's not the path a user expects
+// when it's copied to the clipboard, so strip it for display purposes only.
+fn display_path(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    if let Some(unc) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        stripped.to_string()
+    } else {
+        raw.to_string()
+    }
+}
+
 fn summary(path: &Path) -> WorkspaceSummary {
     WorkspaceSummary {
         id: workspace_id(path),
-        path: path.to_string_lossy().to_string(),
+        path: display_path(path),
         name: path
             .file_name()
             .and_then(|x| x.to_str())

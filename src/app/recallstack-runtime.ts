@@ -2863,6 +2863,16 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     return /win/i.test(platform);
   }
 
+  // Writes plain text to the clipboard. In the native desktop app this goes through
+  // Tauri's clipboard-manager plugin (X11/Wayland directly) instead of
+  // navigator.clipboard.writeText(), which on Linux routes through WebKitGTK's own
+  // clipboard bridge and logs a harmless-looking but noisy "Gdk-WARNING: Error
+  // writing selection data: Broken pipe" whenever a clipboard-history tool reads it.
+  async function copyPlainText(text) {
+    if (window.__recallstackNative?.active) return window.__recallstackNative.writeClipboardText(text);
+    return navigator.clipboard.writeText(text);
+  }
+
   function normalizeWorkspaceRootPath(path) {
     return String(path || '').trim().replace(/[\\/]+$/, '');
   }
@@ -2887,6 +2897,10 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   }
 
   function workspaceRootPathForClipboard() {
+    if (window.__recallstackNative?.active) {
+      const nativeRoot = normalizeWorkspaceRootPath(window.__recallstackNative.workspaceRootPath() || '');
+      if (nativeRoot) return nativeRoot;
+    }
     let rootPath = configuredWorkspaceRootPath() || workspaceRootPathFromFileUrl();
     if (!rootPath) {
       rootPath = normalizeWorkspaceRootPath(prompt(
@@ -4603,7 +4617,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       btn.textContent = 'Copy';
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        navigator.clipboard.writeText(codeEl.textContent).then(() => {
+        copyPlainText(codeEl.textContent).then(() => {
           btn.textContent = 'Copied!';
           btn.classList.add('copied');
           setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
@@ -4628,7 +4642,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       btn.innerHTML = copyIcon();
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        navigator.clipboard.writeText(codeEl.textContent).then(() => {
+        copyPlainText(codeEl.textContent).then(() => {
           btn.innerHTML = checkIcon();
           btn.classList.add('copied');
           setTimeout(() => { btn.innerHTML = copyIcon(); btn.classList.remove('copied'); }, 1600);
@@ -4673,7 +4687,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       btn.addEventListener('click', e => {
         e.stopPropagation();
         const text = Array.from(bq.childNodes).map(c => extractBqText(c, 0)).join('').trim();
-        navigator.clipboard.writeText(text).then(() => {
+        copyPlainText(text).then(() => {
           btn.textContent = 'Copied!';
           btn.classList.add('copied');
           setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
@@ -5636,7 +5650,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   });
   btnMakeCopy.addEventListener('click', makeCopy);
   btnCopyMd.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(mdEditor.value);
+    await copyPlainText(mdEditor.value);
     toast('Copied to clipboard');
   });
   btnCopyHtml.addEventListener('click', async () => {
@@ -5729,7 +5743,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       succeed();
     } catch {
       try {
-        await navigator.clipboard.writeText(fullHtml);
+        await copyPlainText(fullHtml);
         succeed();
       } catch (e) {
         fail(e.message || e);
@@ -5739,13 +5753,13 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   btnCopyPath.addEventListener('click', async () => {
     const path = fullPathForCurrentFile();
     if (!path) { toast('Save or open a markdown file first', 'error'); return; }
-    await navigator.clipboard.writeText(`\`${path}\``);
+    await copyPlainText(`\`${path}\``);
     toast('Full file path copied as inline code');
   });
   btnCopyInternalLink.addEventListener('click', async () => {
     const link = internalLinkForCurrentFile();
     if (!link) { toast('Save or open a markdown file first', 'error'); return; }
-    await navigator.clipboard.writeText(link);
+    await copyPlainText(link);
     toast('RecallStack link copied');
   });
   previewOut.addEventListener('click', e => {
@@ -7037,7 +7051,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
             'text/plain': new Blob([plain], { type: 'text/plain' }),
           })]);
         } catch {
-          await navigator.clipboard.writeText(html);
+          await copyPlainText(html);
         }
         btn.classList.add('copied');
         btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;

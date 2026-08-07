@@ -213,6 +213,17 @@
       try { return await activateWorkspace(path); }
       catch (error) { console.warn('Could not reopen RecallStack workspace', error); return null; }
     },
+    // Absolute, OS-native workspace root path as returned by the Rust backend
+    // (backslashes on Windows, forward slashes on macOS/Linux) — set whenever a
+    // workspace is opened. This is the ground truth for reconstructing full file
+    // paths; do not re-derive it from location.href or ask the user to type it.
+    workspaceRootPath() { return localStorage.getItem(savedPathKey) || null; },
+    // Writes plain text through Tauri's native clipboard-manager plugin instead of
+    // navigator.clipboard.writeText(). On Linux, WebKitGTK's own clipboard bridge
+    // logs a "Gdk-WARNING: Error writing selection data: Broken pipe" whenever a
+    // clipboard-history tool (clipman, CopyQ, Klipper, ...) reads the selection —
+    // the native plugin writes via X11/Wayland directly and sidesteps that path.
+    writeClipboardText(text) { return invoke('plugin:clipboard-manager|write_text', { text }); },
     search(query, prefix = '') { return invoke('search_notes', { query, prefix }); },
     recentWorkspaces() { return invoke('recent_workspaces'); },
     removeRecentWorkspace(path) { return invoke('remove_recent_workspace', { path }); },
