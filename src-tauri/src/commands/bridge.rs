@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::{commands::safety, AppState};
 use serde::Serialize;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -99,12 +99,16 @@ fn portable_read_text_from(executable: &Path, name: &str) -> Result<Option<Strin
     if !PORTABLE_TEXT_FILES.contains(&name) {
         return Err("Unsupported portable text file".to_string());
     }
-    let directory = executable.parent().ok_or_else(|| "Executable has no parent directory".to_string())?;
+    let directory = executable
+        .parent()
+        .ok_or_else(|| "Executable has no parent directory".to_string())?;
     let path = directory.join(name);
     if !path.is_file() {
         return Ok(None);
     }
-    fs::read_to_string(path).map(Some).map_err(|e| e.to_string())
+    fs::read_to_string(path)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -182,6 +186,7 @@ pub fn fs_read_text_versioned(
 
 #[tauri::command]
 pub fn fs_write(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     bytes: Vec<u8>,
@@ -190,12 +195,15 @@ pub fn fs_write(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    let workspace = root(&state)?;
+    let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
     record_internal_write(&state, &target)?;
-    fs::write(target, bytes).map_err(|e| e.to_string())
+    safety::atomic_write(&target, &bytes)
 }
 
 #[tauri::command]
 pub fn fs_write_text(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     text: String,
@@ -204,12 +212,15 @@ pub fn fs_write_text(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    let workspace = root(&state)?;
+    let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
     record_internal_write(&state, &target)?;
-    fs::write(target, text).map_err(|e| e.to_string())
+    safety::atomic_write(&target, text.as_bytes())
 }
 
 #[tauri::command]
 pub fn fs_write_text_versioned(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     text: String,
@@ -228,8 +239,9 @@ pub fn fs_write_text_versioned(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
     record_internal_write(&state, &target)?;
-    fs::write(&target, text).map_err(|e| e.to_string())?;
+    safety::atomic_write(&target, text.as_bytes())?;
     Ok(native_entry(&workspace, &target)?.version)
 }
 
@@ -242,21 +254,13 @@ pub fn fs_create_dir(state: State<'_, Arc<AppState>>, path: String) -> Result<()
 
 #[tauri::command]
 pub fn fs_remove(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     recursive: bool,
-) -> Result<(), String> {
-    let target = safe_path(&state, &path)?;
-    record_internal_write(&state, &target)?;
-    if target.is_dir() {
-        if recursive {
-            fs::remove_dir_all(target).map_err(|e| e.to_string())
-        } else {
-            fs::remove_dir(target).map_err(|e| e.to_string())
-        }
-    } else {
-        fs::remove_file(target).map_err(|e| e.to_string())
-    }
+) -> Result<safety::MutationResult, String> {
+    let _ = recursive;
+    safety::trash_workspace_path(&app, &state, &path)
 }
 
 #[tauri::command]
@@ -289,7 +293,10 @@ mod tests {
         let directory = std::env::temp_dir().join(format!(
             "recallstack-portable-text-{}-{}",
             std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
         ));
         fs::create_dir_all(&directory).expect("fixture directory");
         let executable = directory.join("RecallStack.exe");
@@ -299,7 +306,10 @@ mod tests {
             portable_read_text_from(&executable, "readme.md").expect("portable read"),
             Some("portable guide".to_string())
         );
-        assert_eq!(portable_read_text_from(&executable, "changes.md").expect("missing sidecar"), None);
+        assert_eq!(
+            portable_read_text_from(&executable, "changes.md").expect("missing sidecar"),
+            None
+        );
         assert!(portable_read_text_from(&executable, "../readme.md").is_err());
         fs::remove_dir_all(directory).expect("remove fixture");
     }

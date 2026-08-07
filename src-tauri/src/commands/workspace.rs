@@ -1,9 +1,11 @@
-use crate::AppState;
+use crate::{commands::safety, AppState};
 use chrono::Utc;
 use notify::event::{MetadataKind, ModifyKind};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rusqlite::types::Value;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -53,6 +55,60 @@ pub struct SearchResult {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct KnowledgeSearchResult {
+    pub path: String,
+    pub name: String,
+    pub title: String,
+    pub snippet: String,
+    pub tags: Vec<String>,
+    pub kind: String,
+    pub folder: String,
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub due_date: Option<String>,
+    pub modified_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeSearchPage {
+    pub results: Vec<KnowledgeSearchResult>,
+    pub total: usize,
+    pub offset: usize,
+    pub has_more: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexedNoteSummary {
+    pub path: String,
+    pub name: String,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub kind: String,
+    pub modified_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacklinkResult {
+    pub source_path: String,
+    pub source_title: String,
+    pub anchor: Option<String>,
+    pub kind: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedSearch {
+    pub id: i64,
+    pub name: String,
+    pub query: String,
+    pub sort_order: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskFileResult {
     pub path: String,
     pub folder: String,
@@ -69,6 +125,16 @@ struct IndexStatus {
     indexed: usize,
     duration_ms: u128,
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexHealth {
+    pub schema_version: i64,
+    pub files: usize,
+    pub tags: usize,
+    pub links: usize,
+    pub last_reconciled: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -188,9 +254,18 @@ fn open_db(root: &Path) -> Result<Connection, String> {
         "PRAGMA journal_mode=WAL;
          CREATE TABLE IF NOT EXISTS rs_notes (
            path TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '', modified_at INTEGER NOT NULL,
-           size INTEGER NOT NULL DEFAULT 0, modified_ns TEXT NOT NULL DEFAULT ''
+           size INTEGER NOT NULL DEFAULT 0, modified_ns TEXT NOT NULL DEFAULT '',
+           content_hash TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'note', folder TEXT NOT NULL DEFAULT '',
+           status TEXT, priority TEXT, start_date TEXT, due_date TEXT, completed_date TEXT, created_date TEXT
          );
-         CREATE VIRTUAL TABLE IF NOT EXISTS rs_notes_fts USING fts5(path UNINDEXED, title, body, tags);"
+         CREATE VIRTUAL TABLE IF NOT EXISTS rs_notes_fts USING fts5(path UNINDEXED, title, body, tags);
+         CREATE TABLE IF NOT EXISTS rs_tags(path TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY(path, tag));
+         CREATE INDEX IF NOT EXISTS rs_tags_tag ON rs_tags(tag);
+         CREATE TABLE IF NOT EXISTS rs_links(source_path TEXT NOT NULL, target_path TEXT NOT NULL, anchor TEXT, kind TEXT NOT NULL, PRIMARY KEY(source_path, target_path, anchor, kind));
+         CREATE INDEX IF NOT EXISTS rs_links_target ON rs_links(target_path);
+         CREATE TABLE IF NOT EXISTS rs_saved_searches(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, query TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+         CREATE TABLE IF NOT EXISTS rs_index_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         PRAGMA user_version=2;"
     ).map_err(|e| e.to_string())?;
     let columns = db
         .prepare("PRAGMA table_info(rs_notes)")
@@ -213,6 +288,25 @@ fn open_db(root: &Path) -> Result<Connection, String> {
             [],
         )
         .map_err(|e| e.to_string())?;
+    }
+    for (name, definition) in [
+        ("content_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("kind", "TEXT NOT NULL DEFAULT 'note'"),
+        ("folder", "TEXT NOT NULL DEFAULT ''"),
+        ("status", "TEXT"),
+        ("priority", "TEXT"),
+        ("start_date", "TEXT"),
+        ("due_date", "TEXT"),
+        ("completed_date", "TEXT"),
+        ("created_date", "TEXT"),
+    ] {
+        if !columns.contains(name) {
+            db.execute(
+                &format!("ALTER TABLE rs_notes ADD COLUMN {name} {definition}"),
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        }
     }
     Ok(db)
 }
@@ -246,6 +340,226 @@ fn tags_from_markdown(content: &str) -> String {
         .join(" ")
 }
 
+#[derive(Default)]
+struct StructuredNote {
+    kind: String,
+    folder: String,
+    status: Option<String>,
+    priority: Option<String>,
+    start_date: Option<String>,
+    due_date: Option<String>,
+    completed_date: Option<String>,
+    created_date: Option<String>,
+    tags: Vec<String>,
+    links: Vec<(String, Option<String>, String)>,
+    hash: String,
+}
+
+fn compact_date(value: &str) -> Option<String> {
+    (value.len() == 8 && value.chars().all(|character| character.is_ascii_digit()))
+        .then(|| format!("{}-{}-{}", &value[..4], &value[4..6], &value[6..8]))
+}
+
+fn task_filename_metadata(
+    path: &str,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    let stem = Path::new(path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let Some((_, encoded)) = stem.rsplit_once(" -- s") else {
+        return (None, None, None, None);
+    };
+    let Some((start, remainder)) = encoded.split_once("_c") else {
+        return (None, None, None, None);
+    };
+    let Some((completed, remainder)) = remainder.split_once("_due") else {
+        return (None, None, None, None);
+    };
+    let Some((due, priority)) = remainder.rsplit_once('_') else {
+        return (None, None, None, None);
+    };
+    (
+        compact_date(start),
+        compact_date(completed),
+        compact_date(due),
+        Some(priority.to_lowercase()),
+    )
+}
+
+fn status_from_filename(path: &str) -> Option<String> {
+    if path.contains(" - (Marked for Deployment)") {
+        Some("deployment".into())
+    } else if path.contains(" - (In QA Review)") {
+        Some("qa".into())
+    } else if path.contains(" - (Deployed ") {
+        Some("deployed".into())
+    } else if path.contains(" - (Backlog)") {
+        Some("backlog".into())
+    } else {
+        None
+    }
+}
+
+fn markdown_links(content: &str) -> Vec<(String, Option<String>, String)> {
+    let mut links = Vec::new();
+    let mut rest = content;
+    while let Some(start) = rest.find("](") {
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find(')') else { break };
+        let raw = rest[..end].split_whitespace().next().unwrap_or_default();
+        rest = &rest[end + 1..];
+        if raw.is_empty()
+            || raw.starts_with('#')
+            || raw.contains("://")
+            || raw.starts_with("mailto:")
+        {
+            continue;
+        }
+        let (target, anchor) = raw.split_once('#').map_or((raw, None), |(target, anchor)| {
+            (target, Some(anchor.to_string()))
+        });
+        links.push((target.replace('\\', "/"), anchor, "markdown".into()));
+    }
+    let mut rest = content;
+    while let Some(start) = rest.find("[[") {
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find("]]") else { break };
+        let raw = rest[..end].split('|').next().unwrap_or_default().trim();
+        rest = &rest[end + 2..];
+        if raw.is_empty() {
+            continue;
+        }
+        let (target, anchor) = raw.split_once('#').map_or((raw, None), |(target, anchor)| {
+            (target, Some(anchor.to_string()))
+        });
+        let target = if target.to_lowercase().ends_with(".md") {
+            target.to_string()
+        } else {
+            format!("{target}.md")
+        };
+        links.push((target.replace('\\', "/"), anchor, "wiki".into()));
+    }
+    links
+}
+
+fn resolve_link_target(source_path: &str, target: &str, kind: &str) -> String {
+    if kind == "wiki" || target.starts_with('/') {
+        return target.trim_start_matches('/').to_string();
+    }
+    let mut parts = Path::new(source_path)
+        .parent()
+        .into_iter()
+        .flat_map(Path::components)
+        .filter_map(|part| match part {
+            Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for part in Path::new(target).components() {
+        match part {
+            Component::Normal(value) => parts.push(value.to_string_lossy().to_string()),
+            Component::ParentDir => {
+                parts.pop();
+            }
+            Component::CurDir => {}
+            _ => return target.to_string(),
+        }
+    }
+    parts.join("/")
+}
+
+fn structured_note(path: &str, content: &str) -> StructuredNote {
+    let lower = path.to_lowercase();
+    let working = lower.contains("/tasks/working/");
+    let task = lower.contains("/tasks/") && !lower.contains("/tasks/journal/");
+    let kind = if working {
+        "working"
+    } else if task {
+        "task"
+    } else {
+        "note"
+    };
+    let folder = Path::new(path)
+        .parent()
+        .map(|value| value.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let (start_date, completed_date, due_date, priority) = task_filename_metadata(path);
+    let tags = tags_from_markdown(content)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let created_date = Path::new(path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .and_then(|stem| {
+            let prefix = stem.get(..10)?;
+            (prefix.as_bytes().get(4) == Some(&b'-') && prefix.as_bytes().get(7) == Some(&b'-'))
+                .then(|| prefix.to_string())
+        });
+    let links = markdown_links(content)
+        .into_iter()
+        .map(|(target, anchor, kind)| (resolve_link_target(path, &target, &kind), anchor, kind))
+        .collect();
+    StructuredNote {
+        kind: kind.into(),
+        folder,
+        status: status_from_filename(path),
+        priority,
+        start_date,
+        due_date,
+        completed_date,
+        created_date,
+        tags,
+        links,
+        hash: format!("{:x}", Sha256::digest(content.as_bytes())),
+    }
+}
+
+fn replace_structured(
+    db: &Connection,
+    path: &str,
+    metadata: &StructuredNote,
+) -> Result<(), String> {
+    db.execute("DELETE FROM rs_tags WHERE path=?1", [path])
+        .map_err(|e| e.to_string())?;
+    db.execute("DELETE FROM rs_links WHERE source_path=?1", [path])
+        .map_err(|e| e.to_string())?;
+    for tag in &metadata.tags {
+        db.execute(
+            "INSERT OR IGNORE INTO rs_tags(path, tag) VALUES (?1, ?2)",
+            params![path, tag],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    for (target, anchor, kind) in &metadata.links {
+        db.execute("INSERT OR IGNORE INTO rs_links(source_path, target_path, anchor, kind) VALUES (?1, ?2, ?3, ?4)", params![path, target, anchor, kind]).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn remove_indexed_note(db: &Connection, path: &str) -> Result<(), String> {
+    db.execute("DELETE FROM rs_notes_fts WHERE path=?1", [path])
+        .map_err(|e| e.to_string())?;
+    db.execute("DELETE FROM rs_tags WHERE path=?1", [path])
+        .map_err(|e| e.to_string())?;
+    db.execute("DELETE FROM rs_links WHERE source_path=?1", [path])
+        .map_err(|e| e.to_string())?;
+    db.execute("DELETE FROM rs_notes WHERE path=?1", [path])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn record_index_success(db: &Connection) -> Result<(), String> {
+    db.execute("INSERT INTO rs_index_meta(key,value) VALUES('last_reconciled',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [Utc::now().to_rfc3339()]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+
 fn index_note(root: &Path, relative_path: &str, content: &str) -> Result<(), String> {
     let title = content
         .lines()
@@ -257,6 +571,7 @@ fn index_note(root: &Path, relative_path: &str, content: &str) -> Result<(), Str
                 .unwrap_or(relative_path)
         });
     let tags = tags_from_markdown(content);
+    let structured = structured_note(relative_path, content);
     let (size, modified_ns, modified_at) = file_metadata(&note_path(root, relative_path)?)?;
     let db = open_db(root)?;
     let tx = db.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -267,7 +582,8 @@ fn index_note(root: &Path, relative_path: &str, content: &str) -> Result<(), Str
         params![relative_path, title, content, tags],
     )
     .map_err(|e| e.to_string())?;
-    tx.execute("INSERT OR REPLACE INTO rs_notes(path, title, body, tags, modified_at, size, modified_ns) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![relative_path, title, content, tags, modified_at, size, modified_ns]).map_err(|e| e.to_string())?;
+    tx.execute("INSERT OR REPLACE INTO rs_notes(path, title, body, tags, modified_at, size, modified_ns, content_hash, kind, folder, status, priority, start_date, due_date, completed_date, created_date) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)", params![relative_path, title, content, tags, modified_at, size, modified_ns, structured.hash, structured.kind, structured.folder, structured.status, structured.priority, structured.start_date, structured.due_date, structured.completed_date, structured.created_date]).map_err(|e| e.to_string())?;
+    replace_structured(&tx, relative_path, &structured)?;
     tx.commit().map_err(|e| e.to_string())
 }
 
@@ -356,18 +672,14 @@ fn update_index_path(root: &Path, path: &Path) -> Result<(), String> {
         )
     } else {
         let db = open_db(root)?;
-        db.execute("DELETE FROM rs_notes_fts WHERE path = ?1", [&relative])
-            .map_err(|e| e.to_string())?;
-        db.execute("DELETE FROM rs_notes WHERE path = ?1", [&relative])
-            .map_err(|e| e.to_string())?;
-        Ok(())
+        remove_indexed_note(&db, &relative)
     }
 }
 
 fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Result<(), String> {
     let (sender, receiver) = std::sync::mpsc::channel::<WatcherMessage>();
-    let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        match event {
+    let watcher =
+        notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
             Ok(event) if normalized_event_kind(&event.kind).is_some() => {
                 let _ = sender.send(WatcherMessage::Event(event));
             }
@@ -375,9 +687,8 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
             Err(error) => {
                 let _ = sender.send(WatcherMessage::Error(error.to_string()));
             }
-        }
-    })
-    .map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
     let mut watcher = watcher;
     watcher
         .watch(&root.join(DATA_DIR), RecursiveMode::Recursive)
@@ -425,7 +736,9 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
                     let (Ok(previous_path), Ok(path)) = (
                         relative_from_workspace(&root, source),
                         relative_from_workspace(&root, destination),
-                    ) else { continue; };
+                    ) else {
+                        continue;
+                    };
                     let internal = watcher_state.is_recent_internal_write(&previous_path)
                         || watcher_state.is_recent_internal_write(&path);
                     changes.insert(
@@ -443,7 +756,9 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
                     continue;
                 }
                 for path in event.paths {
-                    let Ok(relative) = relative_from_workspace(&root, &path) else { continue; };
+                    let Ok(relative) = relative_from_workspace(&root, &path) else {
+                        continue;
+                    };
                     let change = WorkspaceChange {
                         kind: kind.to_string(),
                         path: relative.clone(),
@@ -708,6 +1023,7 @@ pub fn read_note(state: State<'_, Arc<AppState>>, path: String) -> Result<Note, 
 
 #[tauri::command]
 pub fn write_note(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     content: String,
@@ -718,12 +1034,14 @@ pub fn write_note(
         return Err(err("Note does not exist; use create_note"));
     }
     state.record_internal_write(&format!("Data/{path}"));
-    fs::write(note, &content).map_err(|e| e.to_string())?;
+    let _ = safety::preserve_version(&app, &root, &note, &format!("Data/{path}"))?;
+    safety::atomic_write(&note, content.as_bytes())?;
     index_note(&root, &path, &content)
 }
 
 #[tauri::command]
 pub fn create_note(
+    _app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     content: String,
@@ -735,7 +1053,7 @@ pub fn create_note(
     }
     fs::create_dir_all(note.parent().expect("note has parent")).map_err(|e| e.to_string())?;
     state.record_internal_write(&format!("Data/{path}"));
-    fs::write(&note, &content).map_err(|e| e.to_string())?;
+    safety::atomic_write(&note, content.as_bytes())?;
     index_note(&root, &path, &content)?;
     Ok(Note {
         name: note
@@ -749,41 +1067,40 @@ pub fn create_note(
 }
 
 #[tauri::command]
-pub fn move_to_trash(state: State<'_, Arc<AppState>>, path: String) -> Result<String, String> {
+pub fn move_to_trash(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<String, String> {
     let root = active_workspace(&state)?;
-    let source = note_path(&root, &path)?;
-    if !source.exists() {
-        return Err(err("Note no longer exists"));
-    }
-    let destination = data_path(&root).join(".recallstack-trash").join(format!(
-        "{}-{}",
-        Utc::now().format("%Y%m%d-%H%M%S"),
-        path
-    ));
-    fs::create_dir_all(destination.parent().expect("trash destination has parent"))
-        .map_err(|e| e.to_string())?;
-    state.record_internal_write(&format!("Data/{path}"));
-    if let Ok(relative) = relative_from_workspace(&root, &destination) {
-        state.record_internal_write(&relative);
-    }
-    fs::rename(source, &destination).map_err(|e| e.to_string())?;
-    let db = open_db(&root)?;
-    db.execute("DELETE FROM rs_notes WHERE path = ?1", [&path])
-        .map_err(|e| e.to_string())?;
-    db.execute("DELETE FROM rs_notes_fts WHERE path = ?1", [&path])
-        .map_err(|e| e.to_string())?;
-    Ok(destination.to_string_lossy().to_string())
+    note_path(&root, &path)?;
+    let result = safety::trash_workspace_path(&app, &state, &format!("Data/{path}"))?;
+    remove_indexed_note(&open_db(&root)?, &path)?;
+    Ok(result
+        .recovery
+        .map(|recovery| recovery.id)
+        .unwrap_or(result.operation_id))
 }
 
 fn coalesce_change(changes: &mut HashMap<String, WorkspaceChange>, change: WorkspaceChange) {
     let key = change.path.clone();
     match changes.get(&key).map(|existing| existing.kind.as_str()) {
         Some("create") if change.kind == "modify" => {}
-        Some("create") if change.kind == "remove" => { changes.remove(&key); }
-        Some("remove") if change.kind == "create" => {
-            changes.insert(key, WorkspaceChange { kind: "modify".to_string(), ..change });
+        Some("create") if change.kind == "remove" => {
+            changes.remove(&key);
         }
-        _ => { changes.insert(key, change); }
+        Some("remove") if change.kind == "create" => {
+            changes.insert(
+                key,
+                WorkspaceChange {
+                    kind: "modify".to_string(),
+                    ..change
+                },
+            );
+        }
+        _ => {
+            changes.insert(key, change);
+        }
     }
 }
 
@@ -793,7 +1110,11 @@ fn sorted_changes(changes: HashMap<String, WorkspaceChange>) -> Vec<WorkspaceCha
     values
 }
 
-fn reconcile_index(root: &Path) -> Result<usize, String> {
+fn reconcile_index_with(
+    root: &Path,
+    mut cancelled: impl FnMut() -> bool,
+    mut progress: impl FnMut(usize, usize, &str),
+) -> Result<usize, String> {
     let mut db = open_db(root)?;
     let existing = {
         let mut statement = db
@@ -811,22 +1132,27 @@ fn reconcile_index(root: &Path) -> Result<usize, String> {
             .map_err(|e| e.to_string())?;
         rows
     };
-    let mut changed = Vec::new();
-    let mut seen = HashSet::new();
-    for item in WalkDir::new(data_path(root))
+    let files = WalkDir::new(data_path(root))
         .into_iter()
         .filter_map(Result::ok)
-    {
-        let path = item.path();
-        if !item.file_type().is_file()
-            || !path
+        .filter(|item| item.file_type().is_file())
+        .filter(|item| {
+            item.path()
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-            || path.to_string_lossy().contains(".recallstack-trash")
-        {
-            continue;
+        })
+        .filter(|item| !item.path().to_string_lossy().contains(".recallstack-trash"))
+        .map(|item| item.into_path())
+        .collect::<Vec<_>>();
+    let total = files.len();
+    let mut changed = Vec::new();
+    let mut seen = HashSet::new();
+    for (index, path) in files.iter().enumerate() {
+        if cancelled() {
+            return Err("Index rebuild cancelled".into());
         }
         let relative = relative_from_data(root, path)?;
+        progress(index + 1, total, &relative);
         let (size, modified_ns, modified_at) = file_metadata(path)?;
         seen.insert(relative.clone());
         if existing.get(&relative) != Some(&(size, modified_ns.clone())) {
@@ -845,17 +1171,13 @@ fn reconcile_index(root: &Path) -> Result<usize, String> {
         .cloned()
         .collect::<Vec<_>>();
     if changed.is_empty() && removed.is_empty() {
+        record_index_success(&db)?;
         return Ok(0);
     }
     let changed_count = changed.len();
     let transaction = db.transaction().map_err(|e| e.to_string())?;
     for path in removed {
-        transaction
-            .execute("DELETE FROM rs_notes_fts WHERE path = ?1", [&path])
-            .map_err(|e| e.to_string())?;
-        transaction
-            .execute("DELETE FROM rs_notes WHERE path = ?1", [&path])
-            .map_err(|e| e.to_string())?;
+        remove_indexed_note(&transaction, &path)?;
     }
     for (path, content, size, modified_ns, modified_at) in changed {
         let title = content
@@ -877,27 +1199,79 @@ fn reconcile_index(root: &Path) -> Result<usize, String> {
                 params![path, title, content, tags],
             )
             .map_err(|e| e.to_string())?;
+        let structured = structured_note(&path, &content);
         transaction
-            .execute("INSERT OR REPLACE INTO rs_notes(path, title, body, tags, modified_at, size, modified_ns) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![path, title, content, tags, modified_at, size, modified_ns])
+            .execute("INSERT OR REPLACE INTO rs_notes(path, title, body, tags, modified_at, size, modified_ns, content_hash, kind, folder, status, priority, start_date, due_date, completed_date, created_date) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)", params![path, title, content, tags, modified_at, size, modified_ns, structured.hash, structured.kind, structured.folder, structured.status, structured.priority, structured.start_date, structured.due_date, structured.completed_date, structured.created_date])
             .map_err(|e| e.to_string())?;
+        replace_structured(&transaction, &path, &structured)?;
     }
     transaction.commit().map_err(|e| e.to_string())?;
+    record_index_success(&db)?;
     Ok(changed_count)
 }
 
-fn rebuild_index_inner(root: &Path) -> Result<usize, String> {
+fn reconcile_index(root: &Path) -> Result<usize, String> {
+    reconcile_index_with(root, || false, |_, _, _| {})
+}
+
+fn rebuild_index_inner_with(
+    root: &Path,
+    cancelled: impl FnMut() -> bool,
+    progress: impl FnMut(usize, usize, &str),
+) -> Result<usize, String> {
     let db = open_db(root)?;
     db.execute("DELETE FROM rs_notes", [])
         .map_err(|e| e.to_string())?;
     db.execute("DELETE FROM rs_notes_fts", [])
         .map_err(|e| e.to_string())?;
+    db.execute("DELETE FROM rs_tags", [])
+        .map_err(|e| e.to_string())?;
+    db.execute("DELETE FROM rs_links", [])
+        .map_err(|e| e.to_string())?;
     drop(db);
-    reconcile_index(root)
+    reconcile_index_with(root, cancelled, progress)
+}
+
+#[cfg(test)]
+fn rebuild_index_inner(root: &Path) -> Result<usize, String> {
+    rebuild_index_inner_with(root, || false, |_, _, _| {})
 }
 
 #[tauri::command]
-pub fn rebuild_index(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
-    rebuild_index_inner(&active_workspace(&state)?)
+pub async fn rebuild_index(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<usize, String> {
+    let root = active_workspace(&state)?;
+    let app_state = Arc::clone(state.inner());
+    app_state
+        .index_cancel
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    tauri::async_runtime::spawn_blocking(move || {
+        rebuild_index_inner_with(
+            &root,
+            || {
+                app_state
+                    .index_cancel
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            },
+            |completed, total, path| {
+                let _ = app.emit(
+                    "index://progress",
+                    serde_json::json!({"completed":completed,"total":total,"path":path}),
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub fn cancel_index(state: State<'_, Arc<AppState>>) {
+    state
+        .index_cancel
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -906,50 +1280,455 @@ pub fn reconcile_workspace(state: State<'_, Arc<AppState>>) -> Result<usize, Str
 }
 
 #[tauri::command]
+pub fn index_health(state: State<'_, Arc<AppState>>) -> Result<IndexHealth, String> {
+    let db = open_db(&active_workspace(&state)?)?;
+    let count = |table: &str| {
+        db.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map(|value| value as usize)
+        .map_err(|e| e.to_string())
+    };
+    Ok(IndexHealth {
+        schema_version: db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?,
+        files: count("rs_notes")?,
+        tags: count("rs_tags")?,
+        links: count("rs_links")?,
+        last_reconciled: db
+            .query_row(
+                "SELECT value FROM rs_index_meta WHERE key='last_reconciled'",
+                [],
+                |row| row.get(0),
+            )
+            .ok(),
+    })
+}
+
+#[derive(Debug, PartialEq)]
+struct ParsedKnowledgeQuery {
+    text: Vec<String>,
+    filters: Vec<(String, String)>,
+}
+
+fn query_tokens(query: &str) -> Result<Vec<String>, String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for character in query.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if character.is_whitespace() && !quoted {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(character);
+        }
+    }
+    if escaped || quoted {
+        return Err("Search query has an unfinished escape or quote".into());
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    Ok(tokens)
+}
+
+fn parse_knowledge_query(query: &str) -> Result<ParsedKnowledgeQuery, String> {
+    let fields = [
+        "tag",
+        "folder",
+        "is",
+        "status",
+        "priority",
+        "due",
+        "created",
+        "modified",
+        "linksto",
+        "linkedfrom",
+    ];
+    let mut parsed = ParsedKnowledgeQuery {
+        text: Vec::new(),
+        filters: Vec::new(),
+    };
+    for token in query_tokens(query)? {
+        if let Some((field, value)) = token.split_once(':') {
+            let field = field.to_lowercase();
+            if !fields.contains(&field.as_str()) {
+                return Err(format!("Unknown search filter: {field}"));
+            }
+            if value.is_empty() {
+                return Err(format!("Search filter {field}: needs a value"));
+            }
+            if field == "is"
+                && !["task", "note", "working"].contains(&value.to_lowercase().as_str())
+            {
+                return Err("is: must be note, task, or working".into());
+            }
+            parsed.filters.push((field, value.to_string()));
+        } else {
+            parsed.text.push(token);
+        }
+    }
+    Ok(parsed)
+}
+
+fn escaped_fts_terms(terms: &[String]) -> String {
+    terms
+        .iter()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+fn search_knowledge_inner(
+    root: &Path,
+    query: &str,
+    prefix: &str,
+    limit: usize,
+    offset: usize,
+) -> Result<KnowledgeSearchPage, String> {
+    let parsed = parse_knowledge_query(query)?;
+    if parsed.text.is_empty() && parsed.filters.is_empty() {
+        return Ok(KnowledgeSearchPage {
+            results: Vec::new(),
+            total: 0,
+            offset,
+            has_more: false,
+        });
+    }
+    let db = open_db(root)?;
+    let has_text = !parsed.text.is_empty();
+    let snippet = if has_text {
+        "snippet(rs_notes_fts, 2, '', '', '…', 16)"
+    } else {
+        "substr(replace(n.body, char(10), ' '), 1, 180)"
+    };
+    let mut sql = format!("SELECT n.path,n.title,{snippet},n.tags,n.kind,n.folder,n.status,n.priority,n.due_date,n.modified_at FROM rs_notes n {} WHERE n.path LIKE ?", if has_text { "JOIN rs_notes_fts ON rs_notes_fts.path=n.path" } else { "" });
+    let normalized_prefix = prefix.trim_start_matches('/');
+    let mut values = vec![Value::Text(format!("{normalized_prefix}%"))];
+    if has_text {
+        sql.push_str(" AND rs_notes_fts MATCH ?");
+        values.push(Value::Text(escaped_fts_terms(&parsed.text)));
+    }
+    for (field, raw) in parsed.filters {
+        let value = raw.to_lowercase();
+        match field.as_str() {
+            "tag" => {
+                sql.push_str(
+                    " AND EXISTS(SELECT 1 FROM rs_tags t WHERE t.path=n.path AND lower(t.tag)=?)",
+                );
+                values.push(Value::Text(value.trim_start_matches('#').into()));
+            }
+            "folder" => {
+                sql.push_str(" AND lower(n.folder) LIKE ?");
+                values.push(Value::Text(format!("{}%", value.trim_matches('/'))));
+            }
+            "is" => {
+                sql.push_str(" AND n.kind=?");
+                values.push(Value::Text(value));
+            }
+            "status" => {
+                sql.push_str(" AND lower(coalesce(n.status,''))=?");
+                values.push(Value::Text(value));
+            }
+            "priority" => {
+                sql.push_str(" AND lower(coalesce(n.priority,''))=?");
+                values.push(Value::Text(value.replace(['-', '_', ' '], "")));
+            }
+            "due" if value == "today" => {
+                sql.push_str(" AND n.due_date=?");
+                values.push(Value::Text(Utc::now().date_naive().to_string()));
+            }
+            "due" if value == "overdue" => {
+                sql.push_str(
+                    " AND n.due_date IS NOT NULL AND n.due_date<? AND n.completed_date IS NULL",
+                );
+                values.push(Value::Text(Utc::now().date_naive().to_string()));
+            }
+            "due" => {
+                sql.push_str(" AND n.due_date LIKE ?");
+                values.push(Value::Text(format!("{value}%")));
+            }
+            "created" => {
+                sql.push_str(" AND coalesce(n.created_date,'') LIKE ?");
+                values.push(Value::Text(format!("{}%", value.trim_start_matches('='))));
+            }
+            "modified" => {
+                let (operator, date) = if let Some(date) = value.strip_prefix(">=") {
+                    (">=", date)
+                } else if let Some(date) = value.strip_prefix("<=") {
+                    ("<=", date)
+                } else {
+                    ("=", value.as_str())
+                };
+                let parsed_date =
+                    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| {
+                        "modified: expects YYYY-MM-DD, >=YYYY-MM-DD, or <=YYYY-MM-DD".to_string()
+                    })?;
+                let timestamp = parsed_date
+                    .and_hms_opt(0, 0, 0)
+                    .expect("midnight")
+                    .and_utc()
+                    .timestamp();
+                sql.push_str(&format!(" AND n.modified_at {operator} ?"));
+                values.push(Value::Integer(timestamp));
+            }
+            "linksto" => {
+                sql.push_str(" AND EXISTS(SELECT 1 FROM rs_links l WHERE l.source_path=n.path AND lower(l.target_path) LIKE ?)");
+                values.push(Value::Text(format!("%{}%", value.trim_matches('"'))));
+            }
+            "linkedfrom" => {
+                sql.push_str(" AND EXISTS(SELECT 1 FROM rs_links l WHERE lower(l.source_path) LIKE ? AND lower(l.target_path) LIKE '%' || lower(n.path) || '%')");
+                values.push(Value::Text(format!("%{}%", value.trim_matches('"'))));
+            }
+            _ => return Err(format!("Invalid value for {field}: {raw}")),
+        }
+    }
+    let from = sql.find(" FROM ").expect("search query has FROM");
+    let count_sql = format!("SELECT count(*){}", &sql[from..]);
+    let total = db
+        .query_row(
+            &count_sql,
+            rusqlite::params_from_iter(values.iter()),
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| e.to_string())? as usize;
+    sql.push_str(if has_text {
+        " ORDER BY bm25(rs_notes_fts), n.modified_at DESC"
+    } else {
+        " ORDER BY n.modified_at DESC"
+    });
+    sql.push_str(" LIMIT ? OFFSET ?");
+    let limit = limit.clamp(1, 100);
+    let offset = offset.min(100_000);
+    values.push(Value::Integer(limit as i64));
+    values.push(Value::Integer(offset as i64));
+    let mut statement = db.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            let path: String = row.get(0)?;
+            Ok(KnowledgeSearchResult {
+                name: Path::new(&path)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or(&path)
+                    .to_string(),
+                path,
+                title: row.get(1)?,
+                snippet: row.get(2)?,
+                tags: row
+                    .get::<_, String>(3)?
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect(),
+                kind: row.get(4)?,
+                folder: row.get(5)?,
+                status: row.get(6)?,
+                priority: row.get(7)?,
+                due_date: row.get(8)?,
+                modified_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(KnowledgeSearchPage {
+        has_more: offset + results.len() < total,
+        results,
+        total,
+        offset,
+    })
+}
+
+#[tauri::command]
+pub fn search_knowledge(
+    state: State<'_, Arc<AppState>>,
+    query: String,
+    prefix: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<KnowledgeSearchPage, String> {
+    search_knowledge_inner(
+        &active_workspace(&state)?,
+        &query,
+        &prefix.unwrap_or_default(),
+        limit.unwrap_or(80),
+        offset.unwrap_or(0),
+    )
+}
+
+#[tauri::command]
 pub fn search_notes(
     state: State<'_, Arc<AppState>>,
     query: String,
     prefix: Option<String>,
 ) -> Result<Vec<SearchResult>, String> {
-    let root = active_workspace(&state)?;
-    let db = open_db(&root)?;
-    let terms = query
-        .split_whitespace()
-        .map(|term| format!("\"{}\"", term.replace('"', "")))
-        .collect::<Vec<_>>()
-        .join(" AND ");
-    if terms.is_empty() {
-        return Ok(Vec::new());
-    }
     let prefix = prefix
         .unwrap_or_default()
         .trim_start_matches('/')
         .to_string();
-    let like_prefix = format!("{prefix}%");
-    let mut statement = db.prepare("SELECT path, snippet(rs_notes_fts, 2, '', '', '…', 16) FROM rs_notes_fts WHERE rs_notes_fts MATCH ?1 AND path LIKE ?2 ORDER BY rank LIMIT 80").map_err(|e| e.to_string())?;
+    Ok(
+        search_knowledge_inner(&active_workspace(&state)?, &query, &prefix, 80, 0)?
+            .results
+            .into_iter()
+            .map(|result| {
+                let path = result
+                    .path
+                    .strip_prefix(&prefix)
+                    .unwrap_or(&result.path)
+                    .trim_start_matches('/')
+                    .to_string();
+                SearchResult {
+                    name: Path::new(&path)
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or(&path)
+                        .to_string(),
+                    path,
+                    snippet: result.snippet,
+                }
+            })
+            .collect(),
+    )
+}
+
+#[tauri::command]
+pub fn indexed_note_catalog(
+    state: State<'_, Arc<AppState>>,
+    prefix: Option<String>,
+) -> Result<Vec<IndexedNoteSummary>, String> {
+    let root = active_workspace(&state)?;
+    let db = open_db(&root)?;
+    let prefix = prefix
+        .unwrap_or_default()
+        .trim_start_matches('/')
+        .to_string();
+    let mut statement = db.prepare("SELECT path,title,tags,kind,modified_at FROM rs_notes WHERE path LIKE ?1 ORDER BY path LIMIT 10000").map_err(|e| e.to_string())?;
     let results = statement
-        .query_map(params![terms, like_prefix], |row| {
-            let indexed_path: String = row.get(0)?;
-            let path = indexed_path
-                .strip_prefix(&prefix)
-                .unwrap_or(&indexed_path)
-                .trim_start_matches('/')
-                .to_string();
-            let name = Path::new(&path)
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or(&path)
-                .to_string();
-            Ok(SearchResult {
+        .query_map([format!("{prefix}%")], |row| {
+            let path: String = row.get(0)?;
+            Ok(IndexedNoteSummary {
+                name: Path::new(&path)
+                    .file_name()
+                    .and_then(|v| v.to_str())
+                    .unwrap_or(&path)
+                    .to_string(),
                 path,
-                name,
-                snippet: row.get(1)?,
+                title: row.get(1)?,
+                tags: row
+                    .get::<_, String>(2)?
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect(),
+                kind: row.get(3)?,
+                modified_at: row.get(4)?,
             })
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     Ok(results)
+}
+
+#[tauri::command]
+pub fn backlinks(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<Vec<BacklinkResult>, String> {
+    if !is_safe_relative(&path) {
+        return Err("Invalid note path".into());
+    }
+    let root = active_workspace(&state)?;
+    let db = open_db(&root)?;
+    let stem = path.trim_end_matches(".md");
+    let mut statement=db.prepare("SELECT l.source_path,n.title,l.anchor,l.kind FROM rs_links l JOIN rs_notes n ON n.path=l.source_path WHERE lower(l.target_path)=lower(?1) OR lower(l.target_path)=lower(?2) OR lower(?1) LIKE '%/' || lower(l.target_path) ORDER BY n.title").map_err(|e|e.to_string())?;
+    let results = statement
+        .query_map(params![path, stem], |row| {
+            Ok(BacklinkResult {
+                source_path: row.get(0)?,
+                source_title: row.get(1)?,
+                anchor: row.get(2)?,
+                kind: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(results)
+}
+
+#[tauri::command]
+pub fn list_saved_searches(state: State<'_, Arc<AppState>>) -> Result<Vec<SavedSearch>, String> {
+    let db = open_db(&active_workspace(&state)?)?;
+    let mut statement = db
+        .prepare("SELECT id,name,query,sort_order FROM rs_saved_searches ORDER BY sort_order,name")
+        .map_err(|e| e.to_string())?;
+    let results = statement
+        .query_map([], |row| {
+            Ok(SavedSearch {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                query: row.get(2)?,
+                sort_order: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(results)
+}
+
+#[tauri::command]
+pub fn save_search(
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    query: String,
+) -> Result<SavedSearch, String> {
+    let name = name.trim();
+    if name.is_empty() || query.trim().is_empty() {
+        return Err("Saved searches require a name and query".into());
+    }
+    parse_knowledge_query(&query)?;
+    let db = open_db(&active_workspace(&state)?)?;
+    db.execute("INSERT INTO rs_saved_searches(name,query,sort_order) VALUES(?1,?2,(SELECT coalesce(max(sort_order),-1)+1 FROM rs_saved_searches)) ON CONFLICT(name) DO UPDATE SET query=excluded.query",params![name,query]).map_err(|e|e.to_string())?;
+    db.query_row(
+        "SELECT id,name,query,sort_order FROM rs_saved_searches WHERE name=?1",
+        [name],
+        |row| {
+            Ok(SavedSearch {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                query: row.get(2)?,
+                sort_order: row.get(3)?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_saved_search(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
+    Ok(open_db(&active_workspace(&state)?)?
+        .execute("DELETE FROM rs_saved_searches WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?
+        > 0)
 }
 
 #[tauri::command]
@@ -1063,7 +1842,10 @@ mod tests {
     fn workspace_identity_is_stable_and_path_specific() {
         let first = Path::new("/tmp/recallstack-one");
         assert_eq!(workspace_id(first), workspace_id(first));
-        assert_ne!(workspace_id(first), workspace_id(Path::new("/tmp/recallstack-two")));
+        assert_ne!(
+            workspace_id(first),
+            workspace_id(Path::new("/tmp/recallstack-two"))
+        );
     }
 
     #[test]
@@ -1166,6 +1948,117 @@ mod tests {
         );
         assert_eq!(cold_changed, 1_000);
         assert_eq!(warm_changed, 0);
+        let search_started = Instant::now();
+        let page = search_knowledge_inner(&root, "benchmark tag:benchmark", "", 80, 0)
+            .expect("benchmark search");
+        let search_ms = search_started.elapsed().as_millis();
+        eprintln!(
+            "PERF native_search notes=1000 search_ms={search_ms} results={} total={}",
+            page.results.len(),
+            page.total
+        );
+        assert_eq!(page.total, 1_000);
+        assert!(
+            search_ms < 500,
+            "debug-build search exceeded 500 ms: {search_ms}"
+        );
         fs::remove_dir_all(&root).expect("remove benchmark fixture");
+    }
+
+    #[test]
+    fn old_index_schema_migrates_without_losing_notes() {
+        let root = temporary_workspace("schema-migration");
+        fs::create_dir_all(root.join("DB")).expect("db folder");
+        let db = Connection::open(db_path(&root)).expect("legacy db");
+        db.execute_batch("CREATE TABLE rs_notes(path TEXT PRIMARY KEY,title TEXT NOT NULL,body TEXT NOT NULL,tags TEXT NOT NULL DEFAULT '',modified_at INTEGER NOT NULL); CREATE VIRTUAL TABLE rs_notes_fts USING fts5(path UNINDEXED,title,body,tags); INSERT INTO rs_notes VALUES('notes/old.md','Old','body','legacy',1);").expect("legacy schema");
+        drop(db);
+        let migrated = open_db(&root).expect("migration");
+        assert_eq!(
+            migrated
+                .query_row(
+                    "SELECT title FROM rs_notes WHERE path='notes/old.md'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("preserved row"),
+            "Old"
+        );
+        let columns = migrated
+            .prepare("PRAGMA table_info(rs_notes)")
+            .and_then(|mut statement| {
+                statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<Result<HashSet<_>, _>>()
+            })
+            .expect("columns");
+        assert!(columns.contains("content_hash"));
+        assert!(columns.contains("due_date"));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn knowledge_query_parser_handles_phrases_filters_and_errors() {
+        let parsed =
+            parse_knowledge_query("\"exact phrase\" tag:ai due:overdue is:task").expect("query");
+        assert_eq!(parsed.text, vec!["exact phrase"]);
+        assert_eq!(
+            parsed.filters,
+            vec![
+                ("tag".into(), "ai".into()),
+                ("due".into(), "overdue".into()),
+                ("is".into(), "task".into())
+            ]
+        );
+        assert!(parse_knowledge_query("unknown:value").is_err());
+        assert!(parse_knowledge_query("\"unfinished").is_err());
+        assert!(parse_knowledge_query("is:document").is_err());
+    }
+
+    #[test]
+    fn markdown_metadata_extracts_tasks_tags_links_and_hash() {
+        let metadata = structured_note(
+            "personal/tasks/working/Ship - (Backlog) -- s20260801_c00000000_due20260810_high.md",
+            "# Ship\n\n#release [Plan](../notes/Plan.md#scope) and [[Reference]]",
+        );
+        assert_eq!(metadata.kind, "working");
+        assert_eq!(metadata.status.as_deref(), Some("backlog"));
+        assert_eq!(metadata.priority.as_deref(), Some("high"));
+        assert_eq!(metadata.start_date.as_deref(), Some("2026-08-01"));
+        assert_eq!(metadata.due_date.as_deref(), Some("2026-08-10"));
+        assert_eq!(metadata.tags, vec!["release"]);
+        assert_eq!(metadata.links.len(), 2);
+        assert_eq!(metadata.hash.len(), 64);
+    }
+
+    #[test]
+    fn structured_search_is_filtered_bounded_and_parameterized() {
+        let root = temporary_workspace("knowledge-search");
+        fs::create_dir_all(root.join("Data/personal/tasks/working")).expect("task folder");
+        fs::write(
+            root.join("Data/notes/reference.md"),
+            "# Reference\n\nsearchable #docs",
+        )
+        .expect("note");
+        fs::write(
+            root.join(
+                "Data/personal/tasks/working/Ship -- s20260801_c00000000_due20260810_high.md",
+            ),
+            "# Ship\n\nsearchable #release [Reference](../../../notes/reference.md)",
+        )
+        .expect("task");
+        assert_eq!(rebuild_index_inner(&root).expect("index"), 2);
+        let page = search_knowledge_inner(
+            &root,
+            "searchable tag:release is:working priority:high",
+            "",
+            20,
+            0,
+        )
+        .expect("search");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.results[0].kind, "working");
+        assert_eq!(page.results[0].tags, vec!["release"]);
+        assert!(search_knowledge_inner(&root, "tag:' OR 1=1 --", "", 20, 0).is_ok());
+        fs::remove_dir_all(&root).expect("cleanup");
     }
 }

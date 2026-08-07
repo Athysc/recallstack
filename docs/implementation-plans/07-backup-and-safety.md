@@ -1,8 +1,17 @@
 # Improvement 7 Implementation Plan: Backup and Safety
 
-**Status:** Planned  
+**Status:** Implemented and verified (2026-08-06)
 **Recommended execution point:** After native data services and filesystem watching  
 **Primary outcome:** Ensure destructive and conflicting operations are recoverable, observable, and resistant to partial failure.
+
+## Implemented Scope
+
+- Native, path-validated mutation bridge with typed results, an application-data audit log, atomic writes, version-token conflict checks, and crash-recovery drafts.
+- Recoverable workspace trash for files, assets, and nested directories, with restore, restore-as collision handling, inspection, and explicitly confirmed permanent emptying.
+- Application-data note versions retained for 90 days and capped at 250 MiB per workspace.
+- Streaming ZIP backups with a SHA-256 manifest, cache/trash exclusions, cancellation, progress events, atomic finalization, and immediate or on-demand verification.
+- Workspace health, broken-link/orphan-asset reporting, search-index rebuild, and read-only Git status in the Safety & Workspace Tools interface.
+- Rust tests cover atomic replacement, nested copy, version retention, backup verification, cancellation cleanup, and damaged archives; the frontend parity/type/build suite also passes.
 
 ## Current Baseline
 

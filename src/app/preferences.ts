@@ -5,6 +5,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   collapseDefault: "pkm-collapse-default",
   cursorLoadPosition: "pkm-cursor-load-pos",
   loadRemoteMedia: "pkm-load-remote-media",
+  lineNumbers: "pkm-line-numbers",
   onlineDependencies: "pkm-online-deps",
   showSystemFolders: "pkm-show-system-folders",
   sqlSource: "pkm-sql-source",
@@ -30,6 +31,10 @@ export function draftPreferenceKey(workspace: string | null, path: string | null
 
 export function readPreference(key: string): string | null {
   try { return localStorage.getItem(key); } catch { return null; }
+}
+
+export function preferenceIsEnabled(value: string | null, defaultEnabled = false): boolean {
+  return value === null ? defaultEnabled : value === "on";
 }
 
 export function writePreference(key: string, value: string): boolean {

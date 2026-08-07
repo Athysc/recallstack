@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PREFERENCE_KEYS, draftPreferenceKey, workspacePreferenceKey } from "../../src/app/preferences.ts";
+import { PREFERENCE_KEYS, draftPreferenceKey, preferenceIsEnabled, workspacePreferenceKey } from "../../src/app/preferences.ts";
 
 test("workspace-scoped keys remain backward compatible", () => {
   assert.equal(workspacePreferenceKey("theme", "Personal"), "pkm-theme-Personal");
@@ -11,6 +11,13 @@ test("workspace-scoped keys remain backward compatible", () => {
 test("draft keys distinguish workspaces and new notes", () => {
   assert.equal(draftPreferenceKey("Personal", "notes/a.md"), "pkm-draft:Personal:notes/a.md");
   assert.equal(draftPreferenceKey(null, null), "pkm-draft:__no_workspace__:__new__");
+});
+
+test("boolean preferences can default on while preserving an explicit off choice", () => {
+  assert.equal(preferenceIsEnabled(null, true), true);
+  assert.equal(preferenceIsEnabled("on", true), true);
+  assert.equal(preferenceIsEnabled("off", true), false);
+  assert.equal(preferenceIsEnabled(null), false);
 });
 
 test("working pane layout and dimensions have stable persisted keys", () => {

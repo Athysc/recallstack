@@ -1,8 +1,19 @@
 # Improvement 10 Implementation Plan: Knowledge-System Search
 
-**Status:** Planned  
+**Status:** Implemented and verified (2026-08-06)
 **Recommended execution point:** Native FTS foundation begins in the performance milestone; advanced query features follow modularization  
 **Primary outcome:** Replace full-workspace JavaScript scans with a native, rebuildable knowledge index supporting full text, structured filters, backlinks, broken links, and saved searches.
+
+## Implemented Scope
+
+- Versioned native SQLite schema now stores note metadata, content hashes, normalized folders, task/date/status fields, tags, links, saved searches, and index observability alongside FTS5.
+- Bulk reconciliation compares size and nanosecond modification tokens, writes changes transactionally, removes stale related rows, and watcher batches incrementally reindex only affected Markdown files.
+- A typed parser accepts quoted phrases plus `tag:`, `folder:`, `is:`, `status:`, `priority:`, `due:`, `created:`, `modified:`, `linksto:`, and `linkedfrom:` filters; unknown or invalid filters return explicit errors.
+- Queries compile to parameterized, bounded SQL/FTS, use BM25 ranking, return safe snippets and structured metadata, and support limit/offset continuation with a total count.
+- The desktop frontend no longer scans Markdown bodies into JavaScript at workspace startup; it loads a bounded native note catalog for navigation/completion while all searches use the native query API.
+- Search results show metadata chips and query help; built-in and user-saved searches are available, and backlinks are displayed on the open note preview.
+- Search index rebuild, watcher reconciliation, schema/file/tag/link counts, last-success metadata, and automatic creation/migration support recovery from a missing or older cache.
+- Rust tests cover migrations, parsing/errors, metadata/link extraction, structured filtering, adversarial parameterization, incremental equivalence, and a 1,000-note indexing/search benchmark.
 
 ## Current Baseline
 

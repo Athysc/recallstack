@@ -451,6 +451,19 @@
     tab-size: 2;
     caret-color: var(--mauve);
   }
+  #md-editor.cm-markdown-editor { min-height: 0; padding: 0; }
+  #md-editor .cm-editor { height: 100%; min-height: 0; background: var(--base); color: var(--text); }
+  #md-editor .cm-scroller {
+    overflow: auto;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 13.5px;
+    line-height: 1.75;
+  }
+  #md-editor .cm-content { padding: 2px; caret-color: var(--mauve); }
+  #md-editor .cm-focused { outline: none; }
+  #md-editor .cm-gutters { background: var(--mantle); color: var(--overlay0); border-right: 1px solid var(--surface0); }
+  #md-editor .cm-activeLine, #md-editor .cm-activeLineGutter { background: color-mix(in srgb, var(--surface0) 48%, transparent); }
+  #md-editor .cm-selectionBackground { background: color-mix(in srgb, var(--blue) 28%, transparent) !important; }
 
   .resizer {
     flex-shrink: 0;
@@ -465,7 +478,7 @@
 
   #preview-output {
     flex: 1;
-    padding: 20px 28px;
+    padding: 4px;
     overflow-y: auto;
     background: var(--base);
   }
@@ -678,7 +691,6 @@
   #preview-output th     { background: var(--surface0); color: var(--lavender); text-align: left; }
   #preview-output tr:nth-child(even) td { background: var(--mantle); }
   #preview-output img    { max-width: 100%; border-radius: 6px; display: block; }
-
   /* ── README modal — markdown styles (mirrors preview) ────────────────────── */
   .readme-content { font-size: 14px; line-height: 1.6; }
   .readme-content h1 { color: var(--mauve);    font-size: 1.75em; margin: 0 0 .75em;     line-height: 1.3; }
@@ -1619,10 +1631,7 @@
   }
 
   /* ── Word-wrap toggle ─────────────────────────────────────────────────────── */
-  #md-editor.nowrap {
-    white-space: pre;
-    overflow-x: auto;
-  }
+  #md-editor.nowrap .cm-content { white-space: pre; }
   .btn-icon.wrap-active        { color: var(--blue); background: var(--surface0); }
   .btn-icon.cursor-pos-active  { color: var(--blue); background: var(--surface0); }
   .btn-icon.collapse-default-active { color: var(--blue); background: var(--surface0); }
@@ -1777,7 +1786,6 @@
     border-radius: 6px;
     line-height: 1.6;
   }
-
   /* ── Dependency status bar ────────────────────────────────────────────────── */
   #dep-status-bar {
     flex-shrink: 0;
@@ -1954,7 +1962,7 @@
         <button class="btn-icon" id="btn-search-clear" title="Clear search">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
-        <input id="search-input" type="text" placeholder="Search notes…" spellcheck="false" autocomplete="off" />
+        <input id="search-input" type="text" placeholder="Search notes or use filters…" title="Filters: tag: folder: is:task is:working status: priority: due:today due:overdue created: modified: linksto: linkedfrom:" spellcheck="false" autocomplete="off" />
         <button class="btn-icon" id="btn-search" title="Search">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </button>
@@ -1980,6 +1988,9 @@
             <polyline points="17 10 21 10"/><path d="M3 10h11a4 4 0 0 1 0 8h-1"/>
             <polyline points="13 15 10 18 13 21"/>
           </svg>
+        </button>
+        <button class="btn-icon" id="btn-line-numbers" title="Line Numbers: Off" aria-label="Toggle editor line numbers">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h12M9 12h12M9 18h12"/><path d="M3 6h1M3 12h1M3 18h1"/></svg>
         </button>
         <button class="btn-icon" id="btn-cursor-pos" title="Load Position: First Line">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2021,6 +2032,9 @@
             <line x1="12" y1="7" x2="12" y2="12"/>
             <line x1="12" y1="12" x2="15" y2="14"/>
           </svg>
+        </button>
+        <button class="btn-icon" id="btn-safety-tools" title="Safety and workspace tools" aria-label="Safety and workspace tools">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-5"/></svg>
         </button>
       </div>
     </div>
@@ -2174,7 +2188,7 @@
           <div class="task-editor-layout" id="task-editor-layout">
             <div class="task-editor-top" id="task-editor-top">
               <div class="pane-label pane-label-row"><button class="btn-icon working-layout-toggle" id="btn-working-layout" title="Move Working Tasks to a left pane" aria-label="Move Working Tasks to a left pane"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg></button><button class="btn-icon" id="btn-toggle-working-pane" title="Show/hide Working Tasks">▣</button> MD <button type="button" class="task-kind-indicator hidden" id="task-kind-indicator"></button><span class="task-meta-summary" id="task-meta-summary"></span></div>
-              <textarea id="md-editor" placeholder="Write your note here…" spellcheck="false"></textarea>
+              <div id="md-editor" data-placeholder="Write your note here…"></div>
             </div>
             <div class="task-editor-resizer" id="task-editor-resizer"></div>
             <div class="working-task-pane" id="working-task-pane"><div class="working-task-header">WORKING Tasks <span class="working-task-options"><button class="btn-icon" id="btn-toggle-working-completed" title="Show completed tasks from today and yesterday (Friday through Sunday on Monday)">✓</button><button class="btn-icon sort-btn" id="btn-working-sort-alpha" title="Sort working tasks alphabetically" aria-label="Sort working tasks alphabetically"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 18 6 6l4 12M3.4 14h5.2M13 6h8l-8 12h8"/></svg></button><button class="btn-icon sort-btn" id="btn-working-sort-mtime" title="Sort working tasks by last modified" aria-label="Sort working tasks by last modified">◷</button><button class="btn-icon sort-btn" id="btn-working-sort-priority" title="Sort working tasks by priority, then last modified" aria-label="Sort working tasks by priority, then last modified">!</button></span><button class="btn-working-new" id="btn-new-working-task" title="Create a new Working Task" aria-label="Create a new Working Task"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM15 3v5h4M12.5 11v6M9.5 14h6"/></svg></button></div><div class="working-task-list" id="working-task-list"></div></div>
@@ -2272,6 +2286,27 @@
   </div>
 </div>
 
+<div id="modal-safety-tools" class="hidden">
+  <div class="md-ref-dialog safety-tools-dialog">
+    <div class="md-ref-header">
+      <span class="md-ref-title">Safety &amp; Workspace Tools</span>
+      <button class="md-ref-close" id="btn-safety-tools-close" title="Close" aria-label="Close safety tools"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="safety-tools-body">
+      <div class="safety-tools-actions">
+        <button class="btn btn-ghost" data-safety-action="validate">Validate Workspace</button>
+        <button class="btn btn-ghost" data-safety-action="backup">Backup Workspace</button>
+        <button class="btn btn-ghost" data-safety-action="verify-backup">Verify Backup</button>
+        <button class="btn btn-ghost" data-safety-action="rebuild">Rebuild Search Index</button>
+        <button class="btn btn-ghost" data-safety-action="trash">Inspect Trash</button>
+        <button class="btn btn-ghost" data-safety-action="versions">Current Note History</button>
+        <button class="btn btn-ghost" data-safety-action="git">Git Status</button>
+      </div>
+      <div class="safety-tools-output" id="safety-tools-output">Choose a tool to inspect or protect the current workspace.</div>
+    </div>
+  </div>
+</div>
+
 <!-- New Folder Modal -->
 <div id="modal-new-folder" class="modal-overlay hidden">
   <div class="modal-dialog">
@@ -2303,7 +2338,7 @@
     <div id="modal-inbox-delete-msg" style="color:var(--subtext0);font-size:13px;line-height:1.5;margin-bottom:4px"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="modal-inbox-delete-cancel">Cancel</button>
-      <button class="btn btn-danger" id="modal-inbox-delete-confirm">Delete</button>
+      <button class="btn btn-danger" id="modal-inbox-delete-confirm">Move to Trash</button>
     </div>
   </div>
 </div>

@@ -16,6 +16,14 @@ export default defineConfig({
       input: {
         main: "index.html",
       },
+      output: {
+        manualChunks(id) {
+          if (id.includes("/node_modules/@lezer/")) return "editor-parser";
+          if (/\/node_modules\/@codemirror\/(state|view|language)\//.test(id)) return "editor-core";
+          if (id.includes("/node_modules/@codemirror/lang-markdown/")) return "editor-markdown";
+          if (id.includes("/node_modules/@codemirror/")) return "editor-tools";
+        },
+      },
     },
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,

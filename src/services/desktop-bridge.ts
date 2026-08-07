@@ -150,7 +150,7 @@
 
     async removeEntry(name, options = {}) {
       validateName(name);
-      await invoke('fs_remove', { path: join(this.path, name), recursive: !!options.recursive });
+      return invoke('fs_remove', { path: join(this.path, name), recursive: !!options.recursive });
     }
 
     async isSameEntry(other) {
@@ -214,11 +214,56 @@
       catch (error) { console.warn('Could not reopen RecallStack workspace', error); return null; }
     },
     search(query, prefix = '') { return invoke('search_notes', { query, prefix }); },
+    recentWorkspaces() { return invoke('recent_workspaces'); },
+    openWorkspacePath(path) { return activateWorkspace(path); },
+    revealPath(path = null) { return invoke('reveal_path', { path }); },
+    revealWorkspace() { return invoke('open_workspace_folder'); },
+    knowledgeSearch(query, prefix = '', limit = 80, offset = 0) { return invoke('search_knowledge', { query, prefix, limit, offset }); },
+    indexedNotes(prefix = '') { return invoke('indexed_note_catalog', { prefix }); },
+    backlinks(path) { return invoke('backlinks', { path }); },
+    listSavedSearches() { return invoke('list_saved_searches'); },
+    saveSearch(name, query) { return invoke('save_search', { name, query }); },
+    deleteSavedSearch(id) { return invoke('delete_saved_search', { id }); },
     readText(path) { return invoke('fs_read_text_versioned', { path }); },
     writeText(path, text, expectedVersion = null) {
       return invoke('fs_write_text_versioned', { path, text, expectedVersion });
     },
     readPortableText(name) { return invoke('portable_read_text', { name }); },
+    trash(path) { return invoke('trash_path', { path }); },
+    listTrash() { return invoke('list_trash'); },
+    restoreTrash(id, restoreAs = null) { return invoke('restore_trash', { id, restoreAs }); },
+    emptyTrash() { return invoke('empty_trash'); },
+    listVersions(path = null) { return invoke('list_versions', { path }); },
+    restoreVersion(id) { return invoke('restore_version', { id }); },
+    saveDraft(path, text) { return invoke('save_draft', { path, text }); },
+    loadDraft(path) { return invoke('load_draft', { path }); },
+    clearDraft(path) { return invoke('clear_draft', { path }); },
+    backup(destination = null, includeCache = false) { return invoke('backup_workspace', { destination, includeCache }); },
+    async chooseBackupDestination() {
+      if (typeof window.__TAURI__?.dialog?.save !== 'function') return null;
+      const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+      const value = await window.__TAURI__.dialog.save({
+        title: 'Save verified RecallStack backup',
+        defaultPath: `RecallStack-backup-${date}.zip`,
+        filters: [{ name: 'ZIP archive', extensions: ['zip'] }],
+      });
+      if (!value) return null;
+      return typeof value === 'string' ? value : value.path || String(value);
+    },
+    async chooseBackupFile() {
+      if (typeof window.__TAURI__?.dialog?.open !== 'function') return null;
+      const value = await window.__TAURI__.dialog.open({ title: 'Choose a RecallStack backup to verify', multiple: false, directory: false, filters: [{ name: 'ZIP archive', extensions: ['zip'] }] });
+      if (!value) return null;
+      return typeof value === 'string' ? value : value.path || String(value);
+    },
+    cancelBackup() { return invoke('cancel_backup'); },
+    verifyBackup(path) { return invoke('verify_backup', { path }); },
+    restoreBackupDryRun(path) { return invoke('restore_backup_dry_run', { path }); },
+    checkWorkspace() { return invoke('check_workspace'); },
+    rebuildIndex() { return invoke('rebuild_index'); },
+    cancelIndex() { return invoke('cancel_index'); },
+    indexHealth() { return invoke('index_health'); },
+    gitStatus() { return invoke('git_status'); },
     async tasks(prefix = '') {
       if (indexState === 'indexing') {
         await Promise.race([
@@ -238,6 +283,7 @@
       };
     },
     close() { return invoke('close_app'); },
+    closeApp() { return invoke('close_app'); },
   };
 
   // The desktop build is always offline and ships its rendering dependencies.
@@ -254,6 +300,12 @@
         indexWaiters.clear();
       }
       window.dispatchEvent(new CustomEvent('recallstack-index-status', { detail: event.payload }));
+    });
+    window.__TAURI__.event.listen('backup://progress', event => {
+      window.dispatchEvent(new CustomEvent('recallstack-backup-progress', { detail: event.payload }));
+    });
+    window.__TAURI__.event.listen('index://progress', event => {
+      window.dispatchEvent(new CustomEvent('recallstack-index-progress', { detail: event.payload }));
     });
   }
 

@@ -38,11 +38,12 @@ Click **Open Workspace** and select your root folder. The app remembers your las
 | Pencil icon (app title) | Click to rename the app title — saved in your local application preferences |
 | Workspace chips | Switch between multiple workspaces; each has its own theme |
 | Calendar icon | Toggle calendar view |
-| Search box | Search all notes (type 3+ characters) |
+| Search box | Native full-text and structured search; hover for the supported filter list |
 | Theme dropdown | Choose from the themes defined in `theme.json` beside the executable |
 | Folder nav mode icon | Toggle Nav Row 1 between **buttons** and **dropdown** display; persists per workspace |
 | Subfolder nav mode icon | Toggle Nav Row 2 between **buttons** and **dropdown** display; persists per workspace |
 | Word wrap icon | Toggle word wrap on/off in the editor; persists globally |
+| Line numbers icon | Toggle CodeMirror line numbers on/off; persists globally |
 | Cursor position icon | Toggle where the cursor lands when opening a file — **First Line** (default) or **Last Line**; persists globally |
 | Collapse icon | Toggle whether collapsible preview sections are **expanded** (default) or **collapsed** by default on render; persists globally. Also immediately opens/closes all collapsible sections in the current preview |
 | Book icon | Markdown syntax reference |
@@ -202,7 +203,7 @@ RecallStack saves your work automatically — in most situations you never need 
 | Move icon | — | Move file to a different folder or to a top-level folder **root** destination |
 | Archive icon | — | Move file to `archived/` subfolder; hidden for root-level notes |
 | Restore icon | — | Move archived file back to active folder |
-| Trash icon | — | Permanently delete the file |
+| Trash icon | — | Move the file to recoverable RecallStack Trash |
 | **Cancel** | `Esc` | Exit editor; discards new unsaved notes silently |
 | **+ New** *(editor)* | — | Save the current file then create a new note in the active subfolder or active **root** |
 | Presentation icon | — | Enter full-screen presentation mode (Escape to exit) |
@@ -230,7 +231,7 @@ Priority and Status controls are borderless until selected; the selected option 
 
 The editor is split into two panes:
 
-- **Left — Markdown**: Editable textarea with a monospace font
+- **Left — Markdown**: CodeMirror 6 source editor with Markdown highlighting, folding, search/replace, history, and completion
 - **Right — Preview**: Live-rendered output, updates as you type
 
 Drag the **divider bar** between the panes to resize them.
@@ -244,6 +245,9 @@ Drag the **divider bar** between the panes to resize them.
 | Shortcut | Action |
 |---|---|
 | `Ctrl+S` | Save current note |
+| `Ctrl+K` | Open the command palette |
+| `Ctrl+P` | Open the command palette in note mode |
+| `Ctrl+Shift+F` | Focus workspace search |
 | `Escape` | Close editor, modal, or clear search |
 
 ### In the Title / Filename Field

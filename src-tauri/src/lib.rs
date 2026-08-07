@@ -1,9 +1,10 @@
 mod commands;
 
-use commands::{backup, bridge, health, workspace};
+use commands::{backup, bridge, health, safety, workspace};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Manager;
@@ -15,6 +16,8 @@ pub struct AppState {
     internal_writes: Mutex<HashMap<String, Instant>>,
     watcher_sequences: Mutex<HashMap<String, u64>>,
     watcher_generation: Mutex<u64>,
+    pub backup_cancel: AtomicBool,
+    pub index_cancel: AtomicBool,
 }
 
 impl Default for AppState {
@@ -26,6 +29,8 @@ impl Default for AppState {
             internal_writes: Mutex::new(HashMap::new()),
             watcher_sequences: Mutex::new(HashMap::new()),
             watcher_generation: Mutex::new(0),
+            backup_cancel: AtomicBool::new(false),
+            index_cancel: AtomicBool::new(false),
         }
     }
 }
@@ -86,8 +91,16 @@ pub fn run() {
             workspace::create_note,
             workspace::move_to_trash,
             workspace::reconcile_workspace,
+            workspace::index_health,
             workspace::rebuild_index,
+            workspace::cancel_index,
             workspace::search_notes,
+            workspace::search_knowledge,
+            workspace::indexed_note_catalog,
+            workspace::backlinks,
+            workspace::list_saved_searches,
+            workspace::save_search,
+            workspace::delete_saved_search,
             workspace::task_files,
             workspace::reveal_path,
             workspace::open_workspace_folder,
@@ -104,8 +117,21 @@ pub fn run() {
             bridge::fs_exists,
             bridge::portable_read_text,
             bridge::close_app,
+            safety::trash_path,
+            safety::list_trash,
+            safety::restore_trash,
+            safety::empty_trash,
+            safety::list_versions,
+            safety::restore_version,
+            safety::save_draft,
+            safety::load_draft,
+            safety::clear_draft,
             backup::backup_workspace,
-            health::check_workspace
+            backup::cancel_backup,
+            backup::verify_backup,
+            backup::restore_backup_dry_run,
+            health::check_workspace,
+            health::git_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running RecallStack");

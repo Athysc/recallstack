@@ -1,8 +1,5 @@
   /* ── Word-wrap toggle ─────────────────────────────────────────────────────── */
-  #md-editor.nowrap {
-    white-space: pre;
-    overflow-x: auto;
-  }
+  #md-editor.nowrap .cm-content { white-space: pre; }
   .btn-icon.wrap-active        { color: var(--blue); background: var(--surface0); }
   .btn-icon.cursor-pos-active  { color: var(--blue); background: var(--surface0); }
   .btn-icon.collapse-default-active { color: var(--blue); background: var(--surface0); }
@@ -157,4 +154,3 @@
     border-radius: 6px;
     line-height: 1.6;
   }
-

@@ -9,6 +9,10 @@
 - Editable portable `readme.md`, `changes.md`, and `theme.json` sidecars beside the executable, with embedded and legacy-workspace fallbacks.
 - A persistent Working Tasks layout toggle for bottom-pane or resizable three-pane views, with a 20% minimum width per pane.
 - Explicit calendar controls and clear buttons for Start, Completed, and Due task dates.
+- Recoverable trash, atomic/versioned writes, crash drafts, verified streaming backups, version retention, safety tools, and read-only Git status.
+- A typed `Ctrl+K` command palette with command/note/tag/help modes, ranking, arguments, unified shortcuts, and accessibility semantics.
+- CodeMirror 6 Markdown editing with highlighting, folding, search/replace, multiple selections, completion, persistent line numbers, and per-document position restoration.
+- Migrated native knowledge index with structured task/tag/link metadata, parameterized query filters, backlinks, saved searches, incremental watcher updates, and migration/performance tests.
 
 ### Changed
 
@@ -23,6 +27,7 @@
 - Copy names exposing task metadata after timestamp suffixes; duplicates and other filename collisions now use clean incrementing parenthesized numbers.
 - Move dialog sizing now increases only its available width, preserving standard application font and control sizes.
 - Journal and Daily Note filename fields are read-only, with save-time enforcement preventing renames.
+- Markdown line numbers now default to visible, and reselecting the active workspace returns to its current folder/subfolder listing without asynchronously reopening the prior note.
 
 ### Known limitations
 

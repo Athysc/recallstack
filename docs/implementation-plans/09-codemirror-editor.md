@@ -1,8 +1,18 @@
 # Improvement 9 Implementation Plan: CodeMirror 6 Markdown Editor
 
-**Status:** Planned  
+**Status:** Implemented and verified (2026-08-06)
 **Recommended execution point:** After modularization, native file versioning, and conflict handling  
 **Primary outcome:** Replace the textarea editor with CodeMirror 6 while retaining Markdown-native files, current preview behavior, task metadata controls, and keyboard expectations.
+
+## Implemented Scope
+
+- The textarea editing surface is replaced by an application-owned CodeMirror 6 adapter; legacy feature code uses the adapter contract rather than CodeMirror internals.
+- Markdown syntax highlighting, folding, bracket matching, local search/replace, history, multiple/rectangular selection, active-line highlighting, and theme-token styling are enabled.
+- Persistent word-wrap and line-number controls, two-space/list keyboard behavior, command-registry save and insertion actions, and task metadata controls remain intact.
+- Existing image paste/drop, asset persistence, preview rendering, crash drafts, version-token conflict UI, and expected-version saves continue through their native safety-aware paths.
+- `[[` note and `#` tag completion are driven by the workspace index; document cursor, selection, and scroll state persist for the most recent 100 documents.
+- Documents above 1 MiB disable costly Markdown language extensions, and large-note preview work receives a longer debounce without affecting immediate dirty/draft tracking.
+- Unit coverage verifies selection restoration bounds and the large-file degradation threshold; the full frontend parity/type/production-build suite passes.
 
 ## Current Baseline
 

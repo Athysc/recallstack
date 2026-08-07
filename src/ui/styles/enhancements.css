@@ -24,6 +24,31 @@ html.app-booting body { visibility: hidden; }
   border-color: transparent;
 }
 
+#modal-safety-tools {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.58);
+}
+.safety-tools-dialog { width: min(900px, 92vw); height: min(650px, 86vh); }
+.safety-tools-body { display: flex; min-height: 0; flex: 1; }
+.safety-tools-actions {
+  display: flex;
+  width: 220px;
+  flex: 0 0 220px;
+  flex-direction: column;
+  gap: 7px;
+  padding: 14px;
+  border-right: 1px solid var(--surface0);
+}
+.safety-tools-actions .btn { justify-content: flex-start; text-align: left; }
+.safety-tools-output { flex: 1; overflow: auto; padding: 18px; white-space: pre-wrap; color: var(--subtext0); font: 12px/1.6 monospace; }
+.safety-record { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--surface0); }
+.safety-record-path { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+
 .task-meta-icon {
   width: 20px;
   height: 20px;
@@ -137,3 +162,68 @@ html.app-booting body { visibility: hidden; }
   cursor: col-resize;
 }
 .split-pane.three-pane .task-editor-top { min-height: 0; height: 100%; flex: 1; }
+.command-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: min(14vh, 120px);
+  background: color-mix(in srgb, var(--crust) 62%, transparent);
+}
+.command-palette.hidden { display: none; }
+.command-palette-dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(620px, 72vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--surface2);
+  border-radius: 12px;
+  background: var(--mantle);
+  box-shadow: 0 24px 80px color-mix(in srgb, var(--crust) 75%, transparent);
+}
+.command-palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-bottom: 1px solid var(--surface1);
+  border-radius: 0;
+  padding: 16px 18px;
+  background: var(--base);
+  color: var(--text);
+  font: 500 16px/1.4 inherit;
+  outline: none;
+}
+.command-palette-results { overflow: auto; padding: 6px; }
+.command-palette-item {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 11px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.command-palette-item[aria-selected="true"] { background: var(--surface0); }
+.command-palette-item:disabled { opacity: .55; }
+.command-palette-item span { display: grid; gap: 2px; }
+.command-palette-item small { color: var(--subtext0); }
+.command-palette-item kbd { color: var(--subtext1); font-size: 11px; }
+.command-palette-footer { padding: 8px 14px; border-top: 1px solid var(--surface1); color: var(--subtext0); font-size: 11px; }
+.search-result-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.search-result-meta span { padding: 2px 6px; border-radius: 999px; background: var(--surface0); color: var(--subtext0); font-size: 10px; text-transform: capitalize; }
+.saved-search-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; }
+.saved-search-chip { display: inline-flex; overflow: hidden; border: 1px solid var(--surface1); border-radius: 999px; background: var(--mantle); }
+.saved-search-chip button { border: 0; padding: 4px 8px; background: transparent; color: var(--subtext1); cursor: pointer; }
+.saved-search-chip button:hover { color: var(--text); background: var(--surface0); }
+.saved-search-built-in { border: 1px solid color-mix(in srgb, var(--blue) 45%, var(--surface1)); border-radius: 999px; padding: 4px 9px; background: color-mix(in srgb, var(--blue) 9%, var(--mantle)); color: var(--blue); cursor: pointer; }
+.preview-backlinks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--surface1); }
+.preview-backlinks h3 { flex-basis: 100%; margin: 0 0 4px !important; }
+.preview-backlinks button { border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 8px; background: var(--mantle); color: var(--blue); cursor: pointer; }

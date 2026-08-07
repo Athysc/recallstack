@@ -1,8 +1,17 @@
 # Improvement 8 Implementation Plan: Command Palette
 
-**Status:** Planned  
+**Status:** Implemented and verified (2026-08-06)
 **Recommended execution point:** After frontend modularization provides stable feature commands  
 **Primary outcome:** Provide one keyboard-first interface for discovering and executing application actions without duplicating business logic.
+
+## Implemented Scope
+
+- Typed registry with stable IDs, visibility/availability rules, disabled explanations, centralized error reporting, and non-reentrant execution.
+- Accessible `Ctrl+K` palette with focus restoration, active-descendant listbox semantics, mouse selection, arrows, page navigation, Enter, Escape/back, and a focus trap.
+- Deterministic exact/prefix/word-boundary/substring/fuzzy ranking plus local-only recency scoring.
+- Explicit `@` note, `#` tag, `?` help, and `>` command modes; theme selection uses a second palette state with Escape-to-back behavior.
+- Shared command execution for primary toolbar actions and shortcuts, including create, save, move, archive, trash, working tasks, search, safety tools, and close.
+- Unit coverage for registration, duplicate IDs, disabled and non-reentrant behavior, centralized failures, ranking, and palette-mode parsing.
 
 ## Current Baseline
 

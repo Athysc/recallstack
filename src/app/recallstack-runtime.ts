@@ -1,7 +1,7 @@
 // @ts-nocheck
 // Transitional controller preserving the original RecallStack behavior while feature
 // modules are extracted behind typed services. See docs/frontend-architecture.md.
-import { PREFERENCE_KEYS } from "./preferences";
+import { PREFERENCE_KEYS, preferenceIsEnabled } from "./preferences";
 import {
   buildTaskFilename,
   nextDuplicateFilename,
@@ -14,6 +14,9 @@ import { clampDivider, resizePanePair } from "../features/tasks/pane-layout";
 import { calendarMonth, localIsoDate } from "../features/tasks/date-picker";
 import { isJournalPath, journalTitleFromPath } from "../features/tasks/paths";
 import { preserveExtraBlankLines } from "../services/markdown-spacing";
+import { CommandRegistry } from "../features/commands/registry";
+import { paletteMode, rankCommands } from "../features/commands/ranking";
+import { createMarkdownEditor } from "../features/editor/markdown-editor";
 
 (() => {
   'use strict';
@@ -86,6 +89,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
   let saveInProgress      = false;
   let savePromise         = null;
   let searchIndex         = [];     // [{ notesRelPath, name, content }]
+  let currentBacklinks    = [];
   const assetBlobUrls     = new Map(); // relative path (e.g. 'assets/foo.png') → blob URL
   let remoteMediaSessionAllowed = false;
   let workingPaneVisible = localStorage.getItem(PREFERENCE_KEYS.workingPaneVisible) !== 'off';
@@ -120,6 +124,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
   const searchInput   = $id('search-input');
   const btnSearch     = $id('btn-search');
   const btnSearchClear = $id('btn-search-clear');
+  const btnSafetyTools = $id('btn-safety-tools');
   const editorView    = $id('editor-view');
   const listHeading  = $id('list-heading');
   const fileGrid     = $id('file-grid');
@@ -143,7 +148,21 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
   const btnCancel         = $id('btn-cancel');
   const btnNewFromEditor  = $id('btn-new-from-editor');
   const btnViewJournal    = $id('btn-view-journal');
-  const mdEditor     = $id('md-editor');
+  const mdEditor     = createMarkdownEditor($id('md-editor'), {
+    lineNumbers: preferenceIsEnabled(localStorage.getItem(PREFERENCE_KEYS.lineNumbers), true),
+    wordWrap: localStorage.getItem(PREFERENCE_KEYS.wordWrap) === 'on',
+    getCompletions(prefix, query) {
+      if (prefix === '[[') {
+        return searchIndex
+          .filter(note => !query || note.name.toLowerCase().includes(query.toLowerCase()))
+          .slice(0, 50)
+          .map(note => ({ label: note.notesRelPath.replace(/\.md$/i, ''), type: 'text' }));
+      }
+      const tags = new Set();
+      searchIndex.forEach(note => (note.content.match(/(^|\s)#[\p{L}\p{N}_-]+/gu) || []).forEach(tag => tags.add(tag.trim().slice(1))));
+      return [...tags].filter(tag => !query || tag.toLowerCase().includes(query.toLowerCase())).slice(0, 50).map(label => ({ label, type: 'keyword' }));
+    },
+  });
   const previewOut   = $id('preview-output');
   const toastEl      = $id('toast');
   const depStatusList = $id('dep-status-list');
@@ -547,7 +566,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
 
   function openInboxDeleteModal(f, dirHandle, onDeleted) {
     _pendingInboxDelete = { f, dirHandle, onDeleted };
-    inboxDeleteMsg.textContent = `Delete "${f.name}"? This cannot be undone.`;
+    inboxDeleteMsg.textContent = `Move "${f.name}" to RecallStack Trash?`;
     inboxDeleteModal.classList.remove('hidden');
     inboxDeleteConfirmBtn.focus();
   }
@@ -1037,17 +1056,17 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
       // Delete
       const delBtn = document.createElement('button');
       delBtn.className = 'btn-icon danger';
-      delBtn.title     = 'Permanently delete this file';
+      delBtn.title     = 'Move this file to RecallStack Trash';
       delBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
       delBtn.addEventListener('click', async e => {
         e.stopPropagation();
-        if (!confirm(`Permanently delete "${entry.name}"?\n\nThis cannot be undone.`)) return;
+        if (!confirm(`Move "${entry.name}" to RecallStack Trash?`)) return;
         try {
           await assetsDir.removeEntry(entry.name);
           const key = 'assets/' + entry.name;
           if (assetBlobUrls.has(key)) { URL.revokeObjectURL(assetBlobUrls.get(key)); assetBlobUrls.delete(key); }
           card.remove();
-          toast(`Deleted: ${entry.name}`);
+          toast(`Moved to Trash: ${entry.name}`);
           if (!fileGrid.querySelector('.file-card')) {
             fileGrid.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">No orphan assets — every file in <code>assets/</code> is referenced.</div></div>`;
           }
@@ -1272,7 +1291,8 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     readmeLoaded    = false;
     changelogLoaded = false;
     await initNav();
-    if (!window.__recallstackNative?.active) await buildSearchIndex();
+    await buildSearchIndex();
+    if (window.__recallstackNative?.active) renderSavedSearches().catch(error => console.warn('Could not load saved searches', error));
     performance.mark('recallstack:workspace-ui-ready');
     if (performance.getEntriesByName('recallstack:workspace-native-ready').length) {
       performance.measure('recallstack:workspace-ui-open', 'recallstack:workspace-open-start', 'recallstack:workspace-ui-ready');
@@ -1294,9 +1314,32 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
       const chip = document.createElement('button');
       chip.className   = 'workspace-chip' + (ws.name === activeName ? ' active' : '');
       chip.textContent = ws.name;
-      chip.addEventListener('click', () => switchWorkspace(ws));
+      chip.addEventListener('click', async () => {
+        try {
+          if (ws.name === activeWorkspace) await showActiveWorkspaceFolderListing();
+          else await switchWorkspace(ws);
+        } catch (error) {
+          toast('Could not open workspace listing: ' + (error.message || error), 'error');
+        }
+      });
       container.appendChild(chip);
     });
+  }
+
+  // Clicking the already-active workspace is navigation, not a workspace reload.
+  // Preserve its selected folder/subfolder and show that folder's normal listing.
+  async function showActiveWorkspaceFolderListing() {
+    if (!await checkUnsavedNewNote()) return;
+    if (!await autoSaveIfDirty(true)) return;
+    if (l2Active) {
+      await selectL2(l2Active);
+    } else if (l1Active) {
+      await selectRootFolder();
+    } else {
+      const folders = await listWorkspaceTopDirs();
+      if (folders.length) await selectL1(folders[0]);
+      else showView('list');
+    }
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────────
@@ -1758,20 +1801,21 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
       returnToOutputs     = true;
 
       titleInput.value = f.name.replace(/\.md$/i, '');
-      mdEditor.value   = content;
       savedContent     = content;
+      let editorContent = content;
 
-      const draft = lsDraftGet(outputsPath);
+      const draft = await recoveryDraftGet(outputsPath);
       if (draft !== null && draft !== content) {
         if (confirm('Unsaved draft found — restore changes?')) {
-          mdEditor.value = draft;
+          editorContent = draft;
           savedContent   = content;
         } else {
           lsDraftClear(outputsPath);
         }
       }
 
-      mdEditor.selectionStart = mdEditor.selectionEnd = 0;
+      mdEditor.openDocument(outputsPath, editorContent, 0);
+      currentBacklinks = [];
       previewOut.innerHTML = '';
       previewOut.scrollTop = 0;
       clearTimeout(_previewTimer);
@@ -2733,29 +2777,27 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
       await syncNavToPath(notesRelPath);
       await loadAssetsForCurrentFile();
       titleInput.value = isCurrentTaskPath(notesRelPath) ? taskDisplayTitle(notesRelPath.split('/').at(-1)) : notesRelPath.split('/').at(-1).replace(/\.md$/, '');
-      mdEditor.value   = content;
       savedContent     = content;
-      const draft = lsDraftGet(notesRelPath);
+      let editorContent = content;
+      const draft = await recoveryDraftGet(notesRelPath);
       if (draft !== null && draft !== content) {
         if (confirm('Unsaved draft found — restore changes?')) {
-          mdEditor.value = draft;
+          editorContent = draft;
           savedContent = content; // keep restored draft dirty until explicitly saved
         } else {
           lsDraftClear(notesRelPath);
         }
       }
-      if (cursorAtEnd) {
-        const lastNewline = content.lastIndexOf('\n', content.length - 2);
-        mdEditor.selectionStart = mdEditor.selectionEnd = lastNewline < 0 ? 0 : lastNewline + 1;
-      } else {
-        mdEditor.selectionStart = mdEditor.selectionEnd = 0;
-      }
+      const lastNewline = editorContent.lastIndexOf('\n', editorContent.length - 2);
+      mdEditor.openDocument(notesRelPath, editorContent, cursorAtEnd ? (lastNewline < 0 ? 0 : lastNewline + 1) : 0);
+      currentBacklinks = [];
       // Immediately clear and render (don't debounce on file switch)
       previewOut.innerHTML = '';
       previewOut.scrollTop = 0;
       clearTimeout(_previewTimer);
       previewOut.innerHTML = renderMarkdown(mdEditor.value);
       postProcessPreview();
+      refreshBacklinks().then(appendBacklinks);
       // Show restore button when viewing a file inside an archived/ subfolder
       const inArchived = notesRelPath.split('/').at(-2) === 'archived';
       const archiveDisabledForRoot = !inArchived && isRootLevelNotePath(notesRelPath);
@@ -2907,6 +2949,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
         savedContent     = content;
         removeExternalChangeBanner();
         lsDraftClear(notesRelPath);
+        if (origPath && origPath !== notesRelPath) lsDraftClear(origPath);
         titleInput.value = taskFile ? taskDisplayTitle(notesRelPath.split('/').at(-1)) : notesRelPath.split('/').at(-1).replace(/\.md$/i, '');
         const inArchived = notesRelPath.split('/').at(-2) === 'archived';
         const archiveDisabledForRoot = !inArchived && isRootLevelNotePath(notesRelPath);
@@ -2940,7 +2983,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     if (isWorkingTask()) return;
     if (!currentPath) return;
     const name = currentPath.split('/').at(-1);
-    if (!confirm(`Delete "${name}"?\n\nThis cannot be undone.`)) return;
+    if (!confirm(`Move "${name}" to RecallStack Trash?`)) return;
 
     if (isOutputsFile && currentOutputsDirFh) {
       try {
@@ -2949,7 +2992,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
         currentOutputsFh    = null;
         currentOutputsDirFh = null;
         returnToOutputs     = true;
-        toast('Deleted');
+        toast('Moved to Trash');
         cancelEdit();
       } catch (e) {
         toast('Delete failed: ' + e.message, 'error');
@@ -2963,7 +3006,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
       removeFromSearchIndex(currentPath);
       await saveSqliteDb();
       refreshCalendarIfVisible();
-      toast('Deleted');
+      toast('Moved to Trash');
       cancelEdit();
     } catch (e) {
       toast('Delete failed: ' + e.message, 'error');
@@ -3327,7 +3370,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     isNew        = false;
 
     titleInput.value = taskDisplayTitle(finalFilename);
-    mdEditor.value   = newContent;
+    mdEditor.openDocument(finalRelPath, newContent, 0);
     previewOut.innerHTML = '';
     previewOut.scrollTop = 0;
     clearTimeout(_previewTimer);
@@ -4120,16 +4163,43 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     const ws = activeWorkspace || '__no_workspace__';
     return 'pkm-draft:' + ws + ':' + (path || '__new__');
   }
+  function nativeDraftPath(path) {
+    if (!path) return null;
+    return /^(?:openbrain|openbrain-shared)\/outputs\//.test(path)
+      ? path
+      : normalizeAppPath((DB_WS_PREFIX || '') + path);
+  }
+  let _nativeDraftTimer = null;
   function lsDraftSave() {
     const key = draftKey(currentPath);
     try { localStorage.setItem(key, mdEditor.value); } catch (_) {}
+    const path = nativeDraftPath(currentPath);
+    if (path && window.__recallstackNative?.saveDraft) {
+      clearTimeout(_nativeDraftTimer);
+      const text = mdEditor.value;
+      _nativeDraftTimer = setTimeout(() => {
+        window.__recallstackNative.saveDraft(path, text).catch(error => console.warn('Could not persist recovery draft', error));
+      }, 300);
+    }
   }
   function lsDraftClear(path) {
     try { localStorage.removeItem(draftKey(path)); } catch (_) {}
     try { localStorage.removeItem(draftKey(null)); } catch (_) {}
+    const nativePath = nativeDraftPath(path);
+    if (nativePath && window.__recallstackNative?.clearDraft) {
+      window.__recallstackNative.clearDraft(nativePath).catch(error => console.warn('Could not clear recovery draft', error));
+    }
   }
   function lsDraftGet(path) {
     try { return localStorage.getItem(draftKey(path)); } catch (_) { return null; }
+  }
+  async function recoveryDraftGet(path) {
+    const local = lsDraftGet(path);
+    if (local !== null) return local;
+    const nativePath = nativeDraftPath(path);
+    if (!nativePath || !window.__recallstackNative?.loadDraft) return null;
+    try { return await window.__recallstackNative.loadDraft(nativePath); }
+    catch (error) { console.warn('Could not load recovery draft', error); return null; }
   }
 
   function renderPreview() {
@@ -4138,7 +4208,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
       previewOut.innerHTML = renderMarkdown(mdEditor.value);
       postProcessPreview();
       if (isTasksEditor()) syncDateInputsFromEditor();
-    }, 120);
+    }, mdEditor.value.length > 500_000 ? 300 : 120);
   }
 
   // Safe marked.parse wrapper — falls back to plain <pre> if the renderer throws
@@ -4224,6 +4294,28 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
       el.parentNode.insertBefore(details, el);
       el.remove();
     });
+  }
+
+  async function refreshBacklinks() {
+    currentBacklinks = [];
+    if (!window.__recallstackNative?.active || !currentPath || isOutputsFile) return;
+    const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
+    try { currentBacklinks = await window.__recallstackNative.backlinks((prefix + currentPath).replace(/\/{2,}/g, '/')); }
+    catch (error) { console.warn('Could not load backlinks', error); }
+  }
+
+  function appendBacklinks() {
+    if (!currentBacklinks.length || previewOut.querySelector('.preview-backlinks')) return;
+    const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
+    const prefixPattern = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?');
+    const section = document.createElement('section'); section.className = 'preview-backlinks';
+    const heading = document.createElement('h3'); heading.textContent = `Backlinks (${currentBacklinks.length})`; section.appendChild(heading);
+    currentBacklinks.forEach(link => {
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = link.sourceTitle; button.title = link.sourcePath;
+      button.addEventListener('click', () => { const relative = link.sourcePath.replace(prefixPattern, ''); openFile(relative.split('/').at(-1), relative); });
+      section.appendChild(button);
+    });
+    previewOut.appendChild(section);
   }
 
   function postProcessPreview() {
@@ -4429,6 +4521,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
         a.rel    = 'noopener';
       }
     });
+    appendBacklinks();
   }
 
   // Toggle the idx-th checkbox in the editor source and re-render
@@ -4567,6 +4660,20 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
 
   async function buildSearchIndex() {
     searchIndex = [];
+    if (window.__recallstackNative?.active) {
+      const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
+      const notes = await window.__recallstackNative.indexedNotes(prefix);
+      const prefixPattern = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?');
+      searchIndex = notes.map(note => ({
+        notesRelPath: note.path.replace(prefixPattern, ''),
+        name: note.name,
+        content: '',
+        tags: note.tags || [],
+        title: note.title,
+        kind: note.kind,
+      }));
+      return;
+    }
     const topDirs = currentWorkspace?.topLevelDirs;
     if (topDirs) {
       for (const dir of topDirs) {
@@ -4608,11 +4715,14 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
   async function runSearch(query) {
     if (window.__recallstackNative?.active) {
       const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
-      const results = await window.__recallstackNative.search(query, prefix);
-      return results.map(result => ({
-        notesRelPath: result.path,
+      const page = await window.__recallstackNative.knowledgeSearch(query, prefix, 80, 0);
+      return page.results.map(result => ({
+        notesRelPath: result.path.replace(new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?'), ''),
         name: result.name,
+        displayTitle: result.kind === 'task' || result.kind === 'working' ? taskDisplayTitle(result.name) : (result.title || result.name.replace(/\.md$/i, '')),
         snippet: result.snippet || '',
+        tags: result.tags || [], kind: result.kind, folder: result.folder,
+        status: result.status, priority: result.priority, dueDate: result.dueDate, modifiedAt: result.modifiedAt,
         matchInName: result.name.toLowerCase().includes(query.toLowerCase()),
       }));
     }
@@ -4638,6 +4748,38 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     return results.sort((a, b) => (b.matchInName ? 1 : 0) - (a.matchInName ? 1 : 0));
   }
 
+  const savedSearchBar = document.createElement('div');
+  savedSearchBar.className = 'saved-search-bar';
+  searchView.querySelector('.list-header')?.after(savedSearchBar);
+  async function renderSavedSearches() {
+    if (!window.__recallstackNative?.active) { savedSearchBar.replaceChildren(); return; }
+    const searches = await window.__recallstackNative.listSavedSearches();
+    savedSearchBar.replaceChildren();
+    const save = document.createElement('button');
+    save.className = 'btn btn-ghost'; save.textContent = 'Save Search'; save.disabled = !searchInput.value.trim();
+    save.addEventListener('click', async () => {
+      const query = searchInput.value.trim(); if (!query) return;
+      const name = prompt('Name this saved search:', query); if (!name?.trim()) return;
+      await window.__recallstackNative.saveSearch(name.trim(), query);
+      await renderSavedSearches(); toast('Search saved');
+    });
+    savedSearchBar.appendChild(save);
+    const recentDate = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    for (const [name, query] of [['Recent Notes', `modified:>=${recentDate}`], ['Overdue Tasks', 'is:task due:overdue'], ['Working Tasks', 'is:working']]) {
+      const builtIn = document.createElement('button'); builtIn.className = 'saved-search-built-in'; builtIn.textContent = name;
+      builtIn.addEventListener('click', async () => { searchInput.value = query; renderSearchResults(await runSearch(query), query); enterSearchView(); });
+      savedSearchBar.appendChild(builtIn);
+    }
+    for (const saved of searches) {
+      const chip = document.createElement('span'); chip.className = 'saved-search-chip';
+      const run = document.createElement('button'); run.type = 'button'; run.textContent = saved.name; run.title = saved.query;
+      run.addEventListener('click', async () => { searchInput.value = saved.query; renderSearchResults(await runSearch(saved.query), saved.query); enterSearchView(); });
+      const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.title = `Delete saved search ${saved.name}`;
+      remove.addEventListener('click', async () => { await window.__recallstackNative.deleteSavedSearch(saved.id); await renderSavedSearches(); });
+      chip.append(run, remove); savedSearchBar.appendChild(chip);
+    }
+  }
+
   function highlightMatch(text, query) {
     const i = text.toLowerCase().indexOf(query.toLowerCase());
     if (i === -1) return esc(text);
@@ -4660,12 +4802,13 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
       const card        = document.createElement('div');
       card.className    = 'search-result-card';
       const folder      = r.notesRelPath.split('/').slice(0, -1).join('/');
-      const nameDisplay = r.name.replace(/\.md$/, '');
+      const nameDisplay = r.displayTitle || r.name.replace(/\.md$/, '');
       const titleHtml   = r.matchInName ? highlightMatch(nameDisplay, query) : esc(nameDisplay);
       const snippetHtml = r.snippet ? highlightMatch(r.snippet, query) : '';
       card.innerHTML = `
         <div class="search-result-title">📄 ${titleHtml}</div>
         <div class="search-result-path">${esc(folder)}/</div>
+        <div class="search-result-meta">${[r.kind, r.priority, r.status, r.dueDate, ...(r.tags || []).map(tag => '#' + tag)].filter(Boolean).map(value => `<span>${esc(value)}</span>`).join('')}</div>
         ${snippetHtml ? `<div class="search-result-snippet">${snippetHtml}</div>` : ''}`;
       card.addEventListener('click', () => openFile(r.name, r.notesRelPath));
       searchGrid.appendChild(card);
@@ -4694,6 +4837,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
   let _searchTimer = null;
   function onSearchInput() {
     clearTimeout(_searchTimer);
+    const saveButton = savedSearchBar.querySelector('.btn'); if (saveButton) saveButton.disabled = !searchInput.value.trim();
     _searchTimer = setTimeout(async () => {
       const query = searchInput.value.trim();
       if (query.length < 3) {
@@ -5014,12 +5158,19 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
         }
       }, 100);
     }
+    if (changes.some(change => change.entity === 'markdown') && currentPath) {
+      setTimeout(() => refreshBacklinks().then(() => { previewOut.querySelector('.preview-backlinks')?.remove(); appendBacklinks(); }), 250);
+    }
   });
   window.addEventListener('recallstack-index-status', event => {
     if (event.detail?.state === 'ready' && searchInput.value.trim().length >= 3) {
       onSearchInput();
     } else if (event.detail?.state === 'error') {
       toast('Search index failed: ' + (event.detail.message || 'unknown error'), 'error');
+    }
+    if (event.detail?.state === 'ready') {
+      buildSearchIndex().catch(error => console.warn('Could not refresh note catalog', error));
+      refreshBacklinks().then(appendBacklinks);
     }
   });
 
@@ -5030,6 +5181,144 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     reloadActiveList().catch(e => toast(e.message, 'error'));
   }
 
+  // ── Shared command registry and keyboard-first palette ──────────────────────
+  const commandRegistry = new CommandRegistry();
+  const commandUsageKey = 'recallstack-command-usage-v1';
+  let commandUsage = {};
+  try { commandUsage = JSON.parse(localStorage.getItem(commandUsageKey) || '{}'); } catch { commandUsage = {}; }
+  const commandState = () => ({
+    workspaceOpen: Boolean(rootHandle),
+    editorOpen: !editorView.classList.contains('hidden'),
+    nativeDesktop: Boolean(window.__recallstackNative?.active),
+  });
+  const commandContext = () => ({
+    state: commandState(),
+    reportError(error, command) { toast(`${command.title} failed: ${error?.message || error}`, 'error'); },
+  });
+  const needsWorkspace = state => state.workspaceOpen;
+  const needsEditor = state => state.editorOpen;
+  const desktopOnly = state => state.nativeDesktop && state.workspaceOpen;
+  const registerCommand = command => commandRegistry.register(command);
+  [
+    { id:'workspace.open', title:'Open or Switch Workspace', category:'Workspace', keywords:['folder'], shortcut:'Ctrl+O', run:() => $id('btn-open-workspace').click() },
+    { id:'workspace.recent', title:'Open Recent Workspace', category:'Workspace', keywords:['switch pinned'], isVisible:state=>state.nativeDesktop, run:() => {} },
+    { id:'file.new', title:'Create Note', category:'File', keywords:['new'], shortcut:'Ctrl+N', isEnabled:needsWorkspace, disabledReason:()=>'Open a workspace first', run:newNote },
+    { id:'file.save', title:'Save Note', category:'File', shortcut:'Ctrl+S', isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:() => saveNote() },
+    { id:'file.move', title:'Move or Rename Note', category:'File', isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:openMoveFileModal },
+    { id:'file.archive', title:'Archive or Restore Note', category:'File', isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:() => btnArchive.classList.contains('restore') ? restoreNote() : archiveNote() },
+    { id:'file.trash', title:'Move Note to Trash', category:'File', keywords:['delete'], isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:deleteNote },
+    { id:'navigation.search', title:'Search Notes', category:'Navigation', keywords:['find'], shortcut:'Ctrl+Shift+F', isEnabled:needsWorkspace, run:() => searchInput.focus() },
+    { id:'navigation.today', title:'Jump to Today', category:'Navigation', keywords:['journal daily'], isEnabled:needsWorkspace, run:openTodayJournal },
+    { id:'tasks.new-working', title:'Create Working Task', category:'Tasks', isEnabled:needsWorkspace, run:createWorkingTask },
+    { id:'view.presentation', title:'Toggle Presentation Mode', category:'View', isEnabled:needsEditor, run:() => $id('btn-presentation').click() },
+    { id:'view.working-pane', title:'Show or Hide Working Tasks', category:'View', isEnabled:needsWorkspace, run:toggleWorkingTask },
+    { id:'view.working-layout', title:'Switch Working Tasks Pane Layout', category:'View', isEnabled:needsWorkspace, run:() => btnWorkingLayout.click() },
+    { id:'view.line-numbers', title:'Toggle Editor Line Numbers', category:'View', isEnabled:needsEditor, run:() => $id('btn-line-numbers').click() },
+    { id:'editor.insert-link', title:'Insert Markdown Link', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('[link text](url)') },
+    { id:'editor.insert-code', title:'Insert Code Block', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('```\n\n```') },
+    { id:'editor.insert-mermaid', title:'Insert Mermaid Block', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('```mermaid\ngraph TD\n  A --> B\n```') },
+    { id:'view.theme', title:'Change Theme', category:'View', keywords:['appearance color'], run:(_context, argument) => { if (argument && THEMES[argument]) { themeSelect.value = argument; applyTheme(argument); } } },
+    { id:'tools.validate', title:'Validate Workspace', category:'Tools', isVisible:state=>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('validate'); } },
+    { id:'tools.rebuild-index', title:'Rebuild Search Index', category:'Tools', isVisible:state=>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('rebuild'); } },
+    { id:'tools.backup', title:'Backup Workspace', category:'Tools', isVisible:state=>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('backup'); } },
+    { id:'tools.git-status', title:'Show Git Status', category:'Tools', isVisible:state=>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('git'); } },
+    { id:'workspace.reveal-file', title:'Reveal Current File', category:'Workspace', isVisible:state=>state.nativeDesktop, isEnabled:needsEditor, run:() => window.__recallstackNative.revealPath((DB_WS_PREFIX.slice(5) + currentPath).replace(/\/{2,}/g, '/')) },
+    { id:'workspace.reveal-folder', title:'Reveal Workspace Folder', category:'Workspace', isVisible:state=>state.nativeDesktop, isEnabled:needsWorkspace, run:() => window.__recallstackNative.revealWorkspace() },
+    { id:'workspace.close-app', title:'Close RecallStack', category:'Workspace', isVisible:state=>state.nativeDesktop, run:() => window.__recallstackNative.closeApp() },
+  ].forEach(registerCommand);
+
+  const palette = document.createElement('div');
+  palette.id = 'command-palette';
+  palette.className = 'command-palette hidden';
+  palette.innerHTML = `<div class="command-palette-dialog" role="dialog" aria-modal="true" aria-label="Command palette"><label class="sr-only" for="command-palette-input">Search commands</label><input id="command-palette-input" class="command-palette-input" role="combobox" aria-autocomplete="list" aria-controls="command-palette-results" aria-expanded="true" autocomplete="off" spellcheck="false" placeholder="Type a command…  @ notes  # tags  ? help"><div id="command-palette-results" class="command-palette-results" role="listbox"></div><div class="command-palette-footer">↑↓ Navigate · Enter Run · Esc Back/Close · Ctrl+K Commands</div></div>`;
+  document.body.appendChild(palette);
+  const paletteInput = $id('command-palette-input');
+  const paletteResults = $id('command-palette-results');
+  let paletteItems = [];
+  let paletteIndex = 0;
+  let palettePreviousFocus = null;
+  let paletteArgumentCommand = null;
+
+  function paletteEntries() {
+    if (paletteArgumentCommand?.id === 'view.theme') {
+      return Object.keys(THEMES).map(id => ({ id:`theme:${id}`, title:themeDetails[id]?.name || id, meta:'Theme', run:() => executeCommand('view.theme', id) }));
+    }
+    if (paletteArgumentCommand?.id === 'workspace.recent') {
+      return (paletteArgumentCommand.arguments || []).map(workspace => ({ id:`workspace:${workspace.id}`, title:workspace.name, meta:workspace.path, run:async()=>{ const handle=await window.__recallstackNative.openWorkspacePath(workspace.path); await openWorkspace(handle); } }));
+    }
+    const parsed = paletteMode(paletteInput.value);
+    if (parsed.mode === 'notes') return searchIndex
+      .filter(note => !parsed.query || `${note.name} ${note.notesRelPath}`.toLowerCase().includes(parsed.query.toLowerCase()))
+      .slice(0, 100).map(note => ({ id:`note:${note.notesRelPath}`, title:taskDisplayTitle(note.name), meta:note.notesRelPath, run:() => openFile(note.name, note.notesRelPath) }));
+    if (parsed.mode === 'tags') {
+      const tags = new Set();
+      searchIndex.forEach(note => (note.content.match(/(^|\s)#[\p{L}\p{N}_-]+/gu) || []).forEach(tag => tags.add(tag.trim())));
+      return [...tags].filter(tag => !parsed.query || tag.toLowerCase().includes(parsed.query.toLowerCase())).sort().map(tag => ({ id:`tag:${tag}`, title:tag, meta:'Search tag', run:() => { searchInput.value=tag; renderSearchResults(runSearch(tag), tag); enterSearchView(); } }));
+    }
+    if (parsed.mode === 'help') return [
+      { id:'help:commands', title:'> commands', meta:'Search every application command' },
+      { id:'help:notes', title:'@ notes', meta:'Open an indexed note' },
+      { id:'help:tags', title:'# tags', meta:'Search notes by tag' },
+      { id:'help:keys', title:'Ctrl+K · arrows · Enter · Escape', meta:'Keyboard controls' },
+    ];
+    return rankCommands(commandRegistry.list(commandState()), parsed.query, commandUsage).map(({command}) => ({
+      id:command.id, title:command.title, meta:command.category, shortcut:command.shortcut,
+      disabled:!commandRegistry.enabled(command, commandState()),
+      reason:commandRegistry.disabledReason(command, commandState()),
+      run:() => command.id === 'view.theme' ? openPaletteArgument(command) : command.id === 'workspace.recent' ? openRecentWorkspaceArgument(command) : executeCommand(command.id),
+    }));
+  }
+
+  function renderPalette() {
+    paletteItems = paletteEntries();
+    paletteIndex = Math.max(0, Math.min(paletteIndex, paletteItems.length - 1));
+    paletteResults.replaceChildren();
+    paletteItems.forEach((item, index) => {
+      const row = document.createElement('button');
+      row.type = 'button'; row.className = 'command-palette-item'; row.id = `command-option-${index}`;
+      row.setAttribute('role', 'option'); row.setAttribute('aria-selected', String(index === paletteIndex));
+      row.disabled = Boolean(item.disabled);
+      row.innerHTML = `<span><strong>${esc(item.title)}</strong><small>${esc(item.reason || item.meta || '')}</small></span>${item.shortcut ? `<kbd>${esc(item.shortcut)}</kbd>` : ''}`;
+      row.addEventListener('mouseenter', () => { paletteIndex = index; renderPaletteSelection(); });
+      row.addEventListener('click', () => runPaletteItem(index));
+      paletteResults.appendChild(row);
+    });
+    paletteInput.setAttribute('aria-activedescendant', paletteItems.length ? `command-option-${paletteIndex}` : '');
+  }
+  function renderPaletteSelection() {
+    paletteResults.querySelectorAll('[role="option"]').forEach((row, index) => row.setAttribute('aria-selected', String(index === paletteIndex)));
+    paletteInput.setAttribute('aria-activedescendant', paletteItems.length ? `command-option-${paletteIndex}` : '');
+    paletteResults.children[paletteIndex]?.scrollIntoView({block:'nearest'});
+  }
+  function openPaletteArgument(command) { paletteArgumentCommand = command; paletteInput.value=''; paletteInput.placeholder=`${command.title}…`; renderPalette(); }
+  async function openRecentWorkspaceArgument(command) { command.arguments = await window.__recallstackNative.recentWorkspaces(); openPaletteArgument(command); }
+  function openCommandPalette(initial='') {
+    palettePreviousFocus = document.activeElement; paletteArgumentCommand = null; paletteInput.value=initial;
+    palette.classList.remove('hidden'); paletteIndex=0; renderPalette(); requestAnimationFrame(() => paletteInput.focus());
+  }
+  function closeCommandPalette() {
+    palette.classList.add('hidden'); paletteArgumentCommand=null; paletteInput.placeholder='Type a command…  @ notes  # tags  ? help';
+    if (palettePreviousFocus?.focus) palettePreviousFocus.focus();
+  }
+  async function executeCommand(id, argument) {
+    const succeeded = await commandRegistry.execute(id, commandContext(), argument);
+    if (succeeded) { commandUsage[id]=(commandUsage[id] || 0)+1; localStorage.setItem(commandUsageKey, JSON.stringify(commandUsage)); }
+    return succeeded;
+  }
+  async function runPaletteItem(index=paletteIndex) {
+    const item = paletteItems[index]; if (!item || item.disabled || !item.run) return;
+    const keepOpen = item.id === 'view.theme' || item.id === 'workspace.recent'; await item.run(); if (!keepOpen) closeCommandPalette();
+  }
+  paletteInput.addEventListener('input', () => { paletteIndex=0; renderPalette(); });
+  paletteInput.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); paletteIndex = (paletteIndex + (event.key==='ArrowDown'?1:-1) + paletteItems.length) % Math.max(1,paletteItems.length); renderPaletteSelection(); }
+    else if (event.key === 'PageDown' || event.key === 'PageUp') { event.preventDefault(); paletteIndex=Math.max(0,Math.min(paletteItems.length-1,paletteIndex+(event.key==='PageDown'?8:-8))); renderPaletteSelection(); }
+    else if (event.key === 'Enter') { event.preventDefault(); runPaletteItem(); }
+    else if (event.key === 'Escape') { event.preventDefault(); if (paletteArgumentCommand) { paletteArgumentCommand=null; paletteInput.value=''; renderPalette(); } else closeCommandPalette(); }
+    else if (event.key === 'Tab') { event.preventDefault(); }
+  });
+  palette.addEventListener('click', event => { if (event.target === palette) closeCommandPalette(); });
+
   btnSortMtime.addEventListener('click', () => setSortMode('mtime'));
   btnSortAlpha.addEventListener('click', () => setSortMode('alpha'));
   if (btnAllTasksMode) btnAllTasksMode.addEventListener('click', toggleAllTasksGroupingMode);
@@ -5037,8 +5326,8 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
   // Set default active state to match initial sortMode
   btnSortMtime.classList.add('active');
 
-  btnNew.addEventListener('click', newNote);
-  btnSave.addEventListener('click', saveNote);
+  btnNew.addEventListener('click', () => executeCommand('file.new'));
+  btnSave.addEventListener('click', () => executeCommand('file.save'));
   btnStampDate.addEventListener('click', async () => {
     if (isWorkingTask()) return;
     const dateStr = new Date().toISOString().slice(0, 10);
@@ -5180,11 +5469,9 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     });
   });
   btnConvertToTask.addEventListener('click', convertNoteToTask);
-  btnMove.addEventListener('click', openMoveFileModal);
-  btnArchive.addEventListener('click', () => {
-    btnArchive.classList.contains('restore') ? restoreNote() : archiveNote();
-  });
-  btnDelete.addEventListener('click', deleteNote);
+  btnMove.addEventListener('click', () => executeCommand('file.move'));
+  btnArchive.addEventListener('click', () => executeCommand('file.archive'));
+  btnDelete.addEventListener('click', () => executeCommand('file.trash'));
   btnCancel.addEventListener('click', cancelEdit);
   btnNewFromEditor.addEventListener('click', async () => {
     if (!l1Active) { toast('Select a folder first', 'error'); return; }
@@ -5574,7 +5861,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     updateWorkingPaneVisibility();
     loadWorkingTasks();
   }));
-  btnNewWorkingTask.addEventListener('click', () => createWorkingTask().catch(e => toast('Could not create working task: ' + e.message, 'error')));
+  btnNewWorkingTask.addEventListener('click', () => executeCommand('tasks.new-working'));
   btnViewJournal.addEventListener('click', () => openTodayJournal().catch(e => toast('Could not open journal: ' + e.message, 'error')));
   let taskResizeStart = null;
   taskEditorResizer.addEventListener('pointerdown', e => {
@@ -5656,7 +5943,7 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     closeInboxDeleteModal();
     try {
       await dirHandle.removeEntry(f.name);
-      toast(`Deleted "${f.name}"`);
+      toast(`Moved to Trash: "${f.name}"`);
       onDeleted();
     } catch (e) {
       toast('Delete failed: ' + e.message, 'error');
@@ -5714,14 +6001,33 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
   });
 
   document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (palette.classList.contains('hidden')) openCommandPalette('>'); else closeCommandPalette();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+      e.preventDefault(); openCommandPalette('@'); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+      e.preventDefault(); executeCommand('navigation.search'); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+      e.preventDefault(); executeCommand('file.new'); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+      e.preventDefault(); executeCommand('workspace.open'); return;
+    }
     const editing   = !editorView.classList.contains('hidden');
     const searching = !searchView.classList.contains('hidden');
     if ((e.ctrlKey || e.metaKey) && e.key === 's' && editing) {
-      e.preventDefault(); saveNote();
+      e.preventDefault(); executeCommand('file.save');
     }
     const anyModalOpen = !modalMdRef.classList.contains('hidden') ||
                          !modalReadme.classList.contains('hidden') ||
-                         !modalChangelog.classList.contains('hidden');
+                         !modalChangelog.classList.contains('hidden') ||
+                         !modalSafetyTools.classList.contains('hidden') ||
+                         !palette.classList.contains('hidden');
     if (e.key === 'Escape' && editing && !anyModalOpen) cancelEdit();
     if (e.key === 'Escape' && searching && document.activeElement !== searchInput) {
       clearTimeout(_searchTimer);
@@ -6030,6 +6336,21 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
     wordWrapOn = !wordWrapOn;
     localStorage.setItem(WRAP_KEY, wordWrapOn ? 'on' : 'off');
     applyWordWrap();
+  });
+
+  const LINE_NUMBERS_KEY = PREFERENCE_KEYS.lineNumbers;
+  const btnLineNumbers = $id('btn-line-numbers');
+  let lineNumbersOn = preferenceIsEnabled(localStorage.getItem(LINE_NUMBERS_KEY), true);
+  function applyLineNumbers() {
+    mdEditor.setLineNumbers(lineNumbersOn);
+    btnLineNumbers.classList.toggle('wrap-active', lineNumbersOn);
+    btnLineNumbers.title = `Line Numbers: ${lineNumbersOn ? 'On' : 'Off'}`;
+  }
+  applyLineNumbers();
+  btnLineNumbers.addEventListener('click', () => {
+    lineNumbersOn = !lineNumbersOn;
+    localStorage.setItem(LINE_NUMBERS_KEY, lineNumbersOn ? 'on' : 'off');
+    applyLineNumbers();
   });
 
   // ── Cursor load-position toggle ───────────────────────────────────────────────
@@ -6427,6 +6748,137 @@ import { preserveExtraBlankLines } from "../services/markdown-spacing";
   btnChangelog.addEventListener('click', openChangelog);
   btnChangelogClose.addEventListener('click', closeChangelog);
   modalChangelog.addEventListener('click', e => { if (e.target === modalChangelog) closeChangelog(); });
+
+  // ── Safety and workspace tools ───────────────────────────────────────────────
+  const modalSafetyTools = $id('modal-safety-tools');
+  const btnSafetyToolsClose = $id('btn-safety-tools-close');
+  const safetyToolsOutput = $id('safety-tools-output');
+
+  function safetyText(value) {
+    safetyToolsOutput.innerHTML = '';
+    safetyToolsOutput.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  }
+  function downloadSafetyReport(filename, text, type) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const link = document.createElement('a'); link.href = url; link.download = filename; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+  function showHealthReport(report) {
+    safetyText(report);
+    const actions = document.createElement('div'); actions.className = 'modal-actions';
+    const json = document.createElement('button'); json.className = 'btn btn-ghost'; json.textContent = 'Export JSON';
+    json.addEventListener('click', () => downloadSafetyReport('recallstack-health.json', JSON.stringify(report, null, 2), 'application/json'));
+    const markdown = document.createElement('button'); markdown.className = 'btn btn-ghost'; markdown.textContent = 'Export Markdown';
+    markdown.addEventListener('click', () => {
+      const findings = (report.findings || []).map(item => `- **${item.severity}** ${item.code}${item.path ? ` — \`${item.path}\`` : ''}: ${item.message}`).join('\n') || '- No findings';
+      downloadSafetyReport('recallstack-health.md', `# RecallStack Workspace Health\n\nNotes: ${report.notes}\n\nWatcher: ${report.watcher}\n\n## Findings\n\n${findings}\n`, 'text/markdown');
+    });
+    actions.append(json, markdown); safetyToolsOutput.appendChild(actions);
+  }
+  window.addEventListener('recallstack-backup-progress', event => {
+    const progress = event.detail || {};
+    const label = safetyToolsOutput.querySelector('[data-backup-progress]');
+    if (label) label.textContent = `Backing up ${progress.completed || 0} of ${progress.total || 0}: ${progress.path || ''}`;
+  });
+  window.addEventListener('recallstack-index-progress', event => {
+    const progress = event.detail || {};
+    const label = safetyToolsOutput.querySelector('[data-index-progress]');
+    if (label) label.textContent = `Indexing ${progress.completed || 0} of ${progress.total || 0}: ${progress.path || ''}`;
+  });
+
+  async function showTrashRecords() {
+    const records = await window.__recallstackNative.listTrash();
+    safetyToolsOutput.innerHTML = '';
+    if (!records.length) { safetyToolsOutput.textContent = 'RecallStack Trash is empty.'; return; }
+    records.forEach(record => {
+      const row = document.createElement('div'); row.className = 'safety-record';
+      const path = document.createElement('span'); path.className = 'safety-record-path';
+      path.textContent = `${record.originalPath}  •  ${record.deletedAt}`;
+      const restore = document.createElement('button'); restore.className = 'btn btn-ghost'; restore.textContent = 'Restore';
+      restore.addEventListener('click', async () => {
+        try { await window.__recallstackNative.restoreTrash(record.id); await showTrashRecords(); await reloadActiveList(); }
+        catch (error) { toast('Restore failed: ' + (error?.message || error), 'error'); }
+      });
+      row.append(path, restore); safetyToolsOutput.appendChild(row);
+    });
+    const empty = document.createElement('button'); empty.className = 'btn btn-danger'; empty.textContent = 'Empty Trash Permanently';
+    empty.addEventListener('click', async () => {
+      if (!confirm(`Permanently delete all ${records.length} Trash item(s)? This cannot be undone.`)) return;
+      const count = await window.__recallstackNative.emptyTrash();
+      safetyText(`Permanently removed ${count} Trash item(s).`);
+    });
+    safetyToolsOutput.appendChild(empty);
+  }
+
+  async function showCurrentVersions() {
+    const path = currentFileAppPath();
+    if (!path) { safetyText('Open a saved note to inspect its version history.'); return; }
+    const versions = await window.__recallstackNative.listVersions(path);
+    safetyToolsOutput.innerHTML = '';
+    if (!versions.length) { safetyToolsOutput.textContent = 'No earlier versions have been recorded for this note.'; return; }
+    versions.forEach(version => {
+      const row = document.createElement('div'); row.className = 'safety-record';
+      const description = document.createElement('span'); description.className = 'safety-record-path';
+      description.textContent = `${version.createdAt}  •  ${version.size} bytes`;
+      const restore = document.createElement('button'); restore.className = 'btn btn-ghost'; restore.textContent = 'Restore';
+      restore.addEventListener('click', async () => {
+        if (!confirm('Restore this version? The current content will be retained as another recoverable version.')) return;
+        await window.__recallstackNative.restoreVersion(version.id);
+        await openFile(currentPath.split('/').at(-1), currentPath);
+        await showCurrentVersions();
+      });
+      row.append(description, restore); safetyToolsOutput.appendChild(row);
+    });
+  }
+
+  async function runSafetyAction(action) {
+    if (!window.__recallstackNative?.active) { safetyText('Safety tools require the native desktop application.'); return; }
+    safetyText('Working…');
+    if (action === 'validate') showHealthReport(await window.__recallstackNative.checkWorkspace());
+    else if (action === 'backup') {
+      const destination = await window.__recallstackNative.chooseBackupDestination();
+      if (!destination) { safetyText('Backup cancelled.'); return; }
+      safetyToolsOutput.replaceChildren();
+      const progress = document.createElement('div'); progress.dataset.backupProgress = 'true'; progress.textContent = 'Preparing backup…';
+      const cancel = document.createElement('button'); cancel.className = 'btn btn-ghost'; cancel.textContent = 'Cancel Backup';
+      cancel.addEventListener('click', () => { cancel.disabled = true; window.__recallstackNative.cancelBackup(); });
+      safetyToolsOutput.append(progress, cancel);
+      safetyText(await window.__recallstackNative.backup(destination, false));
+    } else if (action === 'verify-backup') {
+      const source = await window.__recallstackNative.chooseBackupFile();
+      if (!source) { safetyText('Backup verification cancelled.'); return; }
+      const verification = await window.__recallstackNative.verifyBackup(source);
+      const dryRun = verification.verified ? await window.__recallstackNative.restoreBackupDryRun(source) : null;
+      safetyText({ verification, restoreDryRun: dryRun });
+    } else if (action === 'rebuild') {
+      safetyToolsOutput.replaceChildren();
+      const progress = document.createElement('div'); progress.dataset.indexProgress = 'true'; progress.textContent = 'Preparing search index…';
+      const cancel = document.createElement('button'); cancel.className = 'btn btn-ghost'; cancel.textContent = 'Cancel Rebuild';
+      cancel.addEventListener('click', () => { cancel.disabled = true; window.__recallstackNative.cancelIndex(); });
+      safetyToolsOutput.append(progress, cancel);
+      const count = await window.__recallstackNative.rebuildIndex();
+      const health = await window.__recallstackNative.indexHealth();
+      await buildSearchIndex();
+      safetyText(`Search index rebuilt successfully.\n${count} Markdown file(s) indexed.\n\n${JSON.stringify(health, null, 2)}`);
+    } else if (action === 'trash') await showTrashRecords();
+    else if (action === 'versions') await showCurrentVersions();
+    else if (action === 'git') safetyText(await window.__recallstackNative.gitStatus());
+  }
+
+  function openSafetyTools() {
+    modalSafetyTools.classList.remove('hidden');
+    modalSafetyTools.querySelector('[data-safety-action]')?.focus();
+  }
+  function closeSafetyTools() { modalSafetyTools.classList.add('hidden'); }
+  btnSafetyTools.classList.toggle('hidden', !window.__recallstackNative?.active);
+  btnSafetyTools.addEventListener('click', openSafetyTools);
+  btnSafetyToolsClose.addEventListener('click', closeSafetyTools);
+  modalSafetyTools.addEventListener('click', event => {
+    if (event.target === modalSafetyTools) closeSafetyTools();
+    const action = event.target.closest('[data-safety-action]')?.dataset.safetyAction;
+    if (action) runSafetyAction(action).catch(error => safetyText('Tool failed: ' + (error?.message || error)));
+  });
+  modalSafetyTools.addEventListener('keydown', event => { if (event.key === 'Escape') closeSafetyTools(); });
 
   // ── App title editing ─────────────────────────────────────────────────────────
 

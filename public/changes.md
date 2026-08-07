@@ -2,6 +2,20 @@
 
 ---
 
+## Version 1.5 — 2026-08-06
+
+### Safety, Commands, Editor, and Knowledge Search
+
+Deletes now move files, folders, and assets into recoverable RecallStack Trash. Native writes are atomic and conflict-aware, unsaved drafts survive crashes, prior note versions are retained, and Safety & Workspace Tools provides restore, verified streaming backups, workspace validation, index rebuild, and read-only Git status.
+
+Press **Ctrl+K** for the new keyboard command palette. It supports command ranking and history, disabled-action explanations, note (`@`), tag (`#`), help (`?`), and theme-selection modes. **Ctrl+P** opens note mode directly.
+
+The Markdown textarea has been replaced with CodeMirror 6, adding syntax highlighting, search/replace, folding, bracket matching, undo/redo, multiple selections, optional line numbers, persistent document position, and note/tag completion while retaining the existing preview and asset workflows.
+
+Desktop search now uses the native, incremental SQLite/FTS5 knowledge index. Searches support structured filters such as `tag:`, `folder:`, `is:task`, `is:working`, `priority:`, `due:overdue`, `modified:>=YYYY-MM-DD`, and link filters. Results include metadata, built-in and user-saved searches are available, and open notes display backlinks.
+
+Markdown line numbers are now enabled by default and can still be disabled from the editor toolbar. Clicking the already-active workspace now returns to the normal listing for its currently selected folder and subfolder, without briefly reopening the previously selected note.
+
 ## Version 1.4 — 2026-08-06
 
 ### Portable Desktop Sidecars
