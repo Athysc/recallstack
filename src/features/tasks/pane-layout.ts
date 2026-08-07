@@ -3,10 +3,10 @@ export interface PanePair {
   second: number;
 }
 
-export function resizePanePair(first: number, second: number, delta: number, minimum: number): PanePair {
+export function resizePanePair(first: number, second: number, delta: number, minimum: number, minimumSecond: number = minimum): PanePair {
   const total = Math.max(0, first) + Math.max(0, second);
-  if (total < minimum * 2) return { first: total / 2, second: total / 2 };
-  const nextFirst = Math.min(total - minimum, Math.max(minimum, first + delta));
+  if (total < minimum + minimumSecond) return { first: total / 2, second: total / 2 };
+  const nextFirst = Math.min(total - minimumSecond, Math.max(minimum, first + delta));
   return { first: nextFirst, second: total - nextFirst };
 }
 

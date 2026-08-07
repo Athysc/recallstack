@@ -194,7 +194,7 @@ html.app-booting body { visibility: hidden; }
 .split-pane.three-pane .working-task-pane {
   width: 30%;
   height: auto;
-  min-width: 20vw;
+  min-width: 10vw;
   min-height: 0;
   flex: 0 0 auto;
   border-right: 0;

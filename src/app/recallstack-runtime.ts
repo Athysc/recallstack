@@ -3831,8 +3831,9 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       if (resetWidths) {
         const available = Math.max(0, splitPane.clientWidth - taskEditorResizer.offsetWidth - resizerEl.offsetWidth);
         const minimum = window.innerWidth * 0.2;
+        const workingMinimum = minimum / 2;
         const ratioTotal = workingPaneWidths.reduce((total, value) => total + value, 0) || 1;
-        const workingWidth = Math.min(available - minimum * 2, Math.max(minimum, available * workingPaneWidths[0] / ratioTotal));
+        const workingWidth = Math.min(available - minimum * 2, Math.max(workingMinimum, available * workingPaneWidths[0] / ratioTotal));
         const remaining = Math.max(minimum * 2, available - workingWidth);
         const editorShare = workingPaneWidths[1] / (workingPaneWidths[1] + workingPaneWidths[2]);
         const editorWidth = Math.min(remaining - minimum, Math.max(minimum, remaining * editorShare));
@@ -6164,7 +6165,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   taskEditorResizer.addEventListener('pointermove', e => {
     if (!taskResizeStart) return;
     if (taskResizeStart.mode === 'side') {
-      const widths = resizePanePair(taskResizeStart.working, taskResizeStart.editor, e.clientX - taskResizeStart.x, window.innerWidth * 0.2);
+      const widths = resizePanePair(taskResizeStart.working, taskResizeStart.editor, e.clientX - taskResizeStart.x, window.innerWidth * 0.1, window.innerWidth * 0.2);
       workingTaskPane.style.width = widths.first + 'px';
       editorPane.style.width = widths.second + 'px';
       return;
