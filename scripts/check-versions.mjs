@@ -8,7 +8,7 @@ const tauriConfig = JSON.parse(await readFile(resolve(root, "src-tauri/tauri.con
 const cargoToml = await readFile(resolve(root, "src-tauri/Cargo.toml"), "utf8");
 const cargoLock = await readFile(resolve(root, "src-tauri/Cargo.lock"), "utf8");
 const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
-const lockVersion = cargoLock.match(/\[\[package\]\]\nname = "recallstack"\nversion = "([^"]+)"/)?.[1];
+const lockVersion = cargoLock.match(/\[\[package\]\]\r?\nname = "recallstack"\r?\nversion = "([^"]+)"/)?.[1];
 
 assert.match(packageJson.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, "package.json has an invalid release version");
 assert.equal(cargoVersion, packageJson.version, "Cargo.toml version differs from package.json");
