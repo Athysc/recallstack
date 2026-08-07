@@ -1,6 +1,6 @@
 # RecallStack — User Guide
 
-A portable Tauri 2 desktop Personal Knowledge Management (PKM) app for notes, tasks, and journaling. Markdown remains in the workspace you select; no installation is required on Windows.
+A portable Tauri 2 desktop Personal Knowledge Management (PKM) app for notes, tasks, and journaling. Markdown remains in the workspace you select; no installation is required on Windows, Linux, or macOS.
 
 Current application version: **0.1.1**.
 
@@ -41,10 +41,11 @@ Build from the RecallStack source directory. The release scripts use the version
 
 Open **Actions → Build reviewed release artifacts**, select **Run workflow** on
 `master`, and start a new run. The manual workflow uses Node.js 24 and builds the
-Windows portable and Linux artifacts independently. Download
-`recallstack-windows-portable` or `recallstack-linux` from the successful run's
-**Artifacts** section. After pushing a fix, start a new workflow run instead of
-rerunning an older job, because a rerun continues to use its original commit.
+Windows portable, Linux, and macOS artifacts independently. Download
+`recallstack-windows-portable`, `recallstack-linux`, or `recallstack-macos` from
+the successful run's **Artifacts** section. After pushing a fix, start a new
+workflow run instead of rerunning an older job, because a rerun continues to use
+its original commit.
 
 ### Arch Linux
 
@@ -170,9 +171,59 @@ Run `RecallStack.exe`; administrator access is not required. If the application 
 
 To deploy an update, close RecallStack and replace the extracted application files with the new release. Workspace Markdown and `DB/index.db` remain in the user-selected workspace and are not stored beside the executable.
 
+### macOS
+
+macOS artifacts must be built natively on a Mac; building the macOS release from Windows or Arch Linux is not part of the reviewed release process.
+
+#### Build prerequisites
+
+Install:
+
+- Node.js 24 with npm
+- Rust stable using `rustup` with both the `aarch64-apple-darwin` and `x86_64-apple-darwin` targets, so a single universal binary covers Apple Silicon and Intel
+
+```bash
+rustup default stable
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+cd /path/to/RecallStack
+npm ci
+```
+
+#### Verify, build, and package
+
+```bash
+npm run release:verify
+npm run release:clean
+npm run build:macos:app
+npm run package:macos:app
+```
+
+The `release/` directory will contain:
+
+- `RecallStack-<version>-macos-universal.zip` — portable macOS package containing `RecallStack.app`
+
+No DMG, PKG installer, or notarization is produced.
+
+#### Deploy on macOS
+
+Copy the ZIP to the destination Mac, extract it into a writable folder, and keep these files together:
+
+```text
+RecallStack.app
+README.txt
+LICENSE
+readme.md
+changes.md
+theme.json
+```
+
+Because RecallStack.app is unsigned and unnotarized, Gatekeeper blocks the first launch. Right-click (or Control-click) `RecallStack.app`, choose **Open**, and confirm **Open** again — or run `xattr -cr RecallStack.app` in Terminal first. No administrator access or separate WebView runtime is required; RecallStack uses the WebKit engine built into macOS.
+
+To deploy an update, close RecallStack and replace `RecallStack.app` with the new release. Workspace Markdown and `DB/index.db` remain in the user-selected workspace.
+
 ### Release smoke test
 
-Before distributing either platform build, test opening a workspace, opening and saving notes, native search and reindexing, backup creation, application close/reopen, and paths containing spaces or non-ASCII characters. Test the Windows ZIP from a non-administrator account and test Linux under the display environments that will be supported.
+Before distributing any platform build, test opening a workspace, opening and saving notes, native search and reindexing, backup creation, application close/reopen, and paths containing spaces or non-ASCII characters. Test the Windows ZIP from a non-administrator account, test Linux under the display environments that will be supported, and test the macOS ZIP on both Apple Silicon and Intel (or under Rosetta), including the Gatekeeper right-click-Open and `xattr -cr` paths on a freshly downloaded, quarantined copy.
 
 ---
 
