@@ -1916,6 +1916,7 @@ mod tests {
             .query_row("SELECT count(*) FROM rs_notes", [], |row| row.get(0))
             .expect("remaining count");
         assert_eq!(remaining, 1);
+        drop(db);
 
         fs::remove_dir_all(&root).expect("remove fixture");
     }
@@ -1993,6 +1994,7 @@ mod tests {
             .expect("columns");
         assert!(columns.contains("content_hash"));
         assert!(columns.contains("due_date"));
+        drop(migrated);
         fs::remove_dir_all(root).expect("cleanup");
     }
 
