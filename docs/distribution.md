@@ -28,9 +28,36 @@ If RecallStack does not open, install or repair the WebView2 Evergreen Runtime f
 
 ## Linux and Arch release
 
-On the Linux build host:
+### Build locally on Arch Linux
+
+Install the Tauri 2 build dependencies, Node.js, npm, and the Rust toolchain:
 
 ```bash
+sudo pacman -Syu
+sudo pacman -S --needed \
+  webkit2gtk-4.1 \
+  base-devel \
+  curl \
+  wget \
+  file \
+  openssl \
+  appmenu-gtk-module \
+  libappindicator-gtk3 \
+  librsvg \
+  xdotool \
+  nodejs \
+  npm \
+  rustup
+
+rustup default stable
+```
+
+From the RecallStack repository, install the locked JavaScript dependencies,
+verify the release, and build both Linux formats:
+
+```bash
+npm ci
+npm run release:verify
 npm run release:clean
 npm run build:linux
 npm run package:linux:tar
@@ -38,7 +65,23 @@ npm run build:linux:appimage
 npm run package:linux:appimage
 ```
 
-The tarball contains the executable, desktop entry, 128 px icon, license, and launch guide. The generated `release/PKGBUILD` consumes that exact local, versioned tarball and pins its SHA-256 digest. Place both files together before running `makepkg`. Validate the AppImage independently under Wayland and X11.
+The resulting AppImage, portable tarball, checksums, artifact manifest, and
+generated `PKGBUILD` are written to `release/`. Run the portable AppImage with:
+
+```bash
+chmod +x release/RecallStack-*-linux-x86_64.AppImage
+./release/RecallStack-*-linux-x86_64.AppImage
+```
+
+Keep `readme.md`, `changes.md`, and `theme.json` beside the AppImage so their
+external, editable versions remain available. If the AppImage reports a FUSE
+error, install the Arch `fuse2` package:
+
+```bash
+sudo pacman -S --needed fuse2
+```
+
+The tarball contains the executable, desktop entry, 128 px icon, license, and launch guide. The generated `release/PKGBUILD` consumes that exact local, versioned tarball and pins its SHA-256 digest. Place both files together before running `makepkg -si`. Validate the AppImage independently under Wayland and X11.
 
 ## Data, upgrades, and downgrades
 

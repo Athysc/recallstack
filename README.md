@@ -22,7 +22,9 @@ npm run package:windows:portable
 
 The versioned raw executable, portable ZIP, SHA-256 files, and artifact manifest are written to `release/`. It can be copied and run directly; workspace data stays in the selected workspace and app settings/recent-workspace list live in the user app-data directory. RecallStack relies on the Microsoft Edge WebView2 Evergreen Runtime included with supported Windows 10/11 systems.
 
-For Linux tarball and AppImage commands, runtime requirements, upgrade policy, and release verification, see [docs/distribution.md](docs/distribution.md).
+For complete Arch Linux dependency installation and local build instructions,
+Linux tarball and AppImage commands, runtime requirements, upgrade policy, and
+release verification, see [docs/distribution.md](docs/distribution.md#build-locally-on-arch-linux).
 
 ## Desktop architecture
 
