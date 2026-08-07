@@ -22,6 +22,11 @@
   },
   "bundle": {
     "active": false,
-    "targets": []
+    "targets": [],
+    "category": "Productivity",
+    "shortDescription": "Local-first Markdown workspace",
+    "longDescription": "RecallStack is a local-first Markdown workspace for notes, tasks, calendars, outputs, and searchable knowledge.",
+    "copyright": "Copyright © 2026 RecallStack contributors",
+    "icon": ["icons/icon.png", "icons/icon.ico"]
   }
 }

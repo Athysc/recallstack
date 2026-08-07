@@ -1,0 +1,18 @@
+pkgname=recallstack-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Local-first Markdown workspace (prebuilt binary)'
+arch=('x86_64')
+license=('custom')
+depends=('gtk3' 'webkit2gtk-4.1')
+provides=('recallstack')
+conflicts=('recallstack')
+source=("RecallStack-${pkgver}-linux-x86_64.tar.gz")
+sha256sums=('@SHA256@')
+
+package() {
+  install -Dm755 "${srcdir}/RecallStack-${pkgver}/recallstack" "${pkgdir}/usr/bin/recallstack"
+  install -Dm644 "${srcdir}/RecallStack-${pkgver}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 "${srcdir}/RecallStack-${pkgver}/share/applications/com.recallstack.desktop.desktop" "${pkgdir}/usr/share/applications/com.recallstack.desktop.desktop"
+  install -Dm644 "${srcdir}/RecallStack-${pkgver}/share/icons/hicolor/128x128/apps/com.recallstack.desktop.png" "${pkgdir}/usr/share/icons/hicolor/128x128/apps/com.recallstack.desktop.png"
+}

@@ -17,5 +17,6 @@ const files = [
 for (const [source, destination] of files) {
   await copyFile(resolve(root, source), resolve(output, destination));
 }
-await copyFile(resolve(root, "desktop-shim.js"), resolve(root, "public", "desktop-shim.js"));
-await copyFile(resolve(root, "themes.json"), resolve(root, "public", "themes.json"));
+await copyFile(resolve(root, "themes.json"), resolve(root, "public", "theme.json"));
+await copyFile(resolve(root, "portable", "readme.md"), resolve(root, "public", "readme.md"));
+await copyFile(resolve(root, "portable", "changes.md"), resolve(root, "public", "changes.md"));

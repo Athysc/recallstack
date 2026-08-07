@@ -12,6 +12,7 @@ pub struct HealthReport {
     pub notes: usize,
     pub broken_links: Vec<String>,
     pub orphan_assets: Vec<String>,
+    pub watcher: String,
 }
 
 fn markdown_links(markdown: &str) -> impl Iterator<Item = &str> {
@@ -76,5 +77,6 @@ pub fn check_workspace(state: State<'_, Arc<AppState>>) -> Result<HealthReport, 
         notes: notes.len(),
         broken_links,
         orphan_assets,
+        watcher: state.watcher_health.lock().clone(),
     })
 }

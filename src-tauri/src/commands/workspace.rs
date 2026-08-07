@@ -19,6 +19,7 @@ const DATA_DIR: &str = "Data";
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSummary {
+    pub id: String,
     pub path: String,
     pub name: String,
     pub has_data_directory: bool,
@@ -87,14 +88,25 @@ pub struct WorkspaceWatcher {
 struct WorkspaceChange {
     kind: String,
     path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_path: Option<String>,
     entity: String,
+    internal: bool,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceChangeBatch {
+    workspace_id: String,
     sequence: u64,
+    occurred_at: i64,
+    overflowed: bool,
     changes: Vec<WorkspaceChange>,
+}
+
+enum WatcherMessage {
+    Event(notify::Event),
+    Error(String),
 }
 
 fn err(message: impl Into<String>) -> String {
@@ -119,6 +131,25 @@ fn active_workspace(state: &State<'_, Arc<AppState>>) -> Result<PathBuf, String>
 
 fn data_path(root: &Path) -> PathBuf {
     root.join(DATA_DIR)
+}
+
+fn workspace_id(root: &Path) -> String {
+    // Deterministic FNV-1a avoids using process-random hash state, so the same
+    // canonical workspace path has the same identity across launches.
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in root.to_string_lossy().replace('\\', "/").as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("ws-{hash:016x}")
+}
+
+fn relative_from_workspace(root: &Path, path: &Path) -> Result<String, String> {
+    path.strip_prefix(root)
+        .map_err(|_| err("Path is outside the workspace"))?
+        .to_string_lossy()
+        .replace('\\', "/")
+        .pipe(Ok)
 }
 
 fn note_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
@@ -334,11 +365,15 @@ fn update_index_path(root: &Path, path: &Path) -> Result<(), String> {
 }
 
 fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Result<(), String> {
-    let (sender, receiver) = std::sync::mpsc::channel::<notify::Event>();
+    let (sender, receiver) = std::sync::mpsc::channel::<WatcherMessage>();
     let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if let Ok(event) = event {
-            if normalized_event_kind(&event.kind).is_some() {
-                let _ = sender.send(event);
+        match event {
+            Ok(event) if normalized_event_kind(&event.kind).is_some() => {
+                let _ = sender.send(WatcherMessage::Event(event));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = sender.send(WatcherMessage::Error(error.to_string()));
             }
         }
     })
@@ -351,45 +386,93 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
     if apps_path.is_dir() {
         let _ = watcher.watch(&apps_path, RecursiveMode::NonRecursive);
     }
+    for system_root in ["openbrain/outputs", "openbrain-shared/outputs"] {
+        let path = root.join(system_root);
+        if path.is_dir() {
+            let _ = watcher.watch(&path, RecursiveMode::Recursive);
+        }
+    }
     let app_handle = app.clone();
+    let watcher_state = Arc::clone(state);
+    let active_workspace_id = workspace_id(&root);
+    let watcher_generation = state.start_watcher_generation();
+    *state.watcher_health.lock() = "running".to_string();
     std::thread::spawn(move || {
-        let mut sequence = 0_u64;
         while let Ok(first) = receiver.recv() {
             let mut events = vec![first];
             while let Ok(event) = receiver.recv_timeout(Duration::from_millis(200)) {
                 events.push(event);
             }
             let mut changes = HashMap::<String, WorkspaceChange>::new();
-            for event in events {
+            let mut overflowed = false;
+            for message in events {
+                let event = match message {
+                    WatcherMessage::Event(event) => event,
+                    WatcherMessage::Error(error) => {
+                        overflowed = true;
+                        if watcher_state.is_current_watcher_generation(watcher_generation) {
+                            *watcher_state.watcher_health.lock() = format!("degraded: {error}");
+                        }
+                        continue;
+                    }
+                };
                 let Some(kind) = normalized_event_kind(&event.kind) else {
                     continue;
                 };
-                for path in event.paths {
-                    let Ok(relative) = path.strip_prefix(&root) else {
-                        continue;
-                    };
-                    let relative = relative.to_string_lossy().replace('\\', "/");
+                if kind == "rename" && event.paths.len() >= 2 {
+                    let source = &event.paths[0];
+                    let destination = event.paths.last().expect("rename destination");
+                    let (Ok(previous_path), Ok(path)) = (
+                        relative_from_workspace(&root, source),
+                        relative_from_workspace(&root, destination),
+                    ) else { continue; };
+                    let internal = watcher_state.is_recent_internal_write(&previous_path)
+                        || watcher_state.is_recent_internal_write(&path);
                     changes.insert(
-                        relative.clone(),
+                        path.clone(),
                         WorkspaceChange {
-                            kind: kind.to_string(),
-                            path: relative,
-                            entity: entity_kind(&path).to_string(),
+                            kind: "rename".to_string(),
+                            path,
+                            previous_path: Some(previous_path),
+                            entity: entity_kind(destination).to_string(),
+                            internal,
                         },
                     );
-                    let _ = update_index_path(&root, &path);
+                    let _ = update_index_path(&root, source);
+                    let _ = update_index_path(&root, destination);
+                    continue;
+                }
+                for path in event.paths {
+                    let Ok(relative) = relative_from_workspace(&root, &path) else { continue; };
+                    let change = WorkspaceChange {
+                        kind: kind.to_string(),
+                        path: relative.clone(),
+                        previous_path: None,
+                        entity: entity_kind(&path).to_string(),
+                        internal: watcher_state.is_recent_internal_write(&relative),
+                    };
+                    coalesce_change(&mut changes, change);
+                    if path.starts_with(data_path(&root)) {
+                        let _ = update_index_path(&root, &path);
+                    }
                 }
             }
-            if !changes.is_empty() {
-                sequence += 1;
+            if !changes.is_empty() || overflowed {
+                let sequence = watcher_state.next_watcher_sequence(&active_workspace_id);
                 let _ = app_handle.emit(
                     "workspace://changed",
                     WorkspaceChangeBatch {
+                        workspace_id: active_workspace_id.clone(),
                         sequence,
-                        changes: changes.into_values().collect(),
+                        occurred_at: Utc::now().timestamp_millis(),
+                        overflowed,
+                        changes: sorted_changes(changes),
                     },
                 );
             }
+        }
+        if watcher_state.is_current_watcher_generation(watcher_generation) {
+            *watcher_state.watcher_health.lock() = "stopped".to_string();
         }
     });
     *state.watcher.lock() = Some(WorkspaceWatcher { _watcher: watcher });
@@ -426,6 +509,7 @@ pub async fn pick_workspace(app: AppHandle) -> Result<Option<String>, String> {
 
 fn summary(path: &Path) -> WorkspaceSummary {
     WorkspaceSummary {
+        id: workspace_id(path),
         path: path.to_string_lossy().to_string(),
         name: path
             .file_name()
@@ -633,6 +717,7 @@ pub fn write_note(
     if !note.exists() {
         return Err(err("Note does not exist; use create_note"));
     }
+    state.record_internal_write(&format!("Data/{path}"));
     fs::write(note, &content).map_err(|e| e.to_string())?;
     index_note(&root, &path, &content)
 }
@@ -649,6 +734,7 @@ pub fn create_note(
         return Err(err("A note with that name already exists"));
     }
     fs::create_dir_all(note.parent().expect("note has parent")).map_err(|e| e.to_string())?;
+    state.record_internal_write(&format!("Data/{path}"));
     fs::write(&note, &content).map_err(|e| e.to_string())?;
     index_note(&root, &path, &content)?;
     Ok(Note {
@@ -676,6 +762,10 @@ pub fn move_to_trash(state: State<'_, Arc<AppState>>, path: String) -> Result<St
     ));
     fs::create_dir_all(destination.parent().expect("trash destination has parent"))
         .map_err(|e| e.to_string())?;
+    state.record_internal_write(&format!("Data/{path}"));
+    if let Ok(relative) = relative_from_workspace(&root, &destination) {
+        state.record_internal_write(&relative);
+    }
     fs::rename(source, &destination).map_err(|e| e.to_string())?;
     let db = open_db(&root)?;
     db.execute("DELETE FROM rs_notes WHERE path = ?1", [&path])
@@ -683,6 +773,24 @@ pub fn move_to_trash(state: State<'_, Arc<AppState>>, path: String) -> Result<St
     db.execute("DELETE FROM rs_notes_fts WHERE path = ?1", [&path])
         .map_err(|e| e.to_string())?;
     Ok(destination.to_string_lossy().to_string())
+}
+
+fn coalesce_change(changes: &mut HashMap<String, WorkspaceChange>, change: WorkspaceChange) {
+    let key = change.path.clone();
+    match changes.get(&key).map(|existing| existing.kind.as_str()) {
+        Some("create") if change.kind == "modify" => {}
+        Some("create") if change.kind == "remove" => { changes.remove(&key); }
+        Some("remove") if change.kind == "create" => {
+            changes.insert(key, WorkspaceChange { kind: "modify".to_string(), ..change });
+        }
+        _ => { changes.insert(key, change); }
+    }
+}
+
+fn sorted_changes(changes: HashMap<String, WorkspaceChange>) -> Vec<WorkspaceChange> {
+    let mut values = changes.into_values().collect::<Vec<_>>();
+    values.sort_by(|left, right| left.path.cmp(&right.path));
+    values
 }
 
 fn reconcile_index(root: &Path) -> Result<usize, String> {
@@ -790,6 +898,11 @@ fn rebuild_index_inner(root: &Path) -> Result<usize, String> {
 #[tauri::command]
 pub fn rebuild_index(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
     rebuild_index_inner(&active_workspace(&state)?)
+}
+
+#[tauri::command]
+pub fn reconcile_workspace(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
+    reconcile_index(&active_workspace(&state)?)
 }
 
 #[tauri::command]
@@ -944,6 +1057,60 @@ mod tests {
             normalized_event_kind(&EventKind::Remove(notify::event::RemoveKind::File)),
             Some("remove")
         );
+    }
+
+    #[test]
+    fn workspace_identity_is_stable_and_path_specific() {
+        let first = Path::new("/tmp/recallstack-one");
+        assert_eq!(workspace_id(first), workspace_id(first));
+        assert_ne!(workspace_id(first), workspace_id(Path::new("/tmp/recallstack-two")));
+    }
+
+    #[test]
+    fn watcher_sequences_continue_across_restarts() {
+        let state = AppState::default();
+        assert_eq!(state.next_watcher_sequence("ws-test"), 1);
+        assert_eq!(state.next_watcher_sequence("ws-test"), 2);
+        assert_eq!(state.next_watcher_sequence("ws-other"), 1);
+    }
+
+    #[test]
+    fn stale_watcher_generation_cannot_own_health() {
+        let state = AppState::default();
+        let first = state.start_watcher_generation();
+        let second = state.start_watcher_generation();
+        assert!(!state.is_current_watcher_generation(first));
+        assert!(state.is_current_watcher_generation(second));
+    }
+
+    #[test]
+    fn internal_write_journal_matches_normalized_paths() {
+        let state = AppState::default();
+        state.record_internal_write("Data\\notes\\example.md");
+        assert!(state.is_recent_internal_write("Data/notes/example.md"));
+        assert!(!state.is_recent_internal_write("Data/notes/other.md"));
+    }
+
+    #[test]
+    fn watcher_coalesces_common_event_bursts() {
+        let change = |kind: &str| WorkspaceChange {
+            kind: kind.to_string(),
+            path: "Data/notes/example.md".to_string(),
+            previous_path: None,
+            entity: "markdown".to_string(),
+            internal: false,
+        };
+        let mut changes = HashMap::new();
+        coalesce_change(&mut changes, change("create"));
+        coalesce_change(&mut changes, change("modify"));
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes.values().next().expect("change").kind, "create");
+        coalesce_change(&mut changes, change("remove"));
+        assert!(changes.is_empty());
+
+        coalesce_change(&mut changes, change("remove"));
+        coalesce_change(&mut changes, change("create"));
+        assert_eq!(changes.values().next().expect("change").kind, "modify");
     }
 
     #[test]

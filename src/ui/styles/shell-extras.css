@@ -1,0 +1,53 @@
+  /* ── Workspace switcher ─────────────────────────────────────────────────── */
+  .workspace-switcher {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .workspace-chip {
+    background: transparent;
+    border: none;
+    color: var(--appbar-chip-text, var(--overlay0));
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 3px 9px;
+    border-radius: 10px;
+    white-space: nowrap;
+    transition: background 0.12s, color 0.12s;
+    user-select: none;
+  }
+  .workspace-chip:hover  { background: var(--appbar-chip-hover, var(--surface1)); color: var(--appbar-chip-hi, var(--text)); }
+  .workspace-chip.active {
+    background: var(--appbar-chip-bg, var(--mauve));
+    color: var(--appbar-chip-fg, var(--crust));
+    font-weight: 700;
+  }
+  .workspace-sep {
+    color: var(--surface2);
+    font-size: 13px;
+    user-select: none;
+    padding: 0 2px;
+  }
+
+  /* ── App title inline edit ──────────────────────────────────────────────── */
+  .app-title-edit-btn {
+    opacity: 0.18;
+    padding: 3px 4px;
+    flex-shrink: 0;
+  }
+  .app-title-edit-btn:hover { opacity: 0.6; background: var(--surface0); }
+  .app-title-input {
+    background: var(--surface0);
+    border: 1px solid var(--mauve);
+    border-radius: 5px;
+    color: var(--mauve);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    outline: none;
+    width: 150px;
+    font-family: inherit;
+  }
+

@@ -1,12 +1,12 @@
 # Improvement 5 Implementation Plan: Filesystem Watching
 
-**Status:** In progress — regression-critical event filtering and targeted refresh implemented 2026-08-06  
+**Status:** Implemented and verified 2026-08-06
 **Recommended execution point:** After the performance milestone and typed native data services  
 **Primary outcome:** Detect external workspace changes and refresh only affected application state without losing unsaved edits or repeatedly rescanning the workspace.
 
 ## Implementation Progress
 
-Completed early as part of the native data-layer performance milestone:
+Implemented:
 
 - Native events are normalized to workspace-relative paths and coalesced in 200 ms batches.
 - Non-mutating read, open, and other access events are discarded before batching.
@@ -16,16 +16,17 @@ Completed early as part of the native data-layer performance milestone:
 - The frontend refreshes only an affected visible folder or All Tasks scope.
 - Existing list contents remain visible while replacement data loads.
 - Shared request generations prevent stale list responses from repainting newer navigation.
-- `Apps/themes.json` changes reload the external theme catalog separately from note lists.
+- Legacy `Apps/themes.json` changes reload the compatibility theme catalog separately from note lists when no portable `theme.json` sidecar is available.
+- Workspace IDs are deterministic across launches; sequence counters continue across watcher restarts, and the frontend detects stale batches and gaps.
+- Watcher errors produce overflow batches, trigger incremental index reconciliation, and surface as watcher health in the workspace health report.
+- Rename events pair destination `path` with `previousPath` when the platform supplies both paths.
+- Native mutations register a short-lived internal-write journal; exact watcher echoes are labeled and do not cause redundant editor/list repaints.
+- `src/services/watcher.ts` validates the event contract and maps changes to navigation, notes, tasks, calendar, search, assets, and themes invalidation scopes.
+- Clean open notes reload externally modified content while preserving selection and scroll. Dirty notes retain the user buffer and display persistent **Compare**, **Reload from disk**, and **Keep my version** controls.
+- Version-token saves continue to prevent silent overwrites unless the user explicitly chooses to keep and save their version.
+- `Data/`, `Apps/`, `openbrain/outputs/`, and `openbrain-shared/outputs/` are watched with the appropriate recursive scope.
 
-Still required for the complete improvement:
-
-- Stable workspace IDs and sequence-gap/overflow recovery.
-- Rename pairing with `previousPath` in the frontend contract.
-- Internal-write journaling and exact echo suppression.
-- Selective navigation, calendar, backlink, and asset invalidation.
-- Full clean/dirty editor conflict UI and watcher-health reporting.
-- Cross-platform watcher integration and burst tests.
+Verification is repeatable through `npm run verify:frontend` and `cargo test --manifest-path src-tauri/Cargo.toml`. The Rust suite covers filtering, burst coalescing, stable identity, restart-safe sequences, internal-write matching, and incremental reconciliation; the frontend suite covers validation, gap/stale handling, path normalization, and selective/overflow invalidation. Windows watcher behavior must also run in the Windows CI job added by improvement 6 because Linux cannot reproduce Windows filesystem semantics locally.
 
 ## Original Baseline
 

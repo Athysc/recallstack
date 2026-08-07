@@ -15,7 +15,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: "index.html",
-        recallstack: "recallstack.html",
       },
     },
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",

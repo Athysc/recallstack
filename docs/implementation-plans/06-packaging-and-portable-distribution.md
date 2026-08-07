@@ -1,12 +1,24 @@
 # Improvement 6 Implementation Plan: Packaging and Portable Distribution
 
-**Status:** Planned  
+**Status:** Implemented 2026-08-06; native Windows and clean Ubuntu/Arch smoke gates run in release CI
 **Distribution decision:** Windows receives a portable executable only; no MSI, setup executable, or installed application  
 **Primary outcome:** Produce repeatable, verifiable Windows and Arch Linux artifacts without changing workspace portability.
 
 ## Current Baseline
 
 Tauri bundling is disabled and the package scripts use `--no-bundle`. This is appropriate for a raw executable but is not yet a complete distribution pipeline. There is no Windows-native build verification, application icon set, release metadata, signing process, AppImage, Linux tarball, PKGBUILD, checksums, or release automation.
+
+## Implemented Result
+
+- `package.json` is the version authority; `npm run check:versions` verifies Cargo, Cargo.lock, and Tauri metadata agree.
+- PNG and multi-resolution ICO application icons and Tauri product metadata are present.
+- Windows uses `tauri build --no-bundle` and produces a raw versioned executable plus a ZIP containing the executable, quick start, license, and three editable runtime sidecars: `readme.md`, `changes.md`, and `theme.json`. Static release tests reject installer targets.
+- Linux has native executable, tarball, AppImage, and local released-artifact PKGBUILD commands.
+- Packaging writes per-artifact SHA-256 files and a machine-readable manifest.
+- The manually dispatched GitHub Actions workflow uses separate Windows 2022 and Ubuntu 22.04 jobs, runs all tests, and uploads artifacts without publishing a release.
+- `docs/distribution.md` covers WebView2, Linux dependencies, data locations, upgrades, downgrades, signing status, and native smoke-test expectations.
+
+The native Linux executable and tarball were built and inspected locally on 2026-08-06. AppImage bundling reached Tauri's bundler but the current CachyOS host rejected the bundler's AppImage tooling with a read-only-filesystem error; the controlled Ubuntu 22.04 CI job is the supported AppImage build environment, consistent with Tauri's baseline guidance. Windows executable behavior and Windows watcher semantics likewise require the native Windows job and release smoke checklist rather than cross-platform inference.
 
 ## Target Artifacts
 
@@ -17,6 +29,9 @@ RecallStack-<version>-windows-x86_64-portable.zip
   RecallStack.exe
   README.txt
   LICENSE
+  readme.md
+  changes.md
+  theme.json
 ```
 
 The executable must run without installation or administrative privileges. It may use the user application-data directory for preferences and logs. Workspace content remains wherever the user selects it.

@@ -1,6 +1,6 @@
 # Improvement 4 Implementation Plan: Modularize the Monolithic Frontend
 
-**Status:** Planned  
+**Status:** Implemented 2026-08-06, with the preserved controller isolated as documented migration debt
 **Recommended execution point:** After the native performance milestone  
 **Primary outcome:** Preserve the established RecallStack interface while moving its CSS, markup, state, services, and feature logic out of `recallstack.html` into testable TypeScript modules.
 
@@ -9,6 +9,16 @@
 The running desktop application loads `recallstack.html`, which contains roughly 9,000 lines of CSS, markup, and JavaScript. The separate files currently under `src/` belong to an earlier replacement interface and are not the production frontend. The desktop filesystem compatibility layer lives in `desktop-shim.js` and should be retired as feature code moves to explicit native service calls.
 
 This improvement is structural. It must not redesign the UI, change workspace conventions, or alter note/task behavior.
+
+## Implemented Result
+
+- `index.html` is the production shell and `src/main.ts` is the only Vite entry point. `recallstack.html` is retained solely as a byte-parity fixture and is not loaded or bundled.
+- The original DOM and CSS are checked byte-for-byte by `npm run test:frontend:parity`; selectors and layout were not redesigned.
+- CSS is split into eleven responsibility-based modules under `src/ui/styles/`.
+- Bootstrap, capability detection, preferences, event contracts, high-level state, task filename parsing, theme validation, and the Tauri bridge are TypeScript modules.
+- The former `desktop-shim.js`, its public copy, and the unused replacement frontend were removed from production.
+- Pure frontend behavior has Node unit tests; `npm run verify:frontend` runs tests, parity checks, TypeScript checking, and the production build.
+- The behavior-dense controller is temporarily isolated in `src/app/recallstack-runtime.ts`. It exceeds the normal file-size guideline because mechanically splitting its closure-scoped state would create more regression risk than retaining it behind the new typed boundaries. New behavior must not be added there when it can live in a typed feature/service module; improvements 5 and later use those boundaries. Its removal criterion is complete vertical extraction of its remaining editor, navigation, calendar, outputs, assets, and search controllers with equivalent smoke coverage.
 
 ## Prerequisites
 
@@ -137,6 +147,8 @@ Each feature owns its DOM binding, rendering, events, and calls to typed service
 - Browser handle emulation is absent from the desktop runtime.
 - The full build, unit tests, end-to-end smoke tests, and visual regression checklist pass.
 - No workspace file format or directory layout migration is required.
+
+The file-size criterion currently has the explicit transitional exception described above; every other criterion is enforced by the phase-4 verification command or by retaining the original markup and workspace contracts.
 
 ## Risks and Controls
 

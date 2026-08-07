@@ -1,0 +1,45 @@
+  /* ── Catppuccin Mocha ─────────────────────────────────────────────────────── */
+  :root {
+    --base:     #1e1e2e;
+    --mantle:   #181825;
+    --crust:    #11111b;
+    --surface0: #313244;
+    --surface1: #45475a;
+    --surface2: #585b70;
+    --overlay0: #6c7086;
+    --overlay1: #7f849c;
+    --subtext0: #a6adc8;
+    --subtext1: #bac2de;
+    --text:     #cdd6f4;
+    --lavender: #b4befe;
+    --blue:     #89b4fa;
+    --sapphire: #74c7ec;
+    --sky:      #89dceb;
+    --green:    #a6e3a1;
+    --yellow:   #f9e2af;
+    --peach:    #fab387;
+    --red:      #f38ba8;
+    --mauve:    #cba6f7;
+    --pink:     #f5c2e7;
+    --flamingo: #f2cdcd;
+    /* task card tints — recomputed by applyTheme() */
+    --task-bg-high:    rgba(243,139,168,0.10); --task-bd-high:    rgba(243,139,168,0.28);
+    --task-bg-normal:  rgba(137,180,250,0.07); --task-bd-normal:  rgba(137,180,250,0.18);
+    --task-bg-low:     rgba(166,227,161,0.07); --task-bd-low:     rgba(166,227,161,0.18);
+    --task-bg-blocked: rgba(127,132,156,0.12); --task-bd-blocked: rgba(127,132,156,0.30);
+    --task-bg-onhold:  rgba(249,226,175,0.08); --task-bd-onhold:  rgba(249,226,175,0.22);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--base);
+    color: var(--text);
+    font-family: var(--font-family, 'Segoe UI', system-ui, -apple-system, sans-serif);
+    font-size: 14px;
+    overflow: hidden;
+  }
+
+  body { display: flex; flex-direction: column; }
+

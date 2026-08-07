@@ -14,15 +14,18 @@ npm run tauri:dev
 RecallStack intentionally does **not** create an MSI or setup installer. Build the standalone executable with:
 
 ```bash
-npm run tauri:build:windows
+npm run release:verify
+npm run release:clean
+npm run build:windows:portable
+npm run package:windows:portable
 ```
 
-The result is `src-tauri/target/x86_64-pc-windows-msvc/release/recallstack.exe`. It can be copied and run directly; workspace data stays in the selected workspace and app settings/recent-workspace list live in the user app-data directory.
+The versioned raw executable, portable ZIP, SHA-256 files, and artifact manifest are written to `release/`. It can be copied and run directly; workspace data stays in the selected workspace and app settings/recent-workspace list live in the user app-data directory. RecallStack relies on the Microsoft Edge WebView2 Evergreen Runtime included with supported Windows 10/11 systems.
 
-For a native Linux development build, run `npm run tauri:build`; its executable is `src-tauri/target/release/recallstack`.
+For Linux tarball and AppImage commands, runtime requirements, upgrade policy, and release verification, see [docs/distribution.md](docs/distribution.md).
 
 ## Desktop architecture
 
-The desktop build runs the established `recallstack.html` interface directly. A Tauri compatibility layer implements its browser File System Access handles with native Rust commands, so the existing notes, tasks, calendar, assets, outputs, themes, and navigation remain available without redesigning the application. Markdown remains canonical in the selected workspace.
+The desktop build runs the established interface through `index.html` and the TypeScript entry at `src/main.ts`. `recallstack.html` is retained only as a byte-parity reference and is not loaded or bundled. A Tauri compatibility layer implements browser File System Access handles with native Rust commands, so the existing notes, tasks, calendar, assets, outputs, themes, and navigation remain available without redesigning the application. Markdown remains canonical in the selected workspace.
 
-Themes are loaded from the editable `<workspace>/Apps/themes.json` catalog. RecallStack creates the file from its bundled defaults when it is missing. See [docs/themes.md](docs/themes.md) for the schema and instructions for adding themes.
+The in-app guide, change history, and editable theme catalog are loaded from `readme.md`, `changes.md`, and `theme.json` beside the executable. Embedded defaults and legacy workspace files provide fallbacks. See [docs/themes.md](docs/themes.md) for the theme schema.

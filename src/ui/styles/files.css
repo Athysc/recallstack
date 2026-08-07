@@ -1,0 +1,125 @@
+  /* ── File list ────────────────────────────────────────────────────────────── */
+  #file-list-view {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .list-heading {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--overlay1);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .file-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .file-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 14px;
+    border-radius: 7px;
+    background: var(--mantle);
+    border: 1px solid var(--surface0);
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+    user-select: none;
+  }
+  .file-card:hover { background: var(--surface0); border-color: var(--surface1); box-shadow: 0 1px 4px rgba(0,0,0,0.28); }
+
+  .file-icon { font-size: 15px; flex-shrink: 0; }
+  .file-name { flex: 1; color: var(--text); font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-meta { color: var(--overlay0); font-size: 11px; font-family: monospace; white-space: nowrap; min-width: 130px; text-align: right; }
+  .file-ext  { color: var(--overlay0); font-size: 11px; font-family: monospace; white-space: nowrap; }
+
+  .list-actions { display: flex; align-items: center; gap: 6px; }
+
+  .task-count-bar { display: flex; flex-shrink: 0; gap: 2px; height: 14px; margin: 0 0 12px; border-radius: 3px; overflow: hidden; }
+  .task-count-bar .tcb-segment { flex: 0 0 auto; min-width: 2px; border-radius: 1px; }
+  .tcb-rest       { background: var(--overlay1); }
+  .tcb-completed  { background: var(--mauve); }
+  .tcb-qa         { background: var(--yellow); }
+  .tcb-deployment { background: var(--peach); }
+  .tcb-deployed   { background: var(--green); }
+  .tcb-backlog    { background: var(--overlay0); }
+
+  .sort-btn { padding: 5px 7px; color: var(--overlay1); }
+  .sort-btn.active { color: var(--mauve); background: var(--surface0); }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 64px 20px;
+    color: var(--overlay0);
+    text-align: center;
+  }
+  .empty-icon { font-size: 40px; opacity: 0.4; }
+  .empty-text { font-size: 13px; }
+  .remote-media-block {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px dashed var(--surface2);
+    border-radius: 8px;
+    color: var(--subtext0);
+    background: color-mix(in srgb, var(--surface0) 55%, transparent);
+    font-size: 12px;
+  }
+
+  /* ── Buttons ──────────────────────────────────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 14px;
+    transition: opacity 0.12s, transform 0.08s, box-shadow 0.15s;
+    white-space: nowrap;
+    user-select: none;
+    box-shadow: var(--btn-glow-idle, none);
+  }
+  .btn:hover  { opacity: 0.85; box-shadow: var(--btn-glow-hover, none); }
+  .btn:active { transform: scale(0.97); }
+
+  .btn-primary { background: var(--mauve);    color: var(--crust); }
+  .btn-danger  { background: var(--red);      color: var(--crust); }
+  .btn-ghost   { background: var(--surface1); color: var(--text);  }
+  /* Per-button color overrides — active in Special themes */
+  #btn-save { background: var(--btn-save-bg, var(--mauve)); color: var(--btn-save-color, var(--crust)); }
+  #btn-cancel { background: var(--btn-cancel-bg, var(--surface1)); color: var(--btn-cancel-color, var(--text)); }
+  #btn-new-from-editor, #btn-new { background: var(--btn-new-bg, var(--mauve)); color: var(--btn-new-color, var(--crust)); }
+  #btn-presentation { background: var(--btn-presentation-bg, var(--surface1)); color: var(--btn-presentation-color, var(--text)); }
+  /* Muted, theme-derived accents for editor toolbar icon actions. */
+  .editor-toolbar .toolbar-accent-copy-md { color: color-mix(in srgb, var(--sapphire) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-copy-html { color: color-mix(in srgb, var(--blue) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-copy-path { color: color-mix(in srgb, var(--lavender) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-copy-link { color: color-mix(in srgb, var(--mauve) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-stamp-date { color: color-mix(in srgb, var(--pink) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-convert { color: color-mix(in srgb, var(--green) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-copy-file { color: color-mix(in srgb, color-mix(in srgb, var(--blue), var(--mauve)) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-move { color: color-mix(in srgb, var(--peach) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-archive { color: color-mix(in srgb, var(--yellow) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-delete { color: color-mix(in srgb, var(--red) 62%, var(--overlay1)); }
+

@@ -1,0 +1,139 @@
+/* Explicit date-picker controls avoid platform-dependent native indicator artwork. */
+html.app-booting { background: #1e1e2e; }
+html.app-booting body { visibility: hidden; }
+
+#modal-move-file .modal-dialog {
+  width: 780px;
+  max-width: calc(100vw - 64px);
+}
+
+.pane-label,
+.working-task-header {
+  box-sizing: border-box;
+  height: 35px;
+  min-height: 35px;
+}
+
+#preview-output .md-extra-blank-lines { margin: 0; padding: 0; }
+#preview-output .md-extra-blank-lines > span { display: block; height: 1.8em; }
+
+#title-input.journal-filename-locked {
+  cursor: not-allowed;
+  color: var(--overlay1);
+  background: color-mix(in srgb, var(--surface0) 72%, var(--mantle));
+  border-color: transparent;
+}
+
+.task-meta-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  opacity: 1;
+}
+.task-meta-icon svg { width: 18px; height: 18px; }
+
+.task-date-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  flex: 0 0 30px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: var(--surface0);
+  color: var(--overlay1);
+  cursor: pointer;
+  box-shadow: var(--input-glow-idle, none);
+}
+.task-date-picker:hover { color: var(--text); border-color: var(--surface1); }
+.task-date-picker:focus-within { box-shadow: var(--input-glow-focus, 0 0 0 2px color-mix(in srgb, var(--mauve) 22%, transparent)); }
+.task-date-picker svg { display: block; width: 16px; height: 16px; pointer-events: none; }
+.task-date-picker:has(+ #task-input-start.has-value) { background: var(--dp-start-bg, var(--surface0)); color: var(--dp-start-color, var(--green)); border-color: var(--dp-start-border, var(--surface1)); }
+.task-date-picker:has(+ #task-input-completed.has-value) { background: var(--dp-completed-bg, var(--surface0)); color: var(--dp-completed-color, var(--blue)); border-color: var(--dp-completed-border, var(--surface1)); }
+.task-date-picker:has(+ #task-input-due.has-value) { background: var(--dp-due-bg, var(--surface0)); color: var(--dp-due-color, var(--red)); border-color: var(--dp-due-border, var(--surface1)); }
+.task-date-clear {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--overlay1);
+  font: 700 17px/1 sans-serif;
+  cursor: pointer;
+}
+.task-date-group:has(.task-date-input.has-value) .task-date-clear { display: inline-flex; }
+.task-date-clear:hover { background: var(--surface0); color: var(--red); }
+
+.task-date-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--crust) 60%, transparent);
+}
+.task-date-dialog {
+  width: min(330px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--surface1);
+  border-radius: 9px;
+  background: var(--mantle);
+  color: var(--text);
+  box-shadow: 0 16px 50px color-mix(in srgb, var(--crust) 75%, transparent);
+}
+.task-date-dialog-header,
+.task-date-dialog-actions { display: flex; align-items: center; gap: 7px; }
+.task-date-dialog-title { flex: 1; text-align: center; color: var(--lavender); font-size: 13px; font-weight: 700; }
+.task-date-dialog-weekdays,
+.task-date-dialog-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.task-date-dialog-weekdays { margin: 11px 0 4px; color: var(--overlay0); font-size: 10px; text-align: center; }
+.task-date-dialog-day {
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.task-date-dialog-day:hover { border-color: var(--surface1); background: var(--surface0); }
+.task-date-dialog-day.today { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 50%, transparent); }
+.task-date-dialog-day.selected { background: var(--mauve); color: var(--crust); font-weight: 700; }
+.task-date-dialog-actions { justify-content: flex-end; margin-top: 11px; }
+
+.working-layout-toggle svg { width: 15px; height: 15px; pointer-events: none; }
+.working-layout-toggle.active { color: var(--mauve); background: var(--surface0); }
+.working-task-header .sort-btn svg { width: 16px; height: 16px; pointer-events: none; }
+.working-task-header .btn-working-new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+}
+.working-task-header .btn-working-new svg { width: 16px; height: 16px; pointer-events: none; }
+
+.split-pane.three-pane .working-task-pane {
+  width: 30%;
+  height: auto;
+  min-width: 20vw;
+  min-height: 0;
+  flex: 0 0 auto;
+  border-right: 0;
+}
+.split-pane.three-pane #editor-pane,
+.split-pane.three-pane #preview-pane { min-width: 20vw; flex: 0 0 auto; }
+.split-pane.three-pane .task-editor-resizer {
+  width: 5px;
+  height: auto;
+  min-height: 0;
+  flex: 0 0 5px;
+  cursor: col-resize;
+}
+.split-pane.three-pane .task-editor-top { min-height: 0; height: 100%; flex: 1; }

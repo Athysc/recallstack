@@ -1,3 +1,4 @@
+// @ts-nocheck
 (() => {
   'use strict';
 
@@ -217,6 +218,7 @@
     writeText(path, text, expectedVersion = null) {
       return invoke('fs_write_text_versioned', { path, text, expectedVersion });
     },
+    readPortableText(name) { return invoke('portable_read_text', { name }); },
     async tasks(prefix = '') {
       if (indexState === 'indexing') {
         await Promise.race([
@@ -278,3 +280,5 @@
     }
   });
 })();
+
+export {};
