@@ -7,6 +7,7 @@ import {
   nextDuplicateFilename,
   normalizeTaskPriority,
   parseTaskFilename,
+  regularNoteFilename,
   taskDisplayTitle,
 } from "../features/tasks/filenames";
 import { parseThemeCatalog as parseThemeConfig } from "../features/themes/catalog";
@@ -3477,9 +3478,10 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       const oldPath = currentPath;
       const filename = oldPath.split('/').at(-1);
       const destDir = await getDirHandle(notesHandle, destParts, true);
-      let finalFilename = filename;
+      const movingTaskAsNote = isCurrentTaskFile() && moveAsNonTaskInput.checked;
+      let finalFilename = movingTaskAsNote ? regularNoteFilename(filename) : filename;
       if (await fileExistsInDir(destDir, finalFilename)) {
-        finalFilename = filename.replace(/\.md$/, '') + ' ' + datetimeSuffix() + '.md';
+        finalFilename = await nextDuplicateFilename(finalFilename, candidate => fileExistsInDir(destDir, candidate));
       }
       const finalPath = [...destParts, finalFilename].join('/');
       const content = mdEditor.value;
@@ -3582,7 +3584,6 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   async function convertNoteToTask() {
     if (isWorkingTask()) return;
     if (!currentPath || !l1Active) return;
-    const filename = currentPath.split('/').at(-1);
 
     let tasksHandle;
     try {
@@ -3592,23 +3593,27 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       return;
     }
 
-    await saveNote();
+    if (!await saveNote()) return;
 
-    let finalFilename = buildTaskFilename(filename.replace(/\.md$/i, ''), { priority: 'normal' });
-    let finalRelPath  = l1Active.name + '/tasks/' + filename;
-    if (await fileExistsInDir(tasksHandle, filename)) {
-      const suffix = datetimeSuffix();
-      finalFilename = buildTaskFilename(filename.replace(/\.md$/, '') + ' ' + suffix, { priority: 'normal' });
-      finalRelPath  = l1Active.name + '/tasks/' + finalFilename;
-    }
+    // Saving may rename the source from the title field, so derive the task name
+    // only after that save completes. A converted task must immediately use the
+    // metadata filename format; otherwise it presents as a task but changes name
+    // on its next save.
+    const sourcePath = currentPath;
+    const filename = sourcePath.split('/').at(-1);
+    const desiredFilename = buildTaskFilename(filename.replace(/\.md$/i, ''), { priority: 'normal' });
+    const finalFilename = await fileExistsInDir(tasksHandle, desiredFilename)
+      ? await nextDuplicateFilename(desiredFilename, candidate => fileExistsInDir(tasksHandle, candidate))
+      : desiredFilename;
+    const finalRelPath = l1Active.name + '/tasks/' + finalFilename;
 
     const newContent  = removeLegacyTaskHeader(mdEditor.value);
 
     await writeMdFile(finalRelPath, newContent);
-    await moveAssetsWithFile(currentPath, [l1Active.name, 'tasks'], newContent);
-    await removeMdFile(currentPath);
-    dbDelete(currentPath);
-    removeFromSearchIndex(currentPath);
+    await moveAssetsWithFile(sourcePath, [l1Active.name, 'tasks'], newContent);
+    await removeMdFile(sourcePath);
+    dbDelete(sourcePath);
+    removeFromSearchIndex(sourcePath);
     dbUpsert(finalRelPath, newContent);
     updateSearchIndex(finalRelPath, newContent);
     await saveSqliteDb();
@@ -5122,6 +5127,18 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     }, 200);
   }
 
+  async function executeSearch(query) {
+    try {
+      const generation = workspaceSessionGeneration;
+      const results = await runSearch(query);
+      if (generation !== workspaceSessionGeneration || searchInput.value.trim() !== query) return;
+      renderSearchResults(results, query);
+      enterSearchView();
+    } catch (error) {
+      toast('Search failed: ' + (error?.message || error), 'error');
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
   function esc(s) {
@@ -5477,7 +5494,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     { id:'navigation.today', title:'Jump to Today', category:'Navigation', keywords:['journal daily'], isEnabled:needsWorkspace, run:openTodayJournal },
     { id:'tasks.new-working', title:'Create Working Task', category:'Tasks', isEnabled:needsWorkspace, run:createWorkingTask },
     { id:'view.presentation', title:'Toggle Presentation Mode', category:'View', isEnabled:needsEditor, run:() => $id('btn-presentation').click() },
-    { id:'view.working-pane', title:'Show or Hide Working Tasks', category:'View', isEnabled:needsWorkspace, run:toggleWorkingTask },
+    { id:'view.working-pane', title:'Show or Hide Working Tasks', category:'View', isEnabled:needsWorkspace, run:() => btnToggleWorkingPane.click() },
     { id:'view.working-layout', title:'Switch Working Tasks Pane Layout', category:'View', isEnabled:needsWorkspace, run:() => btnWorkingLayout.click() },
     { id:'view.line-numbers', title:'Toggle Editor Line Numbers', category:'View', isEnabled:needsEditor, run:() => $id('btn-line-numbers').click() },
     { id:'editor.insert-link', title:'Insert Markdown Link', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('[link text](url)') },
@@ -5488,7 +5505,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     { id:'tools.rebuild-index', title:'Rebuild Search Index', category:'Tools', isVisible:state=>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('rebuild'); } },
     { id:'tools.backup', title:'Backup Workspace', category:'Tools', isVisible:state=>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('backup'); } },
     { id:'tools.git-status', title:'Show Git Status', category:'Tools', isVisible:state=>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('git'); } },
-    { id:'workspace.reveal-file', title:'Reveal Current File', category:'Workspace', isVisible:state=>state.nativeDesktop, isEnabled:needsEditor, run:() => window.__recallstackNative.revealPath((DB_WS_PREFIX.slice(5) + currentPath).replace(/\/{2,}/g, '/')) },
+    { id:'workspace.reveal-file', title:'Reveal Current File', category:'Workspace', isVisible:state=>state.nativeDesktop, isEnabled:needsEditor, run:() => window.__recallstackNative.revealPath(currentFileAppPath()) },
     { id:'workspace.reveal-folder', title:'Reveal Workspace Folder', category:'Workspace', isVisible:state=>state.nativeDesktop, isEnabled:needsWorkspace, run:() => window.__recallstackNative.revealWorkspace() },
     { id:'workspace.close-app', title:'Close RecallStack', category:'Workspace', isVisible:state=>state.nativeDesktop, run:() => window.__recallstackNative.closeApp() },
   ].forEach(registerCommand);
@@ -5510,7 +5527,12 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       return Object.keys(THEMES).map(id => ({ id:`theme:${id}`, title:themeDetails[id]?.name || id, meta:'Theme', run:() => executeCommand('view.theme', id) }));
     }
     if (paletteArgumentCommand?.id === 'workspace.recent') {
-      return (paletteArgumentCommand.arguments || []).map(workspace => ({ id:`workspace:${workspace.id}`, title:workspace.name, meta:workspace.path, run:async()=>{ const handle=await window.__recallstackNative.openWorkspacePath(workspace.path); await openWorkspace(handle); } }));
+      return (paletteArgumentCommand.arguments || []).map(workspace => ({
+        id:`workspace:${workspace.id}`,
+        title:workspace.name,
+        meta:workspace.path,
+        run:async()=>reopenWorkspaceChoice({ ...workspace, native:true }),
+      }));
     }
     const parsed = paletteMode(paletteInput.value);
     if (parsed.mode === 'notes') return searchIndex
@@ -5519,7 +5541,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     if (parsed.mode === 'tags') {
       const tags = new Set();
       searchIndex.forEach(note => (note.content.match(/(^|\s)#[\p{L}\p{N}_-]+/gu) || []).forEach(tag => tags.add(tag.trim())));
-      return [...tags].filter(tag => !parsed.query || tag.toLowerCase().includes(parsed.query.toLowerCase())).sort().map(tag => ({ id:`tag:${tag}`, title:tag, meta:'Search tag', run:() => { searchInput.value=tag; renderSearchResults(runSearch(tag), tag); enterSearchView(); } }));
+      return [...tags].filter(tag => !parsed.query || tag.toLowerCase().includes(parsed.query.toLowerCase())).sort().map(tag => ({ id:`tag:${tag}`, title:tag, meta:'Search tag', run:async() => { searchInput.value=tag; await executeSearch(tag); } }));
     }
     if (parsed.mode === 'help') return [
       { id:'help:commands', title:'> commands', meta:'Search every application command' },
@@ -5596,7 +5618,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   btnSave.addEventListener('click', () => executeCommand('file.save'));
   btnStampDate.addEventListener('click', async () => {
     if (isWorkingTask()) return;
-    const dateStr = new Date().toISOString().slice(0, 10);
+    const dateStr = localIsoDate(new Date());
     const datePattern = / \d{4}-\d{2}-\d{2}(?=\.md$|$)/;
     let val = titleInput.value.trim();
     const hasMd = val.toLowerCase().endsWith('.md');
@@ -6243,18 +6265,14 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     if (e.key === 'Enter') {
       clearTimeout(_searchTimer);
       const query = searchInput.value.trim();
-      if (query.length >= 3) {
-        renderSearchResults(runSearch(query), query);
-        enterSearchView();
-      }
+      if (query.length >= 3) executeSearch(query);
     }
   });
-  btnSearch.addEventListener('click', () => {
+  btnSearch.addEventListener('click', async () => {
     const query = searchInput.value.trim();
     if (query.length >= 3) {
       clearTimeout(_searchTimer);
-      renderSearchResults(runSearch(query), query);
-      enterSearchView();
+      await executeSearch(query);
     } else {
       searchInput.focus();
     }

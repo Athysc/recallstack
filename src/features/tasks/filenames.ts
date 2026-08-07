@@ -39,6 +39,12 @@ export function taskDisplayTitle(name: unknown): string {
   return parseTaskFilename(name)?.title || String(name).replace(/\.md$/i, "");
 }
 
+/** Remove task filename metadata when a task is moved back to a regular-note folder. */
+export function regularNoteFilename(name: unknown): string {
+  const value = String(name || "");
+  return parseTaskFilename(value) ? `${taskDisplayTitle(value)}.md` : value;
+}
+
 export function buildTaskFilename(title: unknown, metadata: Partial<TaskFilenameMetadata>): string {
   const cleanTitle = String(title || "").replace(/\.md$/i, "").replace(TASK_FILENAME_RE, "$1").trim() || "Untitled";
   return `${cleanTitle} -- s${taskDateToFilenameValue(metadata.startDate)}_c${taskDateToFilenameValue(metadata.completedDate)}_due${taskDateToFilenameValue(metadata.dueDate)}_${normalizeTaskPriority(metadata.priority)}.md`;

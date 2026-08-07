@@ -2,6 +2,7 @@ use crate::AppState;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use tauri::State;
@@ -95,24 +96,64 @@ fn markdown_links(markdown: &str) -> impl Iterator<Item = &str> {
         .filter_map(move |(start, _)| markdown[start + 2..].split_once(')').map(|(url, _)| url))
 }
 
-#[tauri::command]
-pub fn check_workspace(state: State<'_, Arc<AppState>>) -> Result<HealthReport, String> {
-    let root = state
-        .workspace
-        .lock()
-        .clone()
-        .ok_or_else(|| "No workspace is open".to_string())?;
-    let data = root.join("Data");
+fn is_hidden_workspace_entry(entry: &walkdir::DirEntry) -> bool {
+    entry.depth() > 0 && entry.file_type().is_dir() && entry.file_name().to_string_lossy().starts_with('.')
+}
+
+fn normalized_link_target(data: &Path, note: &Path, raw_link: &str) -> Option<String> {
+    let mut link = raw_link.trim().replace('\\', "/");
+    if link.starts_with('<') && link.ends_with('>') {
+        link = link[1..link.len() - 1].to_string();
+    } else if let Some((destination, _title)) = link.split_once(char::is_whitespace) {
+        link = destination.to_string();
+    }
+    link = link.split(['#', '?']).next().unwrap_or_default().to_string();
+    if link.is_empty()
+        || link.starts_with('#')
+        || link.starts_with('/')
+        || link.contains("://")
+        || link.starts_with("mailto:")
+        || link.starts_with("data:")
+    {
+        return None;
+    }
+
+    let parent = note.parent()?.strip_prefix(data).ok()?;
+    let mut parts = parent
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value.to_os_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for component in Path::new(&link).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                parts.pop()?;
+            }
+            Component::Normal(value) => parts.push(value.to_os_string()),
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    let relative = parts.into_iter().collect::<PathBuf>();
+    Some(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn scan_workspace_links(data: &Path) -> Result<(HashSet<String>, HashSet<String>, HashSet<String>), String> {
     let mut notes = HashSet::new();
     let mut assets = HashSet::new();
     let mut references = HashSet::new();
-    for item in WalkDir::new(&data).into_iter().filter_map(Result::ok) {
+    let walker = WalkDir::new(data)
+        .into_iter()
+        .filter_entry(|entry| !is_hidden_workspace_entry(entry));
+    for item in walker.filter_map(Result::ok) {
         if !item.file_type().is_file() {
             continue;
         }
         let relative = item
             .path()
-            .strip_prefix(&data)
+            .strip_prefix(data)
             .map_err(|e| e.to_string())?
             .to_string_lossy()
             .replace('\\', "/");
@@ -121,22 +162,29 @@ pub fn check_workspace(state: State<'_, Arc<AppState>>) -> Result<HealthReport, 
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
         {
-            notes.insert(relative.clone());
+            notes.insert(relative);
             let text = fs::read_to_string(item.path()).map_err(|e| e.to_string())?;
             for link in markdown_links(&text) {
-                if !link.starts_with('#') && !link.contains("://") && !link.starts_with("mailto:") {
-                    references.insert(
-                        link.split('#')
-                            .next()
-                            .unwrap_or_default()
-                            .replace('\\', "/"),
-                    );
+                if let Some(target) = normalized_link_target(data, item.path(), link) {
+                    references.insert(target);
                 }
             }
         } else {
             assets.insert(relative);
         }
     }
+    Ok((notes, assets, references))
+}
+
+#[tauri::command]
+pub fn check_workspace(state: State<'_, Arc<AppState>>) -> Result<HealthReport, String> {
+    let root = state
+        .workspace
+        .lock()
+        .clone()
+        .ok_or_else(|| "No workspace is open".to_string())?;
+    let data = root.join("Data");
+    let (notes, assets, references) = scan_workspace_links(&data)?;
     let broken_links: Vec<String> = references
         .iter()
         .filter(|link| !link.is_empty() && !data.join(link).exists())
@@ -180,6 +228,36 @@ pub fn check_workspace(state: State<'_, Arc<AppState>>) -> Result<HealthReport, 
         findings,
         git,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn workspace_links_resolve_from_each_note_and_ignore_internal_hidden_data() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("recallstack-health-{}-{unique}", std::process::id()));
+        let data = root.join("Data");
+        let tasks = data.join("notes/mynotes/tasks");
+        fs::create_dir_all(tasks.join("assets")).unwrap();
+        fs::create_dir_all(data.join(".recallstack-trash/record/payload")).unwrap();
+        fs::write(tasks.join("QA.md"), "![local](assets/pixel.png)\n[missing](missing.md)").unwrap();
+        fs::write(tasks.join("assets/pixel.png"), b"png").unwrap();
+        fs::write(data.join(".recallstack-trash/record/payload/deleted.png"), b"trash").unwrap();
+
+        let (notes, assets, references) = scan_workspace_links(&data).unwrap();
+        assert!(notes.contains("notes/mynotes/tasks/QA.md"));
+        assert!(assets.contains("notes/mynotes/tasks/assets/pixel.png"));
+        assert!(!assets.iter().any(|path| path.contains(".recallstack-trash")));
+        assert!(references.contains("notes/mynotes/tasks/assets/pixel.png"));
+        assert!(references.contains("notes/mynotes/tasks/missing.md"));
+        assert!(data.join("notes/mynotes/tasks/assets/pixel.png").exists());
+        assert!(!data.join("notes/mynotes/tasks/missing.md").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[tauri::command]

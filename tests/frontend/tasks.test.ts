@@ -5,6 +5,7 @@ import {
   buildTaskFilename,
   normalizeTaskPriority,
   parseTaskFilename,
+  regularNoteFilename,
   taskDisplayTitle,
 } from "../../src/features/tasks/filenames.ts";
 
@@ -31,4 +32,12 @@ test("task filename helpers retain legacy fallbacks", () => {
   assert.equal(taskDisplayTitle("Ordinary note.md"), "Ordinary note");
   assert.equal(parseTaskFilename("Ordinary note.md"), null);
   assert.match(buildTaskFilename("", {}), /^Untitled -- /);
+});
+
+test("moving a task back to notes removes filename metadata", () => {
+  assert.equal(
+    regularNoteFilename("Plan launch -- s20260807_c00000000_due20260814_high.md"),
+    "Plan launch.md",
+  );
+  assert.equal(regularNoteFilename("ordinary note.md"), "ordinary note.md");
 });
