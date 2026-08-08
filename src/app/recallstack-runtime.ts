@@ -741,18 +741,20 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   const DEPLOYMENT_TAG = ' - (Marked for Deployment)';
   const DEPLOYED_TAG_REGEX = / - \(Deployed \d{4}-\d{2}-\d{2}\)/;
   const BACKLOG_TAG = ' - (Backlog)';
+  const WAITING_TAG = ' - (Waiting)';
 
   function buildDeployedTag() {
     return ' - (Deployed ' + new Date().toISOString().slice(0, 10) + ')';
   }
   function stripStatusTags(base) {
-    return base.replaceAll(QA_REVIEW_TAG, '').replaceAll(DEPLOYMENT_TAG, '').replace(DEPLOYED_TAG_REGEX, '').replaceAll(BACKLOG_TAG, '');
+    return base.replaceAll(QA_REVIEW_TAG, '').replaceAll(DEPLOYMENT_TAG, '').replace(DEPLOYED_TAG_REGEX, '').replaceAll(BACKLOG_TAG, '').replaceAll(WAITING_TAG, '');
   }
   function detectStatusTag(name) {
     if (name.includes(DEPLOYMENT_TAG)) return 'Deployment';
     if (name.includes(QA_REVIEW_TAG)) return 'QA';
     if (DEPLOYED_TAG_REGEX.test(name)) return 'Deployed';
     if (name.includes(BACKLOG_TAG)) return 'Backlog';
+    if (name.includes(WAITING_TAG)) return 'Waiting';
     return '';
   }
 
@@ -3162,6 +3164,24 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     tabs.splice(placeAfter ? toIdx + 1 : toIdx, 0, moved);
   }
 
+  // Small inline-SVG icon distinguishing a tab's file kind (task / journal /
+  // regular note) at a glance in the tab strip. Reuses the same TASK and
+  // JOURNAL glyphs as taskKindIndicatorMarkup() (minus its text label, which
+  // is sized for the toolbar, not a compact tab chip). Outputs-mode tabs and
+  // path-less (brand new, unsaved) tabs are neither task nor note, so they
+  // get no icon rather than a misleading one.
+  function tabKindIconMarkup(tab) {
+    if (tab.isOutputsFile || !tab.path) return '';
+    if (isCurrentTaskPath(tab.path)) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 2.5 2.5L16 9"/></svg>';
+    }
+    if (isJournalNote(tab.path)) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 0-2 2z"/><path d="M5 4v16a2 2 0 0 1 2-2h12M9 8h6M9 12h6"/></svg>';
+    }
+    // Plain note: minimal document-with-folded-corner glyph, distinct from the task checkmark-square.
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5"/></svg>';
+  }
+
   function renderTabStrip() {
     if (!tabStripEl) return;
     tabStripEl.replaceChildren();
@@ -3177,6 +3197,10 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       item.tabIndex = 0;
       item.title = tab.path || 'Untitled';
       item.draggable = true;
+      const kindMarkup = tabKindIconMarkup(tab);
+      const kindIcon = document.createElement('span');
+      kindIcon.className = 'tab-kind-icon';
+      kindIcon.innerHTML = kindMarkup;
       const dot = document.createElement('span');
       dot.className = 'tab-dirty-dot';
       dot.title = 'Unsaved changes';
@@ -3191,7 +3215,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       close.setAttribute('aria-label', `Close ${tab.title || 'tab'}`);
       close.draggable = false; // don't let a mousedown on × start a tab drag instead of a click
       close.addEventListener('click', e => { e.stopPropagation(); closeTab(tab.id); });
-      item.append(dot, label, close);
+      item.append(...(kindMarkup ? [kindIcon] : []), dot, label, close);
       item.addEventListener('click', () => { if (tab.id !== activeTabId) activateTab(tab.id); });
       item.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (tab.id !== activeTabId) activateTab(tab.id); }
@@ -4141,6 +4165,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     else if (choice === 'Deployment') base += DEPLOYMENT_TAG;
     else if (choice === 'Deployed') base += buildDeployedTag();
     else if (choice === 'Backlog') base += BACKLOG_TAG;
+    else if (choice === 'Waiting') base += WAITING_TAG;
     titleInput.value = hasMd ? base + '.md' : base;
     setChoiceSelection(taskInputStatus, 'status', choice);
   }

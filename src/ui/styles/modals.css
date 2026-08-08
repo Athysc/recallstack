@@ -413,6 +413,7 @@
   .task-choice.priority-blocked { color: var(--peach); }
   .task-choice.priority-onhold { color: var(--yellow); }
   .task-choice.status-clear { color: var(--overlay1); }
+  .task-choice.status-waiting { color: var(--sky); }
   .task-choice.status-qa { color: var(--mauve); }
   .task-choice.status-deployment { color: var(--peach); }
   .task-choice.status-deployed { color: var(--green); }

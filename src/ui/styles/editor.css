@@ -56,6 +56,18 @@
   .tab-strip-item.drag-over-left { box-shadow: inset 2px 0 0 0 var(--mauve); }
   .tab-strip-item.drag-over-right { box-shadow: inset -2px 0 0 0 var(--mauve); }
 
+  .tab-kind-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    color: var(--subtext0);
+  }
+  .tab-kind-icon svg { width: 100%; height: 100%; }
+  .tab-strip-item.active .tab-kind-icon { color: var(--text); }
+
   .tab-dirty-dot {
     width: 6px;
     height: 6px;
