@@ -2,6 +2,12 @@
 
 The Tauri 2 desktop port of RecallStack. Markdown files under `Data/` remain canonical. `DB/index.db` is a native SQLite FTS5 index that can always be rebuilt.
 
+## Recent changes (2026-08-08)
+
+- Added a multi-file tab strip above the editor, with drag-to-reorder, a dirty-state indicator, and a close button per tab.
+- Added a "Waiting" task status alongside QA, Deployment, and Deployed.
+- Fixed a frontend parity-check regression (`recallstack.html` had drifted from `index.html`/the modular CSS) and a macOS-only release build failure caused by an upstream `zune-jpeg` compiler incompatibility, both of which were breaking the reviewed release workflow.
+
 ## Development
 
 ```bash
@@ -31,10 +37,67 @@ npm run package:macos:app
 
 The macOS build must run natively on a Mac. Because the app is unsigned and unnotarized, Gatekeeper blocks the first launch until the user right-clicks → Open (or clears the quarantine attribute with `xattr -cr`); this is documented in the packaged `README.txt`.
 
-For complete Arch Linux dependency installation and local build instructions,
-Linux tarball and AppImage commands, macOS build and Gatekeeper notes, runtime
-requirements, upgrade policy, and release verification, see
-[docs/distribution.md](docs/distribution.md#build-locally-on-arch-linux).
+## Arch Linux: build and install
+
+RecallStack does not have a repository/AUR package yet, so build it locally.
+
+Install the Tauri 2 build dependencies, Node.js, npm, and the Rust toolchain:
+
+```bash
+sudo pacman -Syu
+sudo pacman -S --needed \
+  webkit2gtk-4.1 \
+  base-devel \
+  curl \
+  wget \
+  file \
+  openssl \
+  appmenu-gtk-module \
+  libappindicator-gtk3 \
+  librsvg \
+  xdotool \
+  nodejs \
+  npm \
+  rustup
+
+rustup default stable
+```
+
+From the RecallStack repository, install the locked JavaScript dependencies, verify the release, and build both Linux artifact formats:
+
+```bash
+npm ci
+npm run release:verify
+npm run release:clean
+npm run build:linux
+npm run package:linux:tar
+npm run build:linux:appimage
+npm run package:linux:appimage
+```
+
+This writes an AppImage, a portable tarball, SHA-256 checksums, an artifact manifest, and a generated `PKGBUILD` to `release/`. Install with `makepkg` (the `PKGBUILD` pins the exact local tarball and its checksum, so keep both files together):
+
+```bash
+cd release
+makepkg -si
+```
+
+Or run the AppImage directly without installing:
+
+```bash
+chmod +x release/RecallStack-*-linux-x86_64.AppImage
+./release/RecallStack-*-linux-x86_64.AppImage
+```
+
+If the AppImage reports a FUSE error, install `fuse2`:
+
+```bash
+sudo pacman -S --needed fuse2
+```
+
+Keep `readme.md`, `changes.md`, and `theme.json` beside the AppImage (or wherever `makepkg -si` installs the binary) so their externally editable versions stay available; embedded defaults are used as a fallback otherwise.
+
+For Linux tarball/AppImage details beyond Arch, macOS build and Gatekeeper notes, runtime requirements, upgrade policy, and release verification, see [docs/distribution.md](docs/distribution.md#build-locally-on-arch-linux).
 
 ## Desktop architecture
 
