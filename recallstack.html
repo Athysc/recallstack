@@ -353,6 +353,90 @@
     flex-shrink: 0;
   }
 
+  .tab-strip {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    padding: 0 8px;
+    background: var(--mantle);
+    border-bottom: 1px solid var(--surface0);
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .tab-strip.hidden { display: none; }
+
+  .tab-strip-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 8px 7px 10px;
+    max-width: 220px;
+    min-width: 90px;
+    border-bottom: 2px solid transparent;
+    color: var(--subtext0);
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .tab-strip-item:hover { color: var(--text); background: color-mix(in srgb, var(--surface0) 60%, transparent); }
+  .tab-strip-item.active {
+    color: var(--text);
+    border-bottom-color: var(--mauve);
+    background: color-mix(in srgb, var(--mauve) 10%, transparent);
+  }
+  .tab-strip-item:focus-visible { outline: 2px solid var(--mauve); outline-offset: -2px; }
+  .tab-strip-item.dragging { opacity: 0.4; }
+  .tab-strip-item.drag-over-left { box-shadow: inset 2px 0 0 0 var(--mauve); }
+  .tab-strip-item.drag-over-right { box-shadow: inset -2px 0 0 0 var(--mauve); }
+
+  .tab-kind-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    color: var(--subtext0);
+  }
+  .tab-kind-icon svg { width: 100%; height: 100%; }
+  .tab-strip-item.active .tab-kind-icon { color: var(--text); }
+
+  .tab-dirty-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--peach);
+    flex-shrink: 0;
+    visibility: hidden;
+  }
+  .tab-strip-item.dirty .tab-dirty-dot { visibility: visible; }
+
+  .tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .tab-close-btn {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    text-align: center;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--overlay0);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .tab-close-btn:hover { background: var(--surface1); color: var(--text); }
+
   #presentation-exit-bar {
     display: flex;
     align-items: center;
@@ -1210,6 +1294,7 @@
   .task-choice.priority-blocked { color: var(--peach); }
   .task-choice.priority-onhold { color: var(--yellow); }
   .task-choice.status-clear { color: var(--overlay1); }
+  .task-choice.status-waiting { color: var(--sky); }
   .task-choice.status-qa { color: var(--mauve); }
   .task-choice.status-deployment { color: var(--peach); }
   .task-choice.status-deployed { color: var(--green); }
@@ -2339,6 +2424,7 @@
         <button class="btn btn-primary"       id="btn-new-from-editor">+ New</button>
         <button class="btn btn-ghost"         id="btn-presentation" title="Toggle presentation mode">Presentation</button>
       </div>
+      <div id="tab-strip" class="tab-strip hidden" role="tablist" aria-label="Open files"></div>
       <div id="presentation-exit-bar" class="hidden">
         <span id="presentation-title"></span>
         <button class="btn btn-primary" id="btn-exit-presentation">Exit Presentation Mode</button>
@@ -2379,6 +2465,7 @@
           <span class="task-meta-icon status" title="Status" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M8 12h8"/></svg></span>
           <div id="task-input-status" class="task-choice-set">
             <button type="button" class="task-choice status-clear is-selected" data-status="" title="Status: Clear" aria-label="Status: Clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 12h12"/></svg></button>
+            <button type="button" class="task-choice status-waiting" data-status="Waiting" title="Status: Waiting" aria-label="Status: Waiting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></button>
             <button type="button" class="task-choice status-qa" data-status="QA" title="Status: In QA Review" aria-label="Status: In QA Review"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6m-5 0v5l-5 9a3 3 0 0 0 3 4h8a3 3 0 0 0 3-4l-5-9V3"/><path d="M8 15h8"/></svg></button>
             <button type="button" class="task-choice status-deployment" data-status="Deployment" title="Status: Marked for Deployment" aria-label="Status: Marked for Deployment"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 7-9 7 9-7 9-7-9Z"/><path d="M12 12V3m0 9 7 9"/></svg></button>
             <button type="button" class="task-choice status-deployed" data-status="Deployed" title="Status: Deployed" aria-label="Status: Deployed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg></button>
