@@ -447,6 +447,136 @@ Drag the **divider bar** between the panes to resize them.
 
 ---
 
+## Tabs
+
+RecallStack keeps a single shared editor and preview pane, but a **tab strip** above the editor toolbar lets you keep several files open at once and switch between them without losing your place.
+
+- Each open file gets a tab showing its title (long titles are truncated with an ellipsis) and a **×** close button
+- A small dot appears on a tab with unsaved changes
+- Click a tab to activate it — the shared editor and preview swap to that file
+- Click a tab's **×** to close it
+- Opening a file that is already open in a tab activates that tab instead of opening a duplicate
+- Drag a tab and drop it onto another tab to reorder the strip; a highlighted edge on the target tab shows which side the dragged tab will land on
+- When there are more open tabs than fit in the window, the strip scrolls horizontally
+
+### Current Limitations
+
+- Tabs are workspace-scoped — closing or switching the workspace closes all tabs. Nothing is lost: the same autosave and unsaved-note protection that guarded a single open file runs first, exactly as it did before tabs existed
+- Undo history and preview rendering are not yet tracked per tab — switching tabs does not preserve that tab's undo/redo stack or a cached render, and the preview is regenerated on activation
+- Tab order and which tabs were open are not restored after restarting the app
+
+---
+
+## Command Palette
+
+A keyboard-first launcher for commands, notes, tags, and quick help. It opens as a centered dialog with a single search input.
+
+### Opening It
+
+| Shortcut | Behavior |
+|---|---|
+| `Ctrl+K` (`Cmd+K` on macOS) | Toggle the palette — opens pre-filled with `>` (command-search mode) if it's closed, closes it if it's already open |
+| `Ctrl+P` (`Cmd+P` on macOS) | Open the palette pre-filled with `@` (quick-open-notes mode); switches an already-open palette into notes mode |
+
+### Modes
+
+The first character typed into the palette input switches what it searches. Each `Ctrl+K` / `Ctrl+P` press resets to the mode its own shortcut opens — modes are not remembered between sessions.
+
+| Prefix | Mode | What it does |
+|---|---|---|
+| `>` *(default — no prefix also works)* | Commands | Fuzzy-searches every registered application command by title, category, and keywords |
+| `@` | Notes | Quick-opens any indexed note by filename or path; selecting a result opens it in the editor |
+| `#` | Tags | Lists every `#tag` found across indexed notes; selecting one runs a workspace search for that tag |
+| `?` | Help | Shows a short static reference of the four modes and the navigation keys below — these entries are informational only and don't run anything |
+
+### Navigation
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move the highlighted selection |
+| `Page Up` / `Page Down` | Jump the selection 8 items at a time |
+| `Enter` | Run the highlighted item |
+| `Escape` — **Back**, then **Close** | If a command is mid-way through picking an argument (see below), the first `Escape` cancels just that step and returns to the normal list; otherwise, or on a second `Escape`, it closes the palette |
+| Click outside the dialog | Closes the palette |
+| Mouse hover | Also updates the highlighted selection |
+
+### Commands That Ask for an Argument
+
+**Change Theme** and, on desktop builds, **Open Recent Workspace** don't run immediately on `Enter` — they replace the list with a second one scoped to that command (every theme, or every recent workspace) and keep the palette open until you pick from it.
+
+### Registered Commands
+
+Commands are shown or enabled based on context — most **File** and **Editor** commands need a note or workspace open, and **Tools** and some **Workspace** commands only appear in the native desktop build. A disabled command still appears in the list (greyed out), with the reason shown in place of its category.
+
+#### File
+
+| Command | Shortcut |
+|---|---|
+| Create Note | `Ctrl+N` |
+| Save Note | `Ctrl+S` |
+| Move or Rename Note | — |
+| Archive or Restore Note | — |
+| Move Note to Trash | — |
+| Close Tab | `Ctrl+W` |
+| Close Other Tabs | — |
+| Reopen Closed Tab | — |
+
+#### Navigation
+
+| Command | Shortcut |
+|---|---|
+| Search Notes | `Ctrl+Shift+F` |
+| Jump to Today | — |
+| Next Tab | `Ctrl+Tab` |
+| Previous Tab | `Ctrl+Shift+Tab` |
+
+#### Tasks
+
+| Command | Shortcut |
+|---|---|
+| Create Working Task | — |
+
+#### View
+
+| Command | Shortcut |
+|---|---|
+| Toggle Presentation Mode | — |
+| Show or Hide Working Tasks | — |
+| Switch Working Tasks Pane Layout | — |
+| Toggle Editor Line Numbers | — |
+| Change Theme *(opens an argument list)* | — |
+
+#### Editor
+
+| Command | Shortcut |
+|---|---|
+| Insert Markdown Link | — |
+| Insert Code Block | — |
+| Insert Mermaid Block | — |
+
+#### Workspace
+
+| Command | Shortcut |
+|---|---|
+| Open or Switch Workspace | `Ctrl+O` |
+| Open Recent Workspace *(desktop, opens an argument list)* | — |
+| Reveal Current File *(desktop)* | — |
+| Reveal Workspace Folder *(desktop)* | — |
+| Close RecallStack *(desktop)* | — |
+
+#### Tools *(desktop only)*
+
+| Command | Shortcut |
+|---|---|
+| Validate Workspace | — |
+| Rebuild Search Index | — |
+| Backup Workspace | — |
+| Show Git Status | — |
+
+> `Ctrl+1` through `Ctrl+9` jump directly to the tab in that visual position. This is a raw global shortcut, not a palette command, so it isn't listed in the table above — see **Keyboard Shortcuts → Global**.
+
+---
+
 ## Keyboard Shortcuts
 
 ### Global
@@ -454,9 +584,13 @@ Drag the **divider bar** between the panes to resize them.
 | Shortcut | Action |
 |---|---|
 | `Ctrl+S` | Save current note |
-| `Ctrl+K` | Open the command palette |
-| `Ctrl+P` | Open the command palette in note mode |
+| `Ctrl+K` | Toggle the command palette (opens in command-search mode) |
+| `Ctrl+P` | Open the command palette in quick-open-notes mode |
 | `Ctrl+Shift+F` | Focus workspace search |
+| `Ctrl+Tab` | Switch to the next tab |
+| `Ctrl+Shift+Tab` | Switch to the previous tab |
+| `Ctrl+W` | Close the current tab |
+| `Ctrl+1` – `Ctrl+9` | Jump to the tab in that visual position (1 = leftmost) |
 | `Escape` | Close editor, modal, or clear search |
 
 ### In the Title / Filename Field

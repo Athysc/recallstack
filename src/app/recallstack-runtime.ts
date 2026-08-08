@@ -94,6 +94,18 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   let savePromise         = null;
   let searchIndex         = [];     // [{ notesRelPath, name, content }]
   let currentBacklinks    = [];
+
+  // ── Tabs (Improvement 11, Phase 1) ─────────────────────────────────────────────
+  // A tab is a lightweight record; the single shared editor/preview is swapped to
+  // match whichever tab is active. See docs/implementation-plans/11-tab-support.md.
+  // { id, path, title, isNew, dirty, isOutputsFile, outputsFileHandle, outputsDirHandle,
+  //   returnToOutputs, returnToAllTasks }
+  let tabs                = [];
+  let activeTabId         = null;
+  let nextTabId           = 1;
+  let closedTabHistory    = []; // [{ path, title }] — most-recently-closed last
+  let draggedTabId        = null; // in-flight HTML5 drag-and-drop reorder, see renderTabStrip()
+
   const assetBlobUrls     = new Map(); // relative path (e.g. 'assets/foo.png') → blob URL
   let remoteMediaSessionAllowed = false;
   let workingPaneVisible = localStorage.getItem(PREFERENCE_KEYS.workingPaneVisible) !== 'off';
@@ -154,6 +166,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   const btnCancel         = $id('btn-cancel');
   const btnNewFromEditor  = $id('btn-new-from-editor');
   const btnViewJournal    = $id('btn-view-journal');
+  const tabStripEl        = $id('tab-strip');
   const mdEditor     = createMarkdownEditor($id('md-editor'), {
     lineNumbers: preferenceIsEnabled(localStorage.getItem(PREFERENCE_KEYS.lineNumbers), true),
     wordWrap: localStorage.getItem(PREFERENCE_KEYS.wordWrap) === 'on',
@@ -1349,6 +1362,12 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     searchIndex = [];
     currentBacklinks = [];
 
+    // Tabs are workspace-scoped (Improvement 11) — switching workspaces closes them all.
+    tabs = [];
+    activeTabId = null;
+    closedTabHistory = [];
+    renderTabStrip();
+
     navRow1.replaceChildren();
     navRow2.replaceChildren();
     navRow2.classList.add('hidden');
@@ -2032,22 +2051,60 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   }
 
   async function openOutputsFile(f) {
-    if (!await checkUnsavedNewNote()) return;
-    if (!await autoSaveIfDirty()) return;
+    const outputsPath = outputsActiveRoot + '/outputs/' + outputsActiveFolder.name + '/' + f.subPath;
+    return openOutputsFileInTab(outputsPath, f);
+  }
 
+  // Tab-aware entry point for Outputs-mode files — mirrors openFileInTab().
+  async function openOutputsFileInTab(outputsPath, fileEntry) {
+    const existing = findTabByPath(outputsPath);
+    if (existing) {
+      if (existing.id === activeTabId) return true;
+      return activateTab(existing.id);
+    }
+    if (!await checkUnsavedNewNote()) return false;
+    if (!await autoSaveIfDirty()) return false;
+    syncActiveTabFromState();
+    const tab = {
+      id: nextTabId++, path: outputsPath, title: fileEntry.name.replace(/\.md$/i, ''), isNew: false, dirty: false,
+      isOutputsFile: true, outputsFileHandle: fileEntry.handle, outputsDirHandle: fileEntry.dirHandle,
+      returnToOutputs: true, returnToAllTasks: false,
+    };
+    tabs.push(tab);
+    const previousActiveId = activeTabId;
+    activeTabId = tab.id;
+    const ok = await loadOutputsFileIntoEditor(tab, fileEntry);
+    if (!ok) {
+      tabs = tabs.filter(t => t.id !== tab.id);
+      activeTabId = previousActiveId;
+      renderTabStrip();
+      return false;
+    }
+    syncActiveTabFromState();
+    renderTabStrip();
+    return true;
+  }
+
+  // Loads an Outputs-mode file into the shared editor/preview. fileEntry (with
+  // its live FileSystemFileHandle/dirHandle) is only available on first open
+  // from the file card; reactivating a backgrounded tab reuses the handles
+  // already stored on the tab record instead of re-scanning the folder.
+  async function loadOutputsFileIntoEditor(tab, fileEntry = null) {
+    const handle       = fileEntry?.handle    || tab.outputsFileHandle;
+    const dirHandle     = fileEntry?.dirHandle || tab.outputsDirHandle;
+    const outputsPath  = tab.path;
     try {
-      const file    = await f.handle.getFile();
+      const file    = await handle.getFile();
       const content = await file.text();
-      const outputsPath = outputsActiveRoot + '/outputs/' + outputsActiveFolder.name + '/' + f.subPath;
 
       currentPath         = outputsPath;
       isNew               = false;
       isOutputsFile       = true;
-      currentOutputsFh    = f.handle;
-      currentOutputsDirFh = f.dirHandle;
+      currentOutputsFh    = handle;
+      currentOutputsDirFh = dirHandle;
       returnToOutputs     = true;
 
-      titleInput.value = f.name.replace(/\.md$/i, '');
+      titleInput.value = outputsPath.split('/').at(-1).replace(/\.md$/i, '');
       savedContent     = content;
       let editorContent = content;
 
@@ -2080,13 +2137,15 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       showTaskDateBar();
       applyJournalToolbarRestrictions();
       updateConvertToTaskBtn();
+      return true;
     } catch (e) {
       if (e?.name === 'NotFoundError' && outputsActiveFolder) {
         toast('Output file no longer exists; refreshed Outputs.', 'error');
         await loadOutputsFiles(outputsActiveFolder);
-        return;
+        return false;
       }
       toast('Could not open file: ' + e.message, 'error');
+      return false;
     }
   }
 
@@ -3029,10 +3088,198 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     return true;
   }
 
-  async function openFile(filename, fullNotesRelPath, options = {}) {
-    if (!await checkUnsavedNewNote()) return;
-    if (!await autoSaveIfDirty()) return;
-    const notesRelPath = fullNotesRelPath || (activeFolderPath() + '/' + filename);
+  // ── Tabs (Improvement 11, Phase 1) ──────────────────────────────────────────
+  // One shared CodeMirror EditorView and one shared preview DOM node are reused
+  // for every tab (Option A from the plan) — a tab switch re-runs the same
+  // "load this file into the editor" logic that already ran for single-document
+  // opens, just against a different path. Because every navigation away from a
+  // tab is gated by checkUnsavedNewNote()/autoSaveIfDirty() below (exactly like
+  // today's single-document flow), a *background* tab is always left in a clean,
+  // saved-or-discarded state — so only the active tab can ever be "dirty".
+
+  function findTabByPath(path) {
+    if (path == null) return null;
+    return tabs.find(t => t.path === path) || null;
+  }
+
+  function activeTabRecord() {
+    return tabs.find(t => t.id === activeTabId) || null;
+  }
+
+  // Rewrites the paths of every open tab affected by a folder rename/move so
+  // background tabs don't silently keep pointing at a location that no longer
+  // exists. Workspace file paths only — outputs tabs are keyed by handle, not
+  // by a workspace-relative path, so they're left untouched.
+  function remapTabPaths(oldPrefix, newPrefix) {
+    for (const tab of tabs) {
+      if (!tab.isOutputsFile && tab.path && tab.path.startsWith(oldPrefix)) {
+        tab.path = newPrefix + tab.path.slice(oldPrefix.length);
+        tab.title = tabTitleForPath(tab.path, tab.isOutputsFile);
+      }
+    }
+  }
+
+  function tabTitleForPath(path, isOutputsFileFlag = false) {
+    if (!path) return 'Untitled';
+    const name = path.split('/').at(-1);
+    if (isOutputsFileFlag) return name.replace(/\.md$/i, '');
+    return isCurrentTaskPath(path) ? taskDisplayTitle(name) : name.replace(/\.md$/i, '');
+  }
+
+  // Writes the module-level "current document" state onto the active tab record.
+  // Call this after loading a file into the editor, after saving, and right
+  // before deactivating a tab. Returns true when the tab's dirty flag changed
+  // (used to skip unnecessary tab-strip re-renders).
+  function syncActiveTabFromState() {
+    const tab = activeTabRecord();
+    if (!tab) return false;
+    const prevDirty = tab.dirty;
+    tab.path              = currentPath;
+    tab.isNew              = isNew;
+    tab.isOutputsFile       = isOutputsFile;
+    tab.outputsFileHandle   = currentOutputsFh;
+    tab.outputsDirHandle    = currentOutputsDirFh;
+    tab.returnToOutputs    = returnToOutputs;
+    tab.returnToAllTasks   = returnToAllTasks;
+    tab.title = tabTitleForPath(currentPath, isOutputsFile);
+    tab.dirty = isNew
+      ? (mdEditor.value.trim() !== '' && mdEditor.value !== (savedContent ?? ''))
+      : (!!currentPath && mdEditor.value !== savedContent);
+    return tab.dirty !== prevDirty;
+  }
+
+  // Moves `draggedId` in the `tabs` array to sit immediately before/after
+  // `targetId` and re-renders. Ctrl+1-9 (jumpToTabIndex) and Ctrl+Tab
+  // (switchToRelativeTab) both index straight into this same array, so they
+  // automatically follow the new order — no separate bookkeeping needed.
+  function reorderTabs(draggedId, targetId, placeAfter) {
+    if (draggedId === targetId) return;
+    const fromIdx = tabs.findIndex(t => t.id === draggedId);
+    if (fromIdx === -1) return;
+    const [moved] = tabs.splice(fromIdx, 1);
+    const toIdx = tabs.findIndex(t => t.id === targetId);
+    if (toIdx === -1) { tabs.splice(fromIdx, 0, moved); return; } // target vanished mid-drag; put it back
+    tabs.splice(placeAfter ? toIdx + 1 : toIdx, 0, moved);
+  }
+
+  function renderTabStrip() {
+    if (!tabStripEl) return;
+    tabStripEl.replaceChildren();
+    if (!tabs.length) { tabStripEl.classList.add('hidden'); return; }
+    tabStripEl.classList.remove('hidden');
+    tabs.forEach(tab => {
+      const item = document.createElement('div');
+      item.className = 'tab-strip-item'
+        + (tab.id === activeTabId ? ' active' : '')
+        + (tab.dirty ? ' dirty' : '');
+      item.setAttribute('role', 'tab');
+      item.setAttribute('aria-selected', String(tab.id === activeTabId));
+      item.tabIndex = 0;
+      item.title = tab.path || 'Untitled';
+      item.draggable = true;
+      const dot = document.createElement('span');
+      dot.className = 'tab-dirty-dot';
+      dot.title = 'Unsaved changes';
+      const label = document.createElement('span');
+      label.className = 'tab-title';
+      label.textContent = tab.title || 'Untitled';
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'tab-close-btn';
+      close.innerHTML = '&times;';
+      close.title = 'Close tab';
+      close.setAttribute('aria-label', `Close ${tab.title || 'tab'}`);
+      close.draggable = false; // don't let a mousedown on × start a tab drag instead of a click
+      close.addEventListener('click', e => { e.stopPropagation(); closeTab(tab.id); });
+      item.append(dot, label, close);
+      item.addEventListener('click', () => { if (tab.id !== activeTabId) activateTab(tab.id); });
+      item.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (tab.id !== activeTabId) activateTab(tab.id); }
+      });
+      // ── Drag-to-reorder (HTML5 DnD) ──────────────────────────────────────
+      item.addEventListener('dragstart', e => {
+        draggedTabId = tab.id;
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', String(tab.id)); } catch { /* some hosts restrict setData; draggedTabId still tracks it */ }
+      });
+      item.addEventListener('dragend', () => {
+        draggedTabId = null;
+        tabStripEl.querySelectorAll('.tab-strip-item').forEach(el => el.classList.remove('dragging', 'drag-over-left', 'drag-over-right'));
+      });
+      item.addEventListener('dragover', e => {
+        if (draggedTabId == null || draggedTabId === tab.id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = item.getBoundingClientRect();
+        const placeAfter = (e.clientX - rect.left) > rect.width / 2;
+        item.classList.toggle('drag-over-left', !placeAfter);
+        item.classList.toggle('drag-over-right', placeAfter);
+      });
+      item.addEventListener('dragleave', () => item.classList.remove('drag-over-left', 'drag-over-right'));
+      item.addEventListener('drop', e => {
+        e.preventDefault();
+        item.classList.remove('drag-over-left', 'drag-over-right');
+        if (draggedTabId == null || draggedTabId === tab.id) return;
+        const rect = item.getBoundingClientRect();
+        const placeAfter = (e.clientX - rect.left) > rect.width / 2;
+        reorderTabs(draggedTabId, tab.id, placeAfter);
+        draggedTabId = null;
+        renderTabStrip();
+      });
+      tabStripEl.appendChild(item);
+    });
+  }
+
+  // Dropping past the last tab (empty strip space) moves the dragged tab to
+  // the end. Bound once on the strip itself — renderTabStrip() only replaces
+  // its children, so this container-level listener survives every re-render.
+  tabStripEl?.addEventListener('dragover', e => {
+    if (e.target !== tabStripEl || draggedTabId == null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  });
+  tabStripEl?.addEventListener('drop', e => {
+    if (e.target !== tabStripEl || draggedTabId == null) return;
+    e.preventDefault();
+    const fromIdx = tabs.findIndex(t => t.id === draggedTabId);
+    if (fromIdx !== -1) { const [moved] = tabs.splice(fromIdx, 1); tabs.push(moved); }
+    draggedTabId = null;
+    renderTabStrip();
+  });
+
+  // Recomputes just the active tab's dirty flag (cheap; called on every editor
+  // keystroke) and only touches the DOM when the flag actually flips.
+  function updateActiveTabDirtyState() {
+    if (syncActiveTabFromState()) renderTabStrip();
+  }
+
+  function removeTabRecord(tabId) {
+    if (tabId == null) return;
+    tabs = tabs.filter(t => t.id !== tabId);
+    if (activeTabId === tabId) activeTabId = null;
+    renderTabStrip();
+  }
+
+  // Clears the shared "current document" state and returns to the appropriate
+  // list/search/outputs/all-tasks view — used when the last tab is closed.
+  function showEmptyEditorState() {
+    currentPath          = null;
+    savedContent         = null;
+    isNew                = false;
+    isOutputsFile        = false;
+    currentOutputsFh     = null;
+    currentOutputsDirFh  = null;
+    currentBacklinks     = [];
+    mdEditor.openDocument('', '', 0);
+    previewOut.replaceChildren();
+    cancelEdit();
+  }
+
+  // Loads a regular workspace file's content into the shared editor/preview and
+  // task chrome. Formerly the body of openFile(); now only responsible for the
+  // "load" half — tab bookkeeping lives in openFileInTab()/activateTab().
+  async function loadFileIntoEditor(notesRelPath, options = {}) {
     try {
       const content = await readMdFile(notesRelPath);
       currentPath = notesRelPath;
@@ -3091,6 +3338,135 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     }
   }
 
+  // Tab-aware entry point: activates an already-open tab for this path instead
+  // of duplicating it, otherwise settles the outgoing tab and opens a new one.
+  async function openFileInTab(notesRelPath, options = {}) {
+    const existing = findTabByPath(notesRelPath);
+    if (existing) {
+      if (existing.id === activeTabId) return true;
+      return activateTab(existing.id);
+    }
+    if (!await checkUnsavedNewNote()) return false;
+    if (!await autoSaveIfDirty()) return false;
+    syncActiveTabFromState();
+    const tab = {
+      id: nextTabId++, path: notesRelPath, title: tabTitleForPath(notesRelPath), isNew: false, dirty: false,
+      isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false,
+    };
+    tabs.push(tab);
+    const previousActiveId = activeTabId;
+    activeTabId = tab.id;
+    const ok = await loadFileIntoEditor(notesRelPath, options);
+    if (!ok) {
+      tabs = tabs.filter(t => t.id !== tab.id);
+      activeTabId = previousActiveId;
+      renderTabStrip();
+      return false;
+    }
+    syncActiveTabFromState();
+    renderTabStrip();
+    return true;
+  }
+
+  async function openFile(filename, fullNotesRelPath, options = {}) {
+    const notesRelPath = fullNotesRelPath || (activeFolderPath() + '/' + filename);
+    return openFileInTab(notesRelPath, options);
+  }
+
+  // Switches the shared editor/preview to another already-open tab, gated by
+  // the same unsaved-changes flow as any other navigation away from a document.
+  async function activateTab(tabId) {
+    if (tabId === activeTabId) return true;
+    const target = tabs.find(t => t.id === tabId);
+    if (!target) return false;
+    if (!await checkUnsavedNewNote()) return false;
+    if (!await autoSaveIfDirty()) return false;
+    syncActiveTabFromState();
+    activeTabId = tabId;
+    const ok = target.isOutputsFile
+      ? await loadOutputsFileIntoEditor(target)
+      : await loadFileIntoEditor(target.path, {});
+    if (!ok) {
+      // The file behind this tab is gone (e.g. deleted outside RecallStack) —
+      // drop the tab and fall back to another one, or to an empty state.
+      tabs = tabs.filter(t => t.id !== tabId);
+      activeTabId = null;
+      if (tabs.length) await activateTab(tabs[0].id);
+      else showEmptyEditorState();
+      renderTabStrip();
+      return false;
+    }
+    syncActiveTabFromState();
+    renderTabStrip();
+    return true;
+  }
+
+  async function closeTab(tabId) {
+    const tab = tabs.find(t => t.id === tabId);
+    if (!tab) return false;
+    const wasActive = tabId === activeTabId;
+    if (wasActive) {
+      if (!await checkUnsavedNewNote()) return false;
+      if (!await autoSaveIfDirty()) return false;
+      syncActiveTabFromState();
+    }
+    const idx = tabs.findIndex(t => t.id === tabId);
+    tabs.splice(idx, 1);
+    if (tab.path && !tab.isOutputsFile) {
+      closedTabHistory.push({ path: tab.path, title: tab.title });
+      if (closedTabHistory.length > 20) closedTabHistory.shift();
+    }
+    if (wasActive) {
+      activeTabId = null;
+      if (tabs.length) {
+        const nextIdx = Math.min(idx, tabs.length - 1);
+        await activateTab(tabs[nextIdx].id);
+      } else {
+        showEmptyEditorState();
+      }
+    }
+    renderTabStrip();
+    return true;
+  }
+
+  async function closeActiveTab() {
+    if (activeTabId == null) return;
+    await closeTab(activeTabId);
+  }
+
+  // Background tabs are always clean by construction (see note above), so
+  // closing every tab but the active one needs no unsaved-changes prompts.
+  function closeOtherTabs() {
+    const keep = activeTabId;
+    for (const tab of tabs.filter(t => t.id !== keep)) {
+      if (tab.path && !tab.isOutputsFile) {
+        closedTabHistory.push({ path: tab.path, title: tab.title });
+        if (closedTabHistory.length > 20) closedTabHistory.shift();
+      }
+    }
+    tabs = tabs.filter(t => t.id === keep);
+    renderTabStrip();
+  }
+
+  async function switchToRelativeTab(delta) {
+    if (tabs.length < 2) return;
+    const idx = tabs.findIndex(t => t.id === activeTabId);
+    if (idx === -1) return;
+    const nextIdx = (idx + delta + tabs.length) % tabs.length;
+    await activateTab(tabs[nextIdx].id);
+  }
+
+  async function jumpToTabIndex(oneBasedIndex) {
+    const tab = tabs[oneBasedIndex - 1];
+    if (tab) await activateTab(tab.id);
+  }
+
+  async function reopenClosedTab() {
+    const entry = closedTabHistory.pop();
+    if (!entry) { toast('No recently closed tabs', 'error'); return; }
+    await openFileInTab(entry.path);
+  }
+
   async function newNote() {
     if (!l1Active) { toast('Select a folder first', 'error'); return; }
     // Both new-task entry points save the current editor first, avoiding a later
@@ -3120,6 +3496,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
           const writable = await currentOutputsFh.createWritable();
           try { await writable.write(content); } finally { await writable.close(); }
           savedContent = content;
+          syncActiveTabFromState();
+          renderTabStrip();
           lsDraftClear(currentPath);
           if (!silent) toast('Saved ✓');
           return true;
@@ -3210,6 +3588,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         currentPath      = notesRelPath;
         isNew            = false;
         savedContent     = content;
+        syncActiveTabFromState();
+        renderTabStrip();
         removeExternalChangeBanner();
         lsDraftClear(notesRelPath);
         if (origPath && origPath !== notesRelPath) lsDraftClear(origPath);
@@ -3256,6 +3636,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         currentOutputsDirFh = null;
         returnToOutputs     = true;
         toast('Moved to Trash');
+        removeTabRecord(activeTabId);
         cancelEdit();
       } catch (e) {
         toast('Delete failed: ' + e.message, 'error');
@@ -3270,6 +3651,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       await saveSqliteDb();
       refreshCalendarIfVisible();
       toast('Moved to Trash');
+      removeTabRecord(activeTabId);
       cancelEdit();
     } catch (e) {
       toast('Delete failed: ' + e.message, 'error');
@@ -3301,6 +3683,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       await saveSqliteDb();
       refreshCalendarIfVisible();
       toast('Archived ✓');
+      removeTabRecord(activeTabId);
       cancelEdit();
     } catch (e) {
       toast('Archive failed: ' + e.message, 'error');
@@ -3330,6 +3713,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       archiveMode = false;
       btnNew.classList.remove('hidden');
       updateArchiveToggleBtn();
+      removeTabRecord(activeTabId);
       cancelEdit();
     } catch (e) {
       toast('Restore failed: ' + e.message, 'error');
@@ -3635,6 +4019,9 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     l2Active     = { name: 'tasks', handle: tasksHandle };
     currentPath  = finalRelPath;
     isNew        = false;
+    savedContent = newContent;
+    syncActiveTabFromState();
+    renderTabStrip();
 
     titleInput.value = taskDisplayTitle(finalFilename);
     mdEditor.openDocument(finalRelPath, newContent, 0);
@@ -4218,6 +4605,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
             entry.notesRelPath = newPrefix + entry.notesRelPath.slice(oldPrefix.length);
           }
         }
+        remapTabPaths(oldPrefix, newPrefix);
         await saveSqliteDb();
 
         // Rebuild nav row 1
@@ -4264,8 +4652,11 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         // Reload the open file at its new path, or refresh the file list
         if (fileInRenamedL1) {
           const newFilePath = newName + currentPath.slice(oldL1Name.length);
-          currentPath = newFilePath;
-          await openFile(null, newFilePath);
+          // remapTabPaths() above already relocated the active tab's path; just
+          // refresh the editor's content at the new location (same tab, no dup).
+          await loadFileIntoEditor(newFilePath, {});
+          syncActiveTabFromState();
+          renderTabStrip();
         } else if (!editorVisible) {
           const dir     = l2Active ? l2Active.handle : l1Active.handle;
           const heading = activeFolderHeading();
@@ -4298,6 +4689,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
             entry.notesRelPath = newPrefix + entry.notesRelPath.slice(oldPrefix.length);
           }
         }
+        remapTabPaths(oldPrefix, newPrefix);
         await saveSqliteDb();
 
         const subs = await listDirs(l1Active.handle);
@@ -4315,8 +4707,11 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         // Reload the open file at its new path, or refresh the file list
         if (fileInRenamedL2) {
           const newFilePath = l1Active.name + '/' + newName + currentPath.slice((l1Active.name + '/' + oldL2Name).length);
-          currentPath = newFilePath;
-          await openFile(null, newFilePath);
+          // remapTabPaths() above already relocated the active tab's path; just
+          // refresh the editor's content at the new location (same tab, no dup).
+          await loadFileIntoEditor(newFilePath, {});
+          syncActiveTabFromState();
+          renderTabStrip();
         } else if (!editorVisible) {
           await loadFiles(l2Active.handle, newName);
         }
@@ -5348,6 +5743,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
       if (!externalConflict || externalConflict.removed) return;
       mdEditor.value = externalConflict.text;
       savedContent = externalConflict.text;
+      syncActiveTabFromState();
+      renderTabStrip();
       nativeFileVersions.set(externalConflict.nativePath, externalConflict.version);
       lsDraftClear(currentPath);
       renderPreview();
@@ -5382,6 +5779,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     if (change.kind === 'rename' && priorPath === currentNativePath) {
       const prefix = normalizeAppPath(DB_WS_PREFIX).replace(/\/+$/, '') + '/';
       currentPath = changedPath.startsWith(prefix) ? changedPath.slice(prefix.length) : currentPath;
+      syncActiveTabFromState();
+      renderTabStrip();
     }
     try {
       const disk = await window.__recallstackNative.readText(nativePath);
@@ -5391,6 +5790,8 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
         const scrollTop = mdEditor.scrollTop;
         mdEditor.value = disk.text;
         savedContent = disk.text;
+        syncActiveTabFromState();
+        renderTabStrip();
         nativeFileVersions.set(nativePath, disk.version);
         mdEditor.setSelectionRange(Math.min(selectionStart, disk.text.length), Math.min(selectionEnd, disk.text.length));
         mdEditor.scrollTop = scrollTop;
@@ -5505,8 +5906,13 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     { id:'file.move', title:'Move or Rename Note', category:'File', isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:openMoveFileModal },
     { id:'file.archive', title:'Archive or Restore Note', category:'File', isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:() => btnArchive.classList.contains('restore') ? restoreNote() : archiveNote() },
     { id:'file.trash', title:'Move Note to Trash', category:'File', keywords:['delete'], isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:deleteNote },
+    { id:'tabs.close', title:'Close Tab', category:'File', keywords:['tab'], shortcut:'Ctrl+W', isEnabled:()=>activeTabId != null, disabledReason:()=>'No tab open', run:closeActiveTab },
+    { id:'tabs.close-others', title:'Close Other Tabs', category:'File', keywords:['tab'], isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => closeOtherTabs() },
+    { id:'tabs.reopen-closed', title:'Reopen Closed Tab', category:'File', keywords:['tab', 'undo'], isEnabled:()=>closedTabHistory.length > 0, disabledReason:()=>'No recently closed tabs', run:reopenClosedTab },
     { id:'navigation.search', title:'Search Notes', category:'Navigation', keywords:['find'], shortcut:'Ctrl+Shift+F', isEnabled:needsWorkspace, run:() => searchInput.focus() },
     { id:'navigation.today', title:'Jump to Today', category:'Navigation', keywords:['journal daily'], isEnabled:needsWorkspace, run:openTodayJournal },
+    { id:'navigation.next-tab', title:'Next Tab', category:'Navigation', keywords:['tab'], shortcut:'Ctrl+Tab', isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => switchToRelativeTab(1) },
+    { id:'navigation.previous-tab', title:'Previous Tab', category:'Navigation', keywords:['tab'], shortcut:'Ctrl+Shift+Tab', isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => switchToRelativeTab(-1) },
     { id:'tasks.new-working', title:'Create Working Task', category:'Tasks', isEnabled:needsWorkspace, run:createWorkingTask },
     { id:'view.presentation', title:'Toggle Presentation Mode', category:'View', isEnabled:needsEditor, run:() => $id('btn-presentation').click() },
     { id:'view.working-pane', title:'Show or Hide Working Tasks', category:'View', isEnabled:needsWorkspace, run:() => btnToggleWorkingPane.click() },
@@ -5785,6 +6191,7 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
   mdEditor.addEventListener('input', () => {
     renderPreview();
     lsDraftSave();
+    updateActiveTabDirtyState();
     clearTimeout(_autoSaveTimer);
     if (currentPath && !isNew) {
       _autoSaveTimer = setTimeout(() => autoSaveIfDirty(true), 1500);
@@ -6316,6 +6723,15 @@ import { contentZoomScale, normalizeContentZoom, scaledMediaWidth } from "../fea
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
       e.preventDefault(); executeCommand('workspace.open'); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
+      e.preventDefault(); executeCommand(e.shiftKey ? 'navigation.previous-tab' : 'navigation.next-tab'); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+      e.preventDefault(); executeCommand('tabs.close'); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9') {
+      e.preventDefault(); jumpToTabIndex(Number(e.key)); return;
     }
     const editing   = !editorView.classList.contains('hidden');
     const searching = !searchView.classList.contains('hidden');

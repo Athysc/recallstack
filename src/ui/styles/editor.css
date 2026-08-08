@@ -18,6 +18,78 @@
     flex-shrink: 0;
   }
 
+  .tab-strip {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    padding: 0 8px;
+    background: var(--mantle);
+    border-bottom: 1px solid var(--surface0);
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .tab-strip.hidden { display: none; }
+
+  .tab-strip-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 8px 7px 10px;
+    max-width: 220px;
+    min-width: 90px;
+    border-bottom: 2px solid transparent;
+    color: var(--subtext0);
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .tab-strip-item:hover { color: var(--text); background: color-mix(in srgb, var(--surface0) 60%, transparent); }
+  .tab-strip-item.active {
+    color: var(--text);
+    border-bottom-color: var(--mauve);
+    background: color-mix(in srgb, var(--mauve) 10%, transparent);
+  }
+  .tab-strip-item:focus-visible { outline: 2px solid var(--mauve); outline-offset: -2px; }
+  .tab-strip-item.dragging { opacity: 0.4; }
+  .tab-strip-item.drag-over-left { box-shadow: inset 2px 0 0 0 var(--mauve); }
+  .tab-strip-item.drag-over-right { box-shadow: inset -2px 0 0 0 var(--mauve); }
+
+  .tab-dirty-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--peach);
+    flex-shrink: 0;
+    visibility: hidden;
+  }
+  .tab-strip-item.dirty .tab-dirty-dot { visibility: visible; }
+
+  .tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .tab-close-btn {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    text-align: center;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--overlay0);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .tab-close-btn:hover { background: var(--surface1); color: var(--text); }
+
   #presentation-exit-bar {
     display: flex;
     align-items: center;
