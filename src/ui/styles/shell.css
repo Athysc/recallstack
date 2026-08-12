@@ -52,6 +52,18 @@
   header {
     flex-shrink: 0;
     background: var(--mantle);
+    box-shadow: inset 0 0 0 0 transparent;
+    transition: box-shadow 0.15s, background 0.15s;
+  }
+
+  /* Full-bar drop target feedback for the "drop .md files to open as
+     temporary tabs" header shortcut — a highlighted border/glow using the
+     app's existing accent color, matching the Open/Import modal dropzone's
+     .drag-active treatment (modals.css) without copying its dashed-box look,
+     since the header is a full toolbar rather than an empty drop area. */
+  #app-header.drag-active {
+    background: color-mix(in srgb, var(--mauve) 10%, var(--mantle));
+    box-shadow: inset 0 0 0 2px var(--mauve), 0 0 16px color-mix(in srgb, var(--mauve) 35%, transparent);
   }
 
   .app-bar {

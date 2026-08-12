@@ -1,4 +1,6 @@
 // Typed application composition controller for cross-feature DOM and workspace state.
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import type { DragDropEvent } from "@tauri-apps/api/webview";
 import { PREFERENCE_KEYS, preferenceIsEnabled } from "./preferences";
 import {
   buildTaskFilename,
@@ -129,6 +131,7 @@ import { newMarkdownFileTitle, newMarkdownStoredFilename } from "../features/not
 import { NewFileModalController } from "../ui/components/new-file-modal";
 import { QuickTabSwitcherController, tabJumpCodes } from "../ui/components/quick-tab-switcher";
 import {
+  allFilesAreMarkdown,
   buildImportedFilePath,
   mergeSelectedFiles,
   openImportActionEnabled,
@@ -296,6 +299,7 @@ type TaskLocation = {
   }
   const welcomeEl    = $id('welcome');
   const appEl        = $id('app');
+  const appHeader    = $id<HTMLElement>('app-header');
   const navRow1      = $id('nav-row-1');
   const navRow2      = $id('nav-row-2');
   const fileListView  = $id('file-list-view');
@@ -6157,7 +6161,15 @@ type TaskLocation = {
     }
   });
 
+  // Browser (non-Tauri) mode only: real OS files dragged into a Tauri desktop
+  // window are intercepted at the native webview layer once dragDropEnabled
+  // is true (see tauri.conf.json and the onDragDropEvent routing below) and
+  // never reach these HTML5 dataTransfer/File-object listeners on desktop —
+  // Tauri hands them to onDragDropEvent as real absolute paths instead, with
+  // no in-memory bytes. In an actual browser, none of that applies (no
+  // dragDropEnabled, no onDragDropEvent) so this remains the only path there.
   mdEditor.addEventListener('dragover', (e: any) => {
+    if (window.__recallstackNative?.active) return;
     if (e.dataTransfer?.types?.includes('Files')) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
@@ -6165,6 +6177,7 @@ type TaskLocation = {
   });
 
   mdEditor.addEventListener('drop', async (e: any) => {
+    if (window.__recallstackNative?.active) return;
     const files = e.dataTransfer?.files;
     if (!files || !files.length) return;
     e.preventDefault();
@@ -6190,6 +6203,42 @@ type TaskLocation = {
       insertAtCursor(joinDroppedAssetLinks(links, needsLeadingNewline));
     }
   });
+
+  // Tauri desktop counterpart to the browser-mode handler above: real OS
+  // files dropped on the editor arrive via onDragDropEvent (see below) as
+  // absolute paths with no in-memory bytes, so pull the bytes explicitly via
+  // external_fs_read (the binary counterpart to external_fs_read_text) before
+  // writing them into assets/ through the same saveAsset() path native and
+  // browser asset drops already share.
+  function basenameFromNativePath(path: string): string {
+    return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
+  }
+
+  async function insertNativeDroppedAssets(paths: string[]) {
+    const links: string[] = [];
+    for (const path of paths) {
+      const name = basenameFromNativePath(path);
+      try {
+        const bytes    = await window.__recallstackNative!.externalRead(path);
+        const buf      = new Uint8Array(bytes).buffer;
+        const isImage  = isImageFilename(name);
+        const filename = isImage && isScreenshotItem({ name }) ? clipFilename() : (name || clipFilename());
+        const relPath  = await saveAsset(filename, buf, undefined);
+        links.push(assetMarkdownLink(filename, relPath, isImage));
+        toast(`Asset saved: ${filename}`);
+      } catch (err: any) {
+        toast('Failed to save asset: ' + err.message, 'error');
+      }
+    }
+    if (!links.length) return;
+    if (links.length === 1) {
+      insertAtCursor(links[0]);
+    } else {
+      const cursorPos = mdEditor.selectionStart;
+      const needsLeadingNewline = cursorPos > 0 && mdEditor.value[cursorPos - 1] !== '\n';
+      insertAtCursor(joinDroppedAssetLinks(links, needsLeadingNewline));
+    }
+  }
 
   // On focus: clear input when the file field is empty so that selecting today registers
   // as a value change (browser only fires 'change' when the value actually differs from
@@ -6535,6 +6584,43 @@ type TaskLocation = {
     renderOpenImportFileList();
   }
 
+  // Header full-bar drop shortcut: dropping file(s) straight onto the header
+  // opens them exactly like the Open/Import modal's Temporary mode, without
+  // requiring the modal to be opened at all — but only when EVERY dropped
+  // file is Markdown. Unlike addOpenImportSelections() above (which accepts
+  // the valid .md subset of a modal drop and just toasts about the rest),
+  // this shortcut is all-or-nothing: a mixed or non-.md drop is rejected in
+  // full so the user isn't surprised by only some of their files opening.
+  async function openHeaderDroppedFiles(entries: OpenImportSelection[]) {
+    if (!entries.length) return;
+    if (!allFilesAreMarkdown(entries.map(entry => entry.name))) {
+      toast('Only Markdown (.md) files can be opened this way from the header — drop images onto the editor, or use Browse / Open-Import for other files.', 'error');
+      return;
+    }
+
+    const verified: OpenImportSelection[] = [];
+    const unreadable: string[] = [];
+    for (const entry of entries) {
+      if (entry.nativePath && window.__recallstackNative?.active) {
+        try {
+          await window.__recallstackNative!.externalStat(entry.nativePath);
+          verified.push(entry);
+        } catch {
+          unreadable.push(entry.name);
+        }
+      } else {
+        verified.push(entry);
+      }
+    }
+    if (unreadable.length) {
+      toast(`Could not read: ${unreadable.join(', ')}`, 'error');
+    }
+    if (!verified.length) return;
+
+    await openExternalFilesAsTemporary(verified);
+    toast(`Opened ${verified.length} file${verified.length === 1 ? '' : 's'} ✓`);
+  }
+
   async function populateOpenImportTopFolders() {
     openImportL1Select.innerHTML = '';
     addMoveOption(openImportL1Select, '', 'Select a top-level folder…');
@@ -6630,6 +6716,21 @@ type TaskLocation = {
     return finalPath;
   }
 
+  // Opens each external file as a temporary (unsaved-source) tab, in the
+  // given order, then re-activates the first file's tab so it ends up
+  // focused — the exact "Temporary" mode behavior of the Open/Import modal.
+  // Shared by performOpenImportAction() below and the header full-bar drop
+  // shortcut, so this "open N as temp, focus the first" rule lives in one
+  // place.
+  async function openExternalFilesAsTemporary(files: OpenImportSelection[]): Promise<void> {
+    for (const file of files) {
+      await openExternalFileInTab(file, true);
+    }
+    // Multiple files each get their own tab; the first one on the list
+    // becomes the active/focused document, per spec.
+    if (files.length) await openExternalFileInTab(files[0], true);
+  }
+
   async function performOpenImportAction() {
     const mode = openImportSelectedMode();
     const files = openImportSelectedFiles.slice();
@@ -6646,23 +6747,20 @@ type TaskLocation = {
 
     try {
       const openedPaths: string[] = [];
-      for (const file of files) {
-        if (mode === 'import') {
+      if (mode === 'import') {
+        for (const file of files) {
           const finalPath = await importExternalSelectionIntoWorkspace(file, destParts!);
           await openFile(finalPath.split('/').at(-1)!, finalPath, { pinned: true });
           openedPaths.push(finalPath);
-        } else {
-          await openExternalFileInTab(file, true);
-          openedPaths.push(externalTabPathKey(file));
         }
+      } else {
+        await openExternalFilesAsTemporary(files);
       }
       closeOpenImportModal();
-      // Multiple files each get their own tab; the first one on the list
-      // becomes the active/focused document, per spec.
       if (mode === 'import') {
+        // Multiple files each get their own tab; the first one on the list
+        // becomes the active/focused document, per spec.
         await openFile(openedPaths[0].split('/').at(-1)!, openedPaths[0], { pinned: true });
-      } else {
-        await openExternalFileInTab(files[0], true);
       }
       toast(mode === 'import'
         ? `Imported ${files.length} file${files.length === 1 ? '' : 's'} ✓`
@@ -6692,15 +6790,23 @@ type TaskLocation = {
     if (e.key === 'Escape') closeOpenImportModal();
   });
 
+  // Browser (non-Tauri) mode only — see the note above the mdEditor listeners.
+  // On Tauri desktop, real OS file drags never reach these HTML5 listeners
+  // once dragDropEnabled is true; onDragDropEvent below handles that case.
   openImportDropzone.addEventListener('dragover', (e: DragEvent) => {
+    if (window.__recallstackNative?.active) return;
     if (e.dataTransfer?.types?.includes('Files')) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
       openImportDropzone.classList.add('drag-active');
     }
   });
-  openImportDropzone.addEventListener('dragleave', () => openImportDropzone.classList.remove('drag-active'));
+  openImportDropzone.addEventListener('dragleave', () => {
+    if (window.__recallstackNative?.active) return;
+    openImportDropzone.classList.remove('drag-active');
+  });
   openImportDropzone.addEventListener('drop', async (e: DragEvent) => {
+    if (window.__recallstackNative?.active) return;
     e.preventDefault();
     openImportDropzone.classList.remove('drag-active');
     const items = e.dataTransfer?.items;
@@ -6710,22 +6816,7 @@ type TaskLocation = {
     const entries: OpenImportSelection[] = [];
     const unreadable: string[] = [];
 
-    if (window.__recallstackNative?.active) {
-      // Tauri desktop: dragDropEnabled is false in tauri.conf.json specifically
-      // so standard HTML5 drag-and-drop fires in the webview. Tauri's WRY
-      // webview has historically exposed a non-standard `.path` on dropped
-      // File objects in that configuration — verified empirically not
-      // possible from this (Linux dev) environment, so this is read
-      // defensively and falls back to a clear error if it's ever absent.
-      for (const file of Array.from(files || [])) {
-        const nativePath = (file as unknown as { path?: string }).path;
-        if (typeof nativePath === 'string' && nativePath) {
-          entries.push({ key: nativePath, name: file.name, nativePath, browserHandle: null });
-        } else {
-          unreadable.push(file.name);
-        }
-      }
-    } else if (items?.length && typeof items[0]?.getAsFileSystemHandle === 'function') {
+    if (items?.length && typeof items[0]?.getAsFileSystemHandle === 'function') {
       // Browser mode: the standard Chromium API gives a real, writable handle.
       for (const item of Array.from(items)) {
         if (item.kind !== 'file') continue;
@@ -6747,6 +6838,141 @@ type TaskLocation = {
       toast(`Could not read dropped file location — use Browse instead: ${unreadable.join(', ')}`, 'error');
     }
   });
+
+  // Header full-bar drop shortcut, browser (non-Tauri) mode. Same guard
+  // pattern as the modal dropzone listeners just above: only intercept
+  // genuine OS file drags (dataTransfer.types includes 'Files'), so in-page
+  // dragging within the header (e.g. selecting/dragging search input text)
+  // is left completely alone. On Tauri desktop this never fires once
+  // dragDropEnabled is true; the onDragDropEvent routing below handles that
+  // case instead. Building entries and the purity/open logic itself lives in
+  // openHeaderDroppedFiles() so both this and the native branch share it.
+  appHeader.addEventListener('dragover', (e: DragEvent) => {
+    if (window.__recallstackNative?.active) return;
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      appHeader.classList.add('drag-active');
+    }
+  });
+  appHeader.addEventListener('dragleave', () => {
+    if (window.__recallstackNative?.active) return;
+    appHeader.classList.remove('drag-active');
+  });
+  appHeader.addEventListener('drop', async (e: DragEvent) => {
+    if (window.__recallstackNative?.active) return;
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    appHeader.classList.remove('drag-active');
+    const items = e.dataTransfer?.items;
+    const files = e.dataTransfer?.files;
+    if (!items?.length && !files?.length) return;
+
+    const entries: OpenImportSelection[] = [];
+    const unreadable: string[] = [];
+
+    if (items?.length && typeof items[0]?.getAsFileSystemHandle === 'function') {
+      // Browser mode: the standard Chromium API gives a real, writable handle.
+      for (const item of Array.from(items)) {
+        if (item.kind !== 'file') continue;
+        try {
+          const handle = await item.getAsFileSystemHandle?.();
+          if (handle && handle.kind === 'file') {
+            entries.push({ key: `browser-handle:${handle.name}`, name: handle.name, nativePath: null, browserHandle: handle as FileSystemFileHandle });
+          }
+        } catch {
+          unreadable.push(item.type || 'dropped file');
+        }
+      }
+    } else {
+      for (const file of Array.from(files || [])) unreadable.push(file.name);
+    }
+
+    if (unreadable.length) {
+      toast(`Could not read dropped file location — use Browse or the Open/Import modal instead: ${unreadable.join(', ')}`, 'error');
+    }
+    if (entries.length) await openHeaderDroppedFiles(entries);
+  });
+
+  // ── Native (Tauri) drag-and-drop routing ────────────────────────────────
+  // dragDropEnabled is a window-level setting (tauri.conf.json), not scoped to
+  // any one element: when true, real OS file drags are intercepted by the
+  // native webview layer before they ever reach the DOM as HTML5
+  // dataTransfer/File objects — confirmed for all three desktop backends
+  // (WebView2's own IDropTarget on Windows, WebKitGTK's drag-drop signals on
+  // Linux, WKWebView's drag session on macOS), not just a Windows quirk. It
+  // has to be true globally to get real paths at all on Windows (WebView2
+  // never exposes a real filesystem path through the standard HTML5 File
+  // object's non-standard `.path`, unlike some other webviews). Tauri's own
+  // documented, cross-platform replacement is the webview-level
+  // onDragDropEvent API, which delivers real absolute OS paths via
+  // event.payload.paths. Since that API is webview-scoped rather than
+  // element-scoped, route each event by hand to whichever drop target the
+  // cursor is physically over at the moment of the event — the Open/Import
+  // modal's dropzone (only while that modal is open), else the header's
+  // full-bar "open as temporary" shortcut when the cursor is over the header,
+  // else the Markdown editor's asset-drop zone. The modal's dropzone always
+  // wins when the modal is open (drawn on top of everything, including the
+  // header behind it); the header shortcut only ever applies while the modal
+  // is closed. Pure in-page DOM dragging (tab-strip reorder, browser-mode
+  // DnD) is untouched: this handler only ever fires for genuine OS-level
+  // file drags.
+  if (window.__recallstackNative?.active) {
+    const dragDropPoint = (position: { x: number; y: number }) => ({
+      x: position.x / (window.devicePixelRatio || 1),
+      y: position.y / (window.devicePixelRatio || 1),
+    });
+    const pointInRect = (rect: DOMRect, point: { x: number; y: number }) =>
+      point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+
+    void getCurrentWebview().onDragDropEvent((event: { payload: DragDropEvent }) => {
+      const payload = event.payload;
+      if (payload.type === 'leave') {
+        openImportDropzone.classList.remove('drag-active');
+        appHeader.classList.remove('drag-active');
+        return;
+      }
+      const point = dragDropPoint(payload.position);
+      const modalOpen = !openImportModal.classList.contains('hidden');
+      const overDropzone = modalOpen && pointInRect(openImportDropzone.getBoundingClientRect(), point);
+      // The modal dropzone (when the modal is open) always wins; the header
+      // shortcut only ever applies while the modal is closed.
+      const overHeader = !modalOpen && pointInRect(appHeader.getBoundingClientRect(), point);
+
+      if (payload.type === 'enter' || payload.type === 'over') {
+        openImportDropzone.classList.toggle('drag-active', overDropzone);
+        appHeader.classList.toggle('drag-active', overHeader);
+        return;
+      }
+
+      // payload.type === 'drop'
+      openImportDropzone.classList.remove('drag-active');
+      appHeader.classList.remove('drag-active');
+      if (overDropzone) {
+        const entries: OpenImportSelection[] = payload.paths.map(nativePath => ({
+          key: nativePath,
+          name: basenameFromNativePath(nativePath),
+          nativePath,
+          browserHandle: null,
+        }));
+        void addOpenImportSelections(entries);
+      } else if (overHeader) {
+        const entries: OpenImportSelection[] = payload.paths.map(nativePath => ({
+          key: nativePath,
+          name: basenameFromNativePath(nativePath),
+          nativePath,
+          browserHandle: null,
+        }));
+        void openHeaderDroppedFiles(entries);
+      } else if (!modalOpen && pointInRect(editorPane.getBoundingClientRect(), point)) {
+        // editorPane (not mdEditor itself) — mdEditor is a LazyMarkdownEditorAdapter
+        // wrapping either a plain div or CodeMirror once loaded, and exposes no
+        // getBoundingClientRect() of its own; editorPane is the DOM element that
+        // actually bounds the editor's drop target area (excludes previewPane).
+        void insertNativeDroppedAssets(payload.paths);
+      }
+    }).catch(err => console.warn('Could not attach native drag-and-drop listener', err));
+  }
 
   inboxDeleteCancelBtn.addEventListener('click', closeInboxDeleteModal);
   inboxDeleteConfirmBtn.addEventListener('click', async () => {

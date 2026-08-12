@@ -233,6 +233,7 @@ pub fn run() {
             bridge::portable_read_text,
             bridge::external_fs_stat,
             bridge::external_fs_read_text,
+            bridge::external_fs_read,
             bridge::external_fs_write_text,
             bridge::close_app,
             safety::trash_path,

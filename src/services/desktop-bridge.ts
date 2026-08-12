@@ -305,9 +305,11 @@ import { assertPortableName } from "./portable-names";
     restoreBackupDryRun(path) { return invoke('restore_backup_dry_run', { path }); },
     checkWorkspace() { return invoke('check_workspace'); },
     // Open / Import Files: native multi-file picker filtered to Markdown, and the
-    // three external_fs_* commands that read/write an absolute OS path outside the
-    // workspace (see bridge.rs) — used for "temporary" (edit-in-place) external tabs
-    // and to pull source content for an "import into workspace" copy.
+    // external_fs_* commands that read/write an absolute OS path outside the
+    // workspace (see bridge.rs) — used for "temporary" (edit-in-place) external tabs,
+    // to pull source content for an "import into workspace" copy, and (externalRead)
+    // to pull raw bytes for an asset dropped into the editor from outside the
+    // workspace via the webview's onDragDropEvent (paths only, no in-memory bytes).
     async chooseExternalMarkdownFiles() {
       if (typeof window.__TAURI__?.dialog?.open !== 'function') return [];
       const value = await window.__TAURI__.dialog.open({
@@ -322,6 +324,7 @@ import { assertPortableName } from "./portable-names";
     },
     externalStat(path) { return invoke('external_fs_stat', { path }); },
     externalReadText(path) { return invoke('external_fs_read_text', { path }); },
+    externalRead(path) { return invoke('external_fs_read', { path }); },
     externalWriteText(path, text) { return invoke('external_fs_write_text', { path, text }); },
     rebuildIndex() { return invoke('rebuild_index'); },
     cancelIndex() { return invoke('cancel_index'); },

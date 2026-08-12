@@ -24,6 +24,14 @@ export function partitionMarkdownFilenames(names: readonly string[]): Partitione
   return { accepted, rejected };
 }
 
+// Header full-bar drop shortcut rule: unlike the modal's dropzone/Browse flow
+// (which accepts the valid .md subset of a batch and just toasts about the
+// rest), the header shortcut is all-or-nothing — if any dropped file isn't
+// Markdown, the whole drop is rejected rather than silently opening a subset.
+export function allFilesAreMarkdown(names: readonly string[]): boolean {
+  return partitionMarkdownFilenames(names).rejected.length === 0;
+}
+
 export interface SelectableFile {
   // Unique identity for de-duplication: the absolute OS path in Tauri desktop
   // mode, or a handle-derived key (e.g. name) in browser mode.

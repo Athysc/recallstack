@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  allFilesAreMarkdown,
   buildImportedFilePath,
   isMarkdownFilename,
   mergeSelectedFiles,
@@ -17,6 +18,13 @@ test("only .md filenames are accepted, case-insensitively", () => {
   const { accepted, rejected } = partitionMarkdownFilenames(["a.md", "b.txt", "c.MD", "d"]);
   assert.deepEqual(accepted, ["a.md", "c.MD"]);
   assert.deepEqual(rejected, ["b.txt", "d"]);
+});
+
+test("header drop shortcut requires every dropped file to be Markdown, not just some", () => {
+  assert.equal(allFilesAreMarkdown(["a.md", "b.MD"]), true);
+  assert.equal(allFilesAreMarkdown(["a.md", "b.txt"]), false);
+  assert.equal(allFilesAreMarkdown(["photo.png"]), false);
+  assert.equal(allFilesAreMarkdown([]), true);
 });
 
 test("Browse and drag-and-drop selections merge into one deduplicated list", () => {

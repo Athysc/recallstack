@@ -490,6 +490,17 @@ pub fn external_fs_read_text(path: String) -> Result<String, String> {
     fs::read_to_string(candidate).map_err(|e| e.to_string())
 }
 
+// Binary counterpart to external_fs_read_text — used for external assets
+// (e.g. an image dropped into the editor from outside the workspace via the
+// Tauri webview's onDragDropEvent, which hands the frontend real absolute
+// paths but no in-memory bytes). Mirrors the workspace-scoped fs_read above,
+// just against validate_external_file's trust boundary instead of safe_path.
+#[tauri::command]
+pub fn external_fs_read(path: String) -> Result<Vec<u8>, String> {
+    let candidate = validate_external_file(&path)?;
+    fs::read(candidate).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn external_fs_write_text(path: String, text: String) -> Result<(), String> {
     let candidate = validate_external_file(&path)?;

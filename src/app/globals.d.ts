@@ -38,6 +38,7 @@ interface RecallStackNativeBridge {
   chooseExternalMarkdownFiles(): Promise<string[]>;
   externalStat(path: string): Promise<{ name: string; size: number; modifiedAt: number }>;
   externalReadText(path: string): Promise<string>;
+  externalRead(path: string): Promise<number[]>;
   externalWriteText(path: string, text: string): Promise<void>;
   rebuildIndex(): Promise<number>;
   cancelIndex(): Promise<void>;
