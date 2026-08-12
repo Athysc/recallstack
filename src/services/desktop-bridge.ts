@@ -304,6 +304,25 @@ import { assertPortableName } from "./portable-names";
     verifyBackup(path) { return invoke('verify_backup', { path }); },
     restoreBackupDryRun(path) { return invoke('restore_backup_dry_run', { path }); },
     checkWorkspace() { return invoke('check_workspace'); },
+    // Open / Import Files: native multi-file picker filtered to Markdown, and the
+    // three external_fs_* commands that read/write an absolute OS path outside the
+    // workspace (see bridge.rs) — used for "temporary" (edit-in-place) external tabs
+    // and to pull source content for an "import into workspace" copy.
+    async chooseExternalMarkdownFiles() {
+      if (typeof window.__TAURI__?.dialog?.open !== 'function') return [];
+      const value = await window.__TAURI__.dialog.open({
+        title: 'Open or Import Markdown Files',
+        multiple: true,
+        directory: false,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      });
+      if (!value) return [];
+      const list = Array.isArray(value) ? value : [value];
+      return list.map(item => (typeof item === 'string' ? item : item.path || String(item)));
+    },
+    externalStat(path) { return invoke('external_fs_stat', { path }); },
+    externalReadText(path) { return invoke('external_fs_read_text', { path }); },
+    externalWriteText(path, text) { return invoke('external_fs_write_text', { path, text }); },
     rebuildIndex() { return invoke('rebuild_index'); },
     cancelIndex() { return invoke('cancel_index'); },
     indexHealth() { return invoke('index_health'); },

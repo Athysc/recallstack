@@ -52,6 +52,9 @@
         <button class="btn-icon" id="btn-search" title="Search">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </button>
+        <button class="btn-icon" id="btn-open-import" title="Open / Import Files" aria-label="Open or import Markdown files from outside the workspace">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+        </button>
         <button class="btn-icon" id="btn-settings" title="Display and navigation settings" aria-label="Open display and navigation settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--appbar-bg, var(--mantle))"/><circle cx="15" cy="12" r="2" fill="var(--appbar-bg, var(--mantle))"/><circle cx="11" cy="18" r="2" fill="var(--appbar-bg, var(--mantle))"/></svg>
         </button>
@@ -485,6 +488,47 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="modal-move-cancel-btn">Cancel</button>
       <button class="btn btn-primary" id="modal-move-apply-btn" disabled>Move</button>
+    </div>
+  </div>
+</div>
+
+<!-- Open / Import Files Modal -->
+<div id="modal-open-import" class="modal-overlay hidden">
+  <div class="modal-dialog modal-dialog-wide">
+    <div class="modal-title">Open / Import Files</div>
+
+    <div id="open-import-dropzone" class="open-import-dropzone">
+      <div class="open-import-dropzone-text">Drag Markdown files here, or</div>
+      <button class="btn btn-ghost" id="open-import-browse-btn" type="button">Browse…</button>
+    </div>
+
+    <div id="open-import-file-list" class="open-import-file-list" aria-live="polite"></div>
+
+    <div class="open-import-mode-group" role="radiogroup" aria-label="How to open the selected files">
+      <label class="modal-checkbox-label">
+        <input type="radio" name="open-import-mode" id="open-import-mode-temp" value="temporary" checked />
+        Temporary — view/edit in place
+      </label>
+      <label class="modal-checkbox-label">
+        <input type="radio" name="open-import-mode" id="open-import-mode-import" value="import" />
+        Import into workspace
+      </label>
+    </div>
+
+    <div id="open-import-destination" class="hidden">
+      <label class="modal-label">
+        Top-Level Folder
+        <select id="open-import-l1" class="modal-input"></select>
+      </label>
+      <label class="modal-label" id="open-import-l2-wrap">
+        Destination
+        <select id="open-import-l2" class="modal-input"></select>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="open-import-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="open-import-apply-btn" disabled>Open</button>
     </div>
   </div>
 </div>

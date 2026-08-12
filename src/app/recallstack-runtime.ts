@@ -128,6 +128,16 @@ import { portableNameError } from "../services/portable-names";
 import { newMarkdownFileTitle, newMarkdownStoredFilename } from "../features/notes/new-file";
 import { NewFileModalController } from "../ui/components/new-file-modal";
 import { QuickTabSwitcherController, tabJumpCodes } from "../ui/components/quick-tab-switcher";
+import {
+  buildImportedFilePath,
+  mergeSelectedFiles,
+  openImportActionEnabled,
+  partitionMarkdownFilenames,
+  removeSelectedFile,
+  resolveImportDestination,
+  type OpenImportMode,
+  type SelectableFile,
+} from "../features/editor/import-files";
 
 type ViewName = "welcome" | "list" | "editor" | "search" | "calendar" | "outputs";
 type WorkingSortMode = "alpha" | "mtime" | "priority";
@@ -216,6 +226,10 @@ type TaskLocation = {
   let isOutputsFile       = false;  // true when currently editing a file from Outputs
   let currentOutputsFh: FileSystemFileHandle | null = null;
   let currentOutputsDirFh: FileSystemDirectoryHandle | null = null;
+  // ── Open / Import Files (external, non-workspace-owned tabs) ─────────────────
+  let isExternalFile      = false;  // true when currently editing a "Temporary" external file in place
+  let currentExternalPath: string | null = null;             // absolute OS path (Tauri desktop mode)
+  let currentExternalFileHandle: FileSystemFileHandle | null = null; // real handle (browser mode)
   let navRow1Mode: "buttons" | "combo" = 'buttons';
   let navRow2Mode: "buttons" | "combo" = 'buttons';
   let renameFolderRow     = 0;         // 1 or 2 — which nav row triggered the rename modal
@@ -295,6 +309,7 @@ type TaskLocation = {
   const btnSearchClear = $id('btn-search-clear');
   const btnRefreshWorkspace = $id('btn-refresh-workspace');
   const btnOutputsTop = $id('btn-outputs-top');
+  const btnOpenImport = $id('btn-open-import');
   const btnSafetyTools = $id('btn-safety-tools');
   const editorView    = $id('editor-view');
   const listHeading  = $id('list-heading');
@@ -399,6 +414,25 @@ type TaskLocation = {
   const moveAsNonTaskInput = $id('modal-move-as-non-task');
   const moveFileCancelBtn  = $id('modal-move-cancel-btn');
   const moveFileApplyBtn   = $id('modal-move-apply-btn');
+  const openImportModal        = $id('modal-open-import');
+  const openImportDropzone     = $id<HTMLDivElement>('open-import-dropzone');
+  const openImportBrowseBtn    = $id('open-import-browse-btn');
+  const openImportFileListEl   = $id<HTMLDivElement>('open-import-file-list');
+  const openImportModeTemp     = $id<HTMLInputElement>('open-import-mode-temp');
+  const openImportModeImport   = $id<HTMLInputElement>('open-import-mode-import');
+  const openImportDestination  = $id<HTMLDivElement>('open-import-destination');
+  const openImportL1Select     = $id<HTMLSelectElement>('open-import-l1');
+  const openImportL2Select     = $id<HTMLSelectElement>('open-import-l2');
+  const openImportCancelBtn    = $id('open-import-cancel-btn');
+  const openImportApplyBtn     = $id('open-import-apply-btn');
+  interface OpenImportSelection extends SelectableFile {
+    // Absolute OS path (Tauri desktop mode) — key is this same value when set.
+    nativePath: string | null;
+    // Real handle obtained from window.showOpenFilePicker()/getAsFileSystemHandle()
+    // (browser mode) — key is a synthetic value derived from it when set.
+    browserHandle: FileSystemFileHandle | null;
+  }
+  let openImportSelectedFiles: OpenImportSelection[] = [];
   const inboxDeleteModal      = $id('modal-inbox-delete');
   const inboxDeleteMsg        = $id('modal-inbox-delete-msg');
   const inboxDeleteCancelBtn  = $id('modal-inbox-delete-cancel');
@@ -987,6 +1021,9 @@ type TaskLocation = {
     isOutputsFile = false;
     currentOutputsFh = null;
     currentOutputsDirFh = null;
+    isExternalFile = false;
+    currentExternalPath = null;
+    currentExternalFileHandle = null;
     preSearchView = null;
     searchIndex = [];
     lastSearchBuffer = null;
@@ -1324,6 +1361,9 @@ type TaskLocation = {
     isOutputsFile       = false;
     currentOutputsFh    = null;
     currentOutputsDirFh = null;
+    isExternalFile      = false;
+    currentExternalPath = null;
+    currentExternalFileHandle = null;
     updateAllTasksGroupingModeBtn();
     l1Active    = folder;
     l2Active    = null;
@@ -1402,6 +1442,9 @@ type TaskLocation = {
       isOutputsFile    = false;
       currentOutputsFh = null;
       currentOutputsDirFh = null;
+      isExternalFile   = false;
+      currentExternalPath = null;
+      currentExternalFileHandle = null;
       archiveMode      = parts[1] === 'archived';
       updateAllTasksGroupingModeBtn();
       const allTasksBtn = $maybe('btn-all-tasks');
@@ -1430,6 +1473,9 @@ type TaskLocation = {
       isOutputsFile       = false;
       currentOutputsFh    = null;
       currentOutputsDirFh = null;
+      isExternalFile      = false;
+      currentExternalPath = null;
+      currentExternalFileHandle = null;
       updateAllTasksGroupingModeBtn();
       archiveMode      = false;
       const allTasksBtn = $maybe('btn-all-tasks');
@@ -1591,6 +1637,9 @@ type TaskLocation = {
     isOutputsFile       = false;
     currentOutputsFh    = null;
     currentOutputsDirFh = null;
+    isExternalFile      = false;
+    currentExternalPath = null;
+    currentExternalFileHandle = null;
     l1Active    = null;
     l2Active    = null;
     archiveMode = false;
@@ -1697,6 +1746,7 @@ type TaskLocation = {
       path: outputsPath, title: fileEntry.name.replace(/\.md$/i, ''), isNew: false, dirty: false,
       isOutputsFile: true, outputsFileHandle: fileEntry.handle, outputsDirHandle: fileEntry.dirHandle,
       returnToOutputs: true, returnToAllTasks: false,
+      isExternalFile: false, externalPath: null, externalFileHandle: null,
     });
     const ok = await loadOutputsFileIntoEditor(tab, fileEntry);
     if (!ok) {
@@ -1774,6 +1824,109 @@ type TaskLocation = {
     }
   }
 
+  // ── External / temporary files (Open / Import Files) ─────────────────────────
+  // Mirrors the Outputs tab pattern above: a "special-source" tab whose file
+  // lives outside the normal workspace-relative path model. The tab is keyed
+  // by the absolute OS path (Tauri desktop mode) or a synthetic key derived
+  // from the browser FileSystemFileHandle (browser mode, which has no path).
+  function externalTabPathKey(selection: OpenImportSelection): string {
+    return selection.nativePath || `external-handle:${selection.key}`;
+  }
+
+  async function openExternalFileInTab(selection: OpenImportSelection, pinned = true) {
+    const pathKey = externalTabPathKey(selection);
+    const existing = findTabByPath(pathKey);
+    if (existing) {
+      if (pinned && !existing.pinned) { existing.pinned = true; renderTabStrip(); }
+      return activateTab(existing.id);
+    }
+    if (!await checkUnsavedNewNote()) return false;
+    if (!await autoSaveIfDirty()) return false;
+    syncActiveTabFromState();
+    const { tab, previousActiveId, isNewTab } = claimTabSlot(pinned, {
+      path: pathKey, title: selection.name.replace(/\.md$/i, ''), isNew: false, dirty: false,
+      isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false,
+      isExternalFile: true, externalPath: selection.nativePath, externalFileHandle: selection.browserHandle,
+    });
+    const ok = await loadExternalFileIntoEditor(tab);
+    if (!ok) {
+      if (isNewTab) tabs = tabs.filter(t => t.id !== tab.id);
+      activeTabId = previousActiveId;
+      renderTabStrip();
+      return false;
+    }
+    syncActiveTabFromState();
+    renderTabStrip();
+    return true;
+  }
+
+  // Loads a "Temporary" external file into the shared editor/preview. Content is
+  // read fresh each time (fileEntry-equivalent handles/paths live on the tab
+  // record itself, so re-activating a backgrounded tab just re-reads from there).
+  async function loadExternalFileIntoEditor(tab: EditorTab) {
+    const handle = tab.externalFileHandle;
+    const path   = tab.externalPath;
+    try {
+      let content: string;
+      if (handle) {
+        const file = await handle.getFile();
+        content = await file.text();
+      } else if (path && window.__recallstackNative?.active) {
+        content = await window.__recallstackNative!.externalReadText(path);
+      } else {
+        throw new Error('This external file is no longer available');
+      }
+
+      currentPath               = tab.path;
+      isNew                     = false;
+      isExternalFile            = true;
+      currentExternalPath       = path;
+      currentExternalFileHandle = handle;
+
+      titleInput.value = tab.title;
+      savedContent      = content;
+      let editorContent = content;
+
+      const draft = await recoveryDraftGet(tab.path!);
+      if (draft !== null && draft !== content) {
+        if (confirm('Unsaved draft found — restore changes?')) {
+          editorContent = draft;
+          savedContent   = content;
+        } else {
+          lsDraftClear(tab.path!);
+        }
+      }
+
+      await mdEditor.openDocument(tab.path!, editorContent, 0);
+      currentBacklinks = [];
+      previewOut.innerHTML = '';
+      previewOut.scrollTop = 0;
+      previewScheduler.cancel();
+      setPreviewMarkdown(content);
+      postProcessPreview();
+
+      // Temporary files are edited in place at their original OS location and
+      // must never be archivable. Move behaves like Import instead of the
+      // normal in-workspace move (see openMoveFileModal()/moveCurrentFile()).
+      // Delete isn't offered either — RecallStack doesn't own this file.
+      btnDelete.classList.add('hidden');
+      btnMove.classList.remove('hidden');
+      btnArchive.classList.add('hidden');
+      btnMakeCopy.classList.add('hidden');
+      btnNewFromEditor.classList.add('hidden');
+      btnStampDate.classList.add('hidden');
+
+      showView('editor');
+      showTaskDateBar();
+      applyJournalToolbarRestrictions();
+      updateConvertToTaskBtn();
+      return true;
+    } catch (e: any) {
+      toast('Could not open file: ' + e.message, 'error');
+      return false;
+    }
+  }
+
   function mkNavSeparator() {
     return createNavSeparator();
   }
@@ -1838,6 +1991,9 @@ type TaskLocation = {
     isOutputsFile       = false;
     currentOutputsFh    = null;
     currentOutputsDirFh = null;
+    isExternalFile      = false;
+    currentExternalPath = null;
+    currentExternalFileHandle = null;
     l1Active         = null;
     l2Active         = null;
     archiveMode      = preserveArchiveMode === true;
@@ -2379,11 +2535,14 @@ type TaskLocation = {
 
   function appLocalPathForCurrentFile() {
     if (!currentPath || isNew) return '';
-    if (isOutputsFile) return normalizeAppPath(currentPath);
+    if (isOutputsFile || isExternalFile) return normalizeAppPath(currentPath);
     return normalizeAppPath((DB_WS_PREFIX || '') + currentPath);
   }
 
   function fullPathForCurrentFile() {
+    // An external file's currentPath is already the real absolute OS path —
+    // joining it with the workspace root again would double it up.
+    if (isExternalFile) return currentPath || '';
     const appPath = appLocalPathForCurrentFile();
     return appPath ? nativePathJoin(workspaceRootPathForClipboard(), appPath) : '';
   }
@@ -2395,6 +2554,9 @@ type TaskLocation = {
   }
 
   function internalLinkForCurrentFile() {
+    // #recallstack-open= links only resolve workspace-relative paths — an
+    // external file has no such address to link to.
+    if (isExternalFile) return '';
     const appPath = appLocalPathForCurrentFile();
     if (!appPath) return '';
     return `[${markdownLinkLabelForCurrentFile()}](#recallstack-open=${encodeURIComponent(appPath)})`;
@@ -2504,13 +2666,13 @@ type TaskLocation = {
   }
 
   function isProtectedDailyJournalTab(tab: EditorTab | null | undefined) {
-    return !!tab && !!protectedDailyJournalPath && !tab.isOutputsFile && tab.path === protectedDailyJournalPath;
+    return !!tab && !!protectedDailyJournalPath && !tab.isOutputsFile && !tab.isExternalFile && tab.path === protectedDailyJournalPath;
   }
 
   function enforceDailyJournalTabPosition() {
     const dailyPath = protectedDailyJournalPath;
     if (!dailyPath) return;
-    const index = tabs.findIndex(tab => !tab.isOutputsFile && tab.path === dailyPath);
+    const index = tabs.findIndex(tab => !tab.isOutputsFile && !tab.isExternalFile && tab.path === dailyPath);
     if (index < 0) return;
     const [tab] = tabs.splice(index, 1);
     tab.pinned = true;
@@ -2541,6 +2703,7 @@ type TaskLocation = {
       path: currentPath, content: mdEditor.value, savedContent, isNew, isOutputsFile,
       outputsFileHandle: currentOutputsFh, outputsDirHandle: currentOutputsDirFh,
       returnToOutputs, returnToAllTasks,
+      isExternalFile, externalPath: currentExternalPath, externalFileHandle: currentExternalFileHandle,
     }, tabTitleForPath);
   }
 
@@ -2561,11 +2724,11 @@ type TaskLocation = {
   // Small inline-SVG icon distinguishing a tab's file kind (task / journal /
   // regular note) at a glance in the tab strip. Reuses the same TASK and
   // JOURNAL glyphs as taskKindIndicatorMarkup() (minus its text label, which
-  // is sized for the toolbar, not a compact tab chip). Outputs-mode tabs and
-  // path-less (brand new, unsaved) tabs are neither task nor note, so they
-  // get no icon rather than a misleading one.
+  // is sized for the toolbar, not a compact tab chip). Outputs-mode tabs,
+  // external/temporary tabs, and path-less (brand new, unsaved) tabs are
+  // neither task nor note, so they get no icon rather than a misleading one.
   function tabKindIconMarkup(tab: any) {
-    if (tab.isOutputsFile || !tab.path) return '';
+    if (tab.isOutputsFile || tab.isExternalFile || !tab.path) return '';
     if (isCurrentTaskPath(tab.path)) {
       return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 2.5 2.5L16 9"/></svg>';
     }
@@ -2703,6 +2866,9 @@ type TaskLocation = {
     isOutputsFile        = false;
     currentOutputsFh     = null;
     currentOutputsDirFh  = null;
+    isExternalFile       = false;
+    currentExternalPath  = null;
+    currentExternalFileHandle = null;
     currentBacklinks     = [];
     mdEditor.openDocument('', '', 0);
     previewOut.replaceChildren();
@@ -2717,6 +2883,14 @@ type TaskLocation = {
       const content = await readMdFile(notesRelPath);
       currentPath = notesRelPath;
       isNew       = false;
+      // Unconditionally clear external-file state here rather than relying on
+      // syncNavToPath()'s folder-change branches below — those only fire when
+      // the navigation sidebar's active folder actually changes, which isn't
+      // guaranteed (e.g. importing a temporary file into the folder that was
+      // already active before it was opened).
+      isExternalFile            = false;
+      currentExternalPath       = null;
+      currentExternalFileHandle = null;
       await syncNavToPath(notesRelPath);
       await loadAssetsForCurrentFile();
       titleInput.value = isCurrentTaskPath(notesRelPath) ? taskDisplayTitle(notesRelPath.split('/').at(-1)!) : notesRelPath.split('/').at(-1)!.replace(/\.md$/, '');
@@ -2813,6 +2987,7 @@ type TaskLocation = {
     const { tab, previousActiveId, isNewTab } = claimTabSlot(pinned, {
       path: notesRelPath, title: tabTitleForPath(notesRelPath), isNew: false, dirty: false,
       isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false,
+      isExternalFile: false, externalPath: null, externalFileHandle: null,
     });
     const ok = await loadFileIntoEditor(notesRelPath, options);
     if (!ok) {
@@ -2850,7 +3025,9 @@ type TaskLocation = {
     activeTabId = tabId;
     const ok = target.isOutputsFile
       ? await loadOutputsFileIntoEditor(target)
-      : await loadFileIntoEditor(target.path!, {});
+      : target.isExternalFile
+        ? await loadExternalFileIntoEditor(target)
+        : await loadFileIntoEditor(target.path!, {});
     if (!ok) {
       // The file behind this tab is gone (e.g. deleted outside RecallStack) —
       // drop the tab and fall back to another one, or to an empty state.
@@ -2968,6 +3145,44 @@ type TaskLocation = {
     }
 
     saveShouldNotify = !silent;
+
+    // Temporary external file: save in place, back to its original OS location —
+    // never into the workspace. Browser mode writes through the real
+    // FileSystemFileHandle obtained at open time; Tauri desktop mode writes
+    // through the external_fs_write_text command using the absolute path.
+    if (isExternalFile) {
+      saveInProgress = true;
+      savePromise = (async () => {
+        btnSave.textContent = 'Saving…';
+        btnSave.disabled    = true;
+        try {
+          const content = mdEditor.value;
+          if (currentExternalFileHandle) {
+            const writable = await currentExternalFileHandle.createWritable();
+            try { await writable.write(content); } finally { await writable.close(); }
+          } else if (currentExternalPath && window.__recallstackNative?.active) {
+            await window.__recallstackNative!.externalWriteText(currentExternalPath, content);
+          } else {
+            throw new Error('No writable location for this external file');
+          }
+          savedContent = content;
+          syncActiveTabFromState();
+          renderTabStrip();
+          if (saveShouldNotify) toast('Saved ✓');
+          return true;
+        } catch (e: any) {
+          toast('Save failed: ' + e.message, 'error');
+          return false;
+        } finally {
+          saveInProgress      = false;
+          savePromise         = null;
+          saveShouldNotify    = false;
+          btnSave.disabled    = false;
+          btnSave.textContent = 'Save';
+        }
+      })();
+      return savePromise;
+    }
 
     // Outputs mode: save in-place directly to the outputs file handle
     if (isOutputsFile && currentOutputsFh) {
@@ -3116,6 +3331,13 @@ type TaskLocation = {
   async function deleteNote() {
     if (isWorkingTask()) return;
     if (!currentPath) return;
+    // External/temporary files aren't owned by the workspace — there's no
+    // RecallStack Trash to move them to, and deleting the user's original
+    // file out from under them is out of scope for this editor-in-place mode.
+    if (isExternalFile) {
+      toast('External files can’t be deleted from RecallStack', 'error');
+      return;
+    }
     const name = currentPath!.split('/').at(-1)!;
     if (!confirm(`Move "${name}" to RecallStack Trash?`)) return;
 
@@ -3150,6 +3372,12 @@ type TaskLocation = {
   async function archiveNote() {
     if (isWorkingTask()) return;
     if (!currentPath) return;
+    // Temporary/external files must never be archivable (the button is hidden
+    // while one is active — this guard covers the command palette too).
+    if (isExternalFile) {
+      toast('External files can’t be archived', 'error');
+      return;
+    }
     if (isRootLevelNotePath()) {
       toast('Archive is disabled for root notes', 'error');
       return;
@@ -3183,6 +3411,7 @@ type TaskLocation = {
   async function restoreNote() {
     if (isWorkingTask()) return;
     if (!currentPath) return;
+    if (isExternalFile) return;
     try {
       if (!await saveNote()) return;
       const rawContent = mdEditor.value;
@@ -3223,7 +3452,10 @@ type TaskLocation = {
   }
 
   function isTaskSpecificMove() {
-    return isCurrentTaskFile() && !moveAsNonTaskInput.checked;
+    // An external/temporary file's absolute OS path may incidentally contain a
+    // "tasks" path segment (e.g. .../Documents/tasks/todo.md) — that must never
+    // be mistaken for a workspace task move.
+    return !isExternalFile && isCurrentTaskFile() && !moveAsNonTaskInput.checked;
   }
 
   function closeMoveFileModal() {
@@ -3290,7 +3522,7 @@ type TaskLocation = {
   }
 
   function updateMoveTopFolderOptions() {
-    const currentTop = isOutputsFile ? null : currentPath?.split('/')[0];
+    const currentTop = (isOutputsFile || isExternalFile) ? null : currentPath?.split('/')[0];
     for (const option of moveL1Select.options) {
       option.disabled = !!currentTop && isTaskSpecificMove() && option.value === currentTop;
     }
@@ -3305,22 +3537,28 @@ type TaskLocation = {
     else await populateMoveSubfolders();
   }
 
+  // For a normal workspace file this moves it between folders. For a
+  // "Temporary" external file (isExternalFile) it instead drives the same
+  // Top-Level Folder / Subfolder destination picker to *import* that file
+  // into the workspace — see moveCurrentFile()'s isExternalFile branch below,
+  // and the "Clicking the Move button on a temporary file behaves like
+  // Import" requirement this satisfies.
   async function openMoveFileModal() {
     if (isWorkingTask() || isTaskNamespacePath()) return;
     if (!currentPath || isNew) return;
 
     const filename   = currentPath!.split('/').at(-1)!;
-    const taskFile   = isCurrentTaskFile();
-    const currentTop = isOutputsFile ? null : currentPath!.split('/')[0];
+    const taskFile   = isCurrentTaskFile() && !isExternalFile;
+    const currentTop = (isOutputsFile || isExternalFile) ? null : currentPath!.split('/')[0];
 
-    moveFileTitle.textContent = `Move "${filename}"`;
+    moveFileTitle.textContent = isExternalFile ? `Import "${filename}" into Workspace` : `Move "${filename}"`;
     moveL1Select.innerHTML = '';
     moveL2Select.innerHTML = '';
     moveAsNonTaskInput.checked = false;
     moveAsNonTaskWrap.classList.toggle('hidden', !taskFile);
     moveL2Wrap.classList.toggle('hidden', isTaskSpecificMove());
     moveFileApplyBtn.disabled = true;
-    moveFileApplyBtn.textContent = 'Move';
+    moveFileApplyBtn.textContent = isExternalFile ? 'Import' : 'Move';
     addMoveOption(moveL1Select, '', 'Select a top-level folder…');
 
     try {
@@ -3343,14 +3581,47 @@ type TaskLocation = {
     }
   }
 
+  // Copies the active external/temporary file's current editor content into the
+  // chosen workspace folder, then swaps the temporary tab for a normal workspace
+  // tab pointed at the new copy. The original file at its OS location is left
+  // untouched — this is a copy-in, not a move, since RecallStack never owns
+  // files outside the workspace.
+  async function importActiveExternalFile(destParts: [string, string]) {
+    const content = mdEditor.value;
+    const destDir = await getDirHandle(notesHandle!, destParts, true);
+    const sourceName = currentPath!.split(/[\\/]/).pop() || 'untitled.md';
+    const baseFilename = sourceName.toLowerCase().endsWith('.md') ? sourceName : sourceName + '.md';
+    const finalFilename = await uniqueFilenameInDir(destDir, baseFilename);
+    const finalPath = buildImportedFilePath(destParts, finalFilename);
+    await writeMdFile(finalPath, content);
+    updateSearchIndex(finalPath, content);
+    removeTabRecord(activeTabId);
+    // Mark the shared editor state clean before handing off to openFile()
+    // below — otherwise its internal autoSaveIfDirty() would try to write
+    // this same content back into the external source file one more time
+    // (harmless, but an unnecessary and surprising extra native write).
+    savedContent              = content;
+    isExternalFile            = false;
+    currentExternalPath       = null;
+    currentExternalFileHandle = null;
+    await openFile(finalFilename, finalPath, { pinned: true });
+  }
+
   async function moveCurrentFile() {
     const destParts = selectedMoveDestination();
     if (!destParts || !currentPath) return;
 
     moveFileApplyBtn.disabled = true;
-    moveFileApplyBtn.textContent = 'Moving…';
+    moveFileApplyBtn.textContent = isExternalFile ? 'Importing…' : 'Moving…';
 
     try {
+      if (isExternalFile) {
+        await importActiveExternalFile(destParts as [string, string]);
+        closeMoveFileModal();
+        toast('Imported ✓');
+        return;
+      }
+
       const oldPath = currentPath;
       const filename = oldPath.split('/').at(-1)!;
       const destDir = await getDirHandle(notesHandle!, destParts, true);
@@ -3406,11 +3677,11 @@ type TaskLocation = {
       await openFile(finalFilename, finalPath);
       toast('Moved ✓');
     } catch (e: any) {
-      toast('Move failed: ' + e.message, 'error');
+      toast((isExternalFile ? 'Import failed: ' : 'Move failed: ') + e.message, 'error');
     } finally {
       if (!moveFileModal.classList.contains('hidden')) {
         moveFileApplyBtn.disabled = false;
-        moveFileApplyBtn.textContent = 'Move';
+        moveFileApplyBtn.textContent = isExternalFile ? 'Import' : 'Move';
       }
     }
   }
@@ -4200,6 +4471,9 @@ type TaskLocation = {
       isOutputsFile       = false;
       currentOutputsFh    = null;
       currentOutputsDirFh = null;
+      isExternalFile      = false;
+      currentExternalPath = null;
+      currentExternalFileHandle = null;
       clearOutputsNavActive();
       const outputsBtn = $maybe(outputsActiveRoot === 'openbrain-shared' ? 'btn-outputs-shared' : 'btn-outputs');
       if (outputsBtn) outputsBtn.classList.add('active');
@@ -4410,7 +4684,7 @@ type TaskLocation = {
 
   async function refreshBacklinks() {
     currentBacklinks = [];
-    if (!window.__recallstackNative?.active || !currentPath || isOutputsFile) return;
+    if (!window.__recallstackNative?.active || !currentPath || isOutputsFile || isExternalFile) return;
     const generation = workspaceSessionGeneration;
     const path = currentPath;
     const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
@@ -5310,6 +5584,7 @@ type TaskLocation = {
 
   function quickTabKind(tab: any) {
     if (tab.isOutputsFile) return 'Output';
+    if (tab.isExternalFile) return 'External';
     if (isJournalNote(tab.path)) return 'Journal';
     if (tab.path?.split('/').includes('working')) return 'Working Task';
     if (isCurrentTaskPath(tab.path)) return 'Task';
@@ -5432,7 +5707,7 @@ type TaskLocation = {
     { id:'tools.rebuild-index', title:'Rebuild Search Index', category:'Tools', isVisible:(state: any) =>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('rebuild'); } },
     { id:'tools.backup', title:'Backup Workspace', category:'Tools', isVisible:(state: any) =>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('backup'); } },
     { id:'tools.git-status', title:'Show Git Status', category:'Tools', isVisible:(state: any) =>state.nativeDesktop, isEnabled:desktopOnly, run:() => { openSafetyTools(); return runSafetyAction('git'); } },
-    { id:'workspace.reveal-file', title:'Reveal Current File', category:'Workspace', isVisible:(state: any) =>state.nativeDesktop, isEnabled:needsEditor, run:() => window.__recallstackNative!.revealPath(appLocalPathForCurrentFile()) },
+    { id:'workspace.reveal-file', title:'Reveal Current File', category:'Workspace', isVisible:(state: any) =>state.nativeDesktop, isEnabled:(state: any) => needsEditor(state) && !isExternalFile, disabledReason:()=>isExternalFile ? 'Not available for external files' : 'Open a note first', run:() => window.__recallstackNative!.revealPath(appLocalPathForCurrentFile()) },
     { id:'workspace.reveal-folder', title:'Reveal Workspace Folder', category:'Workspace', isVisible:(state: any) =>state.nativeDesktop, isEnabled:needsWorkspace, run:() => window.__recallstackNative!.revealWorkspace() },
     { id:'workspace.close-app', title:'Close RecallStack', category:'Workspace', isVisible:(state: any) =>state.nativeDesktop, run:() => window.__recallstackNative!.closeApp() },
   ].forEach(registerCommand);
@@ -6161,6 +6436,316 @@ type TaskLocation = {
   moveFileModal.addEventListener('keydown', (e: any) => {
     if (e.key === 'Escape') closeMoveFileModal();
     if (e.key === 'Enter' && !moveFileApplyBtn.disabled) moveCurrentFile();
+  });
+
+  // ── Open / Import Files modal ─────────────────────────────────────────────
+  // Browse and drag-and-drop both feed openImportSelectedFiles; the
+  // Temporary/Import radio group decides whether "Open/Import" opens each
+  // file in place or copies it into a chosen workspace folder first — see
+  // performOpenImportAction() below. Destination selects reuse the exact
+  // two-select (Top-Level Folder → Subfolder) pattern as the Move File modal
+  // above, including its addMoveOption()/listWorkspaceTopDirs() helpers.
+
+  function openImportSelectedMode(): OpenImportMode {
+    return openImportModeImport.checked ? 'import' : 'temporary';
+  }
+
+  function openImportDestinationParts(): [string, string] | null {
+    return resolveImportDestination(openImportL1Select.value, openImportL2Select.value);
+  }
+
+  function updateOpenImportApplyBtn() {
+    const mode = openImportSelectedMode();
+    const destination = mode === 'import' ? openImportDestinationParts() : null;
+    openImportApplyBtn.disabled = !openImportActionEnabled(openImportSelectedFiles.length, mode, destination);
+    openImportApplyBtn.textContent = mode === 'import' ? 'Import' : 'Open';
+  }
+
+  function updateOpenImportModeUi() {
+    openImportDestination.classList.toggle('hidden', openImportSelectedMode() !== 'import');
+    updateOpenImportApplyBtn();
+  }
+
+  function renderOpenImportFileList() {
+    openImportFileListEl.replaceChildren();
+    openImportSelectedFiles.forEach((file, index) => {
+      const row = document.createElement('div');
+      row.className = 'open-import-file-row' + (index === 0 ? ' first-file' : '');
+      const name = document.createElement('span');
+      name.className = 'open-import-file-name';
+      name.textContent = file.name;
+      name.title = file.nativePath || file.name;
+      row.appendChild(name);
+      if (index === 0 && openImportSelectedFiles.length > 1) {
+        const hint = document.createElement('span');
+        hint.className = 'open-import-file-hint';
+        hint.title = 'This file becomes the active tab once opened';
+        hint.textContent = 'Opens first';
+        row.appendChild(hint);
+      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'open-import-file-remove';
+      remove.innerHTML = '&times;';
+      remove.title = `Remove ${file.name}`;
+      remove.setAttribute('aria-label', `Remove ${file.name}`);
+      remove.addEventListener('click', () => {
+        openImportSelectedFiles = removeSelectedFile(openImportSelectedFiles, file.key);
+        renderOpenImportFileList();
+      });
+      row.appendChild(remove);
+      openImportFileListEl.appendChild(row);
+    });
+    updateOpenImportApplyBtn();
+  }
+
+  // Filters a freshly picked/dropped batch to .md only (toasting anything
+  // rejected), verifies native-mode paths still point at a real file (a stale
+  // dialog result, or a folder rather than a file), merges the rest into the
+  // existing selection, and re-renders.
+  async function addOpenImportSelections(entries: OpenImportSelection[]) {
+    if (!entries.length) return;
+    const { accepted, rejected } = partitionMarkdownFilenames(entries.map(entry => entry.name));
+    if (rejected.length) {
+      toast(`Only .md files are supported — ignored: ${rejected.join(', ')}`, 'error');
+    }
+    const acceptedNames = new Set(accepted);
+    const acceptedEntries = entries.filter(entry => acceptedNames.has(entry.name));
+    if (!acceptedEntries.length) return;
+
+    const verified: OpenImportSelection[] = [];
+    const unreadable: string[] = [];
+    for (const entry of acceptedEntries) {
+      if (entry.nativePath && window.__recallstackNative?.active) {
+        try {
+          await window.__recallstackNative!.externalStat(entry.nativePath);
+          verified.push(entry);
+        } catch {
+          unreadable.push(entry.name);
+        }
+      } else {
+        verified.push(entry);
+      }
+    }
+    if (unreadable.length) {
+      toast(`Could not read: ${unreadable.join(', ')}`, 'error');
+    }
+    if (!verified.length) return;
+    openImportSelectedFiles = mergeSelectedFiles(openImportSelectedFiles, verified);
+    renderOpenImportFileList();
+  }
+
+  async function populateOpenImportTopFolders() {
+    openImportL1Select.innerHTML = '';
+    addMoveOption(openImportL1Select, '', 'Select a top-level folder…');
+    try {
+      const folders = await listWorkspaceTopDirs();
+      // Never include 'outputs' as an import destination (Outputs is read-only as a target)
+      folders.filter(f => f.name !== 'outputs').forEach(folder => addMoveOption(openImportL1Select, folder.name, folder.name));
+    } catch (e: any) {
+      toast('Could not load folders: ' + e.message, 'error');
+    }
+  }
+
+  async function populateOpenImportSubfolders() {
+    openImportL2Select.innerHTML = '';
+    addMoveOption(openImportL2Select, '', 'Select destination…');
+    const topName = openImportL1Select.value;
+    if (topName) {
+      try {
+        const topHandle = await notesHandle!.getDirectoryHandle(topName);
+        const subs = await listDirs(topHandle);
+        subs.filter(sub => sub.name !== 'tasks' && sub.name !== 'archived' && sub.name !== 'assets')
+          .forEach(sub => addMoveOption(openImportL2Select, sub.name, sub.name));
+      } catch (e: any) {
+        toast('Could not load subfolders: ' + e.message, 'error');
+      }
+    }
+    updateOpenImportApplyBtn();
+  }
+
+  function resetOpenImportModal() {
+    openImportSelectedFiles = [];
+    openImportModeTemp.checked = true;
+    openImportModeImport.checked = false;
+    openImportDestination.classList.add('hidden');
+    openImportL1Select.innerHTML = '';
+    openImportL2Select.innerHTML = '';
+    openImportDropzone.classList.remove('drag-active');
+    renderOpenImportFileList();
+  }
+
+  async function openOpenImportModal() {
+    resetOpenImportModal();
+    openImportModal.classList.remove('hidden');
+    await populateOpenImportTopFolders();
+    setTimeout(() => openImportBrowseBtn.focus(), 0);
+  }
+
+  function closeOpenImportModal() {
+    openImportModal.classList.add('hidden');
+    resetOpenImportModal();
+  }
+
+  async function browseOpenImportFiles() {
+    if (window.__recallstackNative?.active) {
+      const paths = await window.__recallstackNative.chooseExternalMarkdownFiles();
+      await addOpenImportSelections(paths.map(path => ({
+        key: path, name: path.split(/[\\/]/).pop() || path, nativePath: path, browserHandle: null,
+      })));
+      return;
+    }
+    if (typeof window.showOpenFilePicker !== 'function') {
+      toast('File picking is not available in this environment', 'error');
+      return;
+    }
+    try {
+      const handles = await window.showOpenFilePicker({
+        multiple: true,
+        excludeAcceptAllOption: true,
+        types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }],
+      });
+      await addOpenImportSelections(handles.map(handle => ({
+        key: `browser-handle:${handle.name}`, name: handle.name, nativePath: null, browserHandle: handle,
+      })));
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      toast('Could not open file picker: ' + e.message, 'error');
+    }
+  }
+
+  // Writes one selected external file's current content into the chosen
+  // workspace folder (a copy-in — the external source is left untouched) and
+  // returns the new workspace-relative path.
+  async function importExternalSelectionIntoWorkspace(file: OpenImportSelection, destParts: [string, string]): Promise<string> {
+    const destDir = await getDirHandle(notesHandle!, destParts, true);
+    const baseFilename = file.name.toLowerCase().endsWith('.md') ? file.name : file.name + '.md';
+    const finalFilename = await uniqueFilenameInDir(destDir, baseFilename);
+    const finalPath = buildImportedFilePath(destParts, finalFilename);
+    const content = file.nativePath
+      ? await window.__recallstackNative!.externalReadText(file.nativePath)
+      : await (await file.browserHandle!.getFile()).text();
+    await writeMdFile(finalPath, content);
+    updateSearchIndex(finalPath, content);
+    return finalPath;
+  }
+
+  async function performOpenImportAction() {
+    const mode = openImportSelectedMode();
+    const files = openImportSelectedFiles.slice();
+    if (!files.length) return;
+
+    let destParts: [string, string] | null = null;
+    if (mode === 'import') {
+      destParts = openImportDestinationParts();
+      if (!destParts) return;
+    }
+
+    openImportApplyBtn.disabled = true;
+    openImportApplyBtn.textContent = mode === 'import' ? 'Importing…' : 'Opening…';
+
+    try {
+      const openedPaths: string[] = [];
+      for (const file of files) {
+        if (mode === 'import') {
+          const finalPath = await importExternalSelectionIntoWorkspace(file, destParts!);
+          await openFile(finalPath.split('/').at(-1)!, finalPath, { pinned: true });
+          openedPaths.push(finalPath);
+        } else {
+          await openExternalFileInTab(file, true);
+          openedPaths.push(externalTabPathKey(file));
+        }
+      }
+      closeOpenImportModal();
+      // Multiple files each get their own tab; the first one on the list
+      // becomes the active/focused document, per spec.
+      if (mode === 'import') {
+        await openFile(openedPaths[0].split('/').at(-1)!, openedPaths[0], { pinned: true });
+      } else {
+        await openExternalFileInTab(files[0], true);
+      }
+      toast(mode === 'import'
+        ? `Imported ${files.length} file${files.length === 1 ? '' : 's'} ✓`
+        : `Opened ${files.length} file${files.length === 1 ? '' : 's'} ✓`);
+    } catch (e: any) {
+      toast((mode === 'import' ? 'Import failed: ' : 'Open failed: ') + e.message, 'error');
+    } finally {
+      if (!openImportModal.classList.contains('hidden')) {
+        openImportApplyBtn.disabled = false;
+        updateOpenImportApplyBtn();
+      }
+    }
+  }
+
+  btnOpenImport.addEventListener('click', openOpenImportModal);
+  openImportCancelBtn.addEventListener('click', closeOpenImportModal);
+  openImportApplyBtn.addEventListener('click', performOpenImportAction);
+  openImportBrowseBtn.addEventListener('click', browseOpenImportFiles);
+  openImportModeTemp.addEventListener('change', updateOpenImportModeUi);
+  openImportModeImport.addEventListener('change', updateOpenImportModeUi);
+  openImportL1Select.addEventListener('change', populateOpenImportSubfolders);
+  openImportL2Select.addEventListener('change', updateOpenImportApplyBtn);
+  openImportModal.addEventListener('click', (e: any) => {
+    if (e.target === openImportModal) closeOpenImportModal();
+  });
+  openImportModal.addEventListener('keydown', (e: any) => {
+    if (e.key === 'Escape') closeOpenImportModal();
+  });
+
+  openImportDropzone.addEventListener('dragover', (e: DragEvent) => {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      openImportDropzone.classList.add('drag-active');
+    }
+  });
+  openImportDropzone.addEventListener('dragleave', () => openImportDropzone.classList.remove('drag-active'));
+  openImportDropzone.addEventListener('drop', async (e: DragEvent) => {
+    e.preventDefault();
+    openImportDropzone.classList.remove('drag-active');
+    const items = e.dataTransfer?.items;
+    const files = e.dataTransfer?.files;
+    if (!items?.length && !files?.length) return;
+
+    const entries: OpenImportSelection[] = [];
+    const unreadable: string[] = [];
+
+    if (window.__recallstackNative?.active) {
+      // Tauri desktop: dragDropEnabled is false in tauri.conf.json specifically
+      // so standard HTML5 drag-and-drop fires in the webview. Tauri's WRY
+      // webview has historically exposed a non-standard `.path` on dropped
+      // File objects in that configuration — verified empirically not
+      // possible from this (Linux dev) environment, so this is read
+      // defensively and falls back to a clear error if it's ever absent.
+      for (const file of Array.from(files || [])) {
+        const nativePath = (file as unknown as { path?: string }).path;
+        if (typeof nativePath === 'string' && nativePath) {
+          entries.push({ key: nativePath, name: file.name, nativePath, browserHandle: null });
+        } else {
+          unreadable.push(file.name);
+        }
+      }
+    } else if (items?.length && typeof items[0]?.getAsFileSystemHandle === 'function') {
+      // Browser mode: the standard Chromium API gives a real, writable handle.
+      for (const item of Array.from(items)) {
+        if (item.kind !== 'file') continue;
+        try {
+          const handle = await item.getAsFileSystemHandle?.();
+          if (handle && handle.kind === 'file') {
+            entries.push({ key: `browser-handle:${handle.name}`, name: handle.name, nativePath: null, browserHandle: handle as FileSystemFileHandle });
+          }
+        } catch {
+          unreadable.push(item.type || 'dropped file');
+        }
+      }
+    } else {
+      for (const file of Array.from(files || [])) unreadable.push(file.name);
+    }
+
+    if (entries.length) await addOpenImportSelections(entries);
+    if (unreadable.length) {
+      toast(`Could not read dropped file location — use Browse instead: ${unreadable.join(', ')}`, 'error');
+    }
   });
 
   inboxDeleteCancelBtn.addEventListener('click', closeInboxDeleteModal);

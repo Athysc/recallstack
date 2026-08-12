@@ -429,6 +429,73 @@ pub fn fs_exists(state: State<'_, Arc<AppState>>, path: String) -> Result<bool, 
     Ok(safe_path(&state, &path)?.exists())
 }
 
+// ── External file access (Open / Import Files) ─────────────────────────────
+//
+// These three commands are the only way the frontend can touch a path outside
+// the open workspace. They deliberately take an absolute OS path with no
+// workspace root involved at all — safe_path() above is the wrong tool here
+// since it exists specifically to *reject* absolute paths. The trust boundary
+// instead is: the path only ever reaches here after the user drove a native
+// OS file-picker dialog (or an OS-level drag-and-drop) themselves, which is
+// the standard boundary for this kind of access. We still refuse symlinks and
+// non-regular files/directories as a basic sanity check.
+
+fn validate_external_file(path: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(path);
+    if !candidate.is_absolute() {
+        return Err("External file path must be absolute".to_string());
+    }
+    let metadata = fs::symlink_metadata(&candidate).map_err(|e| e.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("Symbolic links are not allowed for external files".to_string());
+    }
+    if !metadata.is_file() {
+        return Err("Path is not a regular file".to_string());
+    }
+    Ok(candidate)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalFileInfo {
+    name: String,
+    size: u64,
+    modified_at: u64,
+}
+
+#[tauri::command]
+pub fn external_fs_stat(path: String) -> Result<ExternalFileInfo, String> {
+    let candidate = validate_external_file(&path)?;
+    let metadata = fs::metadata(&candidate).map_err(|e| e.to_string())?;
+    let modified_at = metadata
+        .modified()
+        .map_err(|e| e.to_string())?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis() as u64;
+    Ok(ExternalFileInfo {
+        name: candidate
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string(),
+        size: metadata.len(),
+        modified_at,
+    })
+}
+
+#[tauri::command]
+pub fn external_fs_read_text(path: String) -> Result<String, String> {
+    let candidate = validate_external_file(&path)?;
+    fs::read_to_string(candidate).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn external_fs_write_text(path: String, text: String) -> Result<(), String> {
+    let candidate = validate_external_file(&path)?;
+    safety::atomic_write(&candidate, text.as_bytes())
+}
+
 #[tauri::command]
 pub fn close_app(app: AppHandle) {
     app.exit(0);
@@ -438,7 +505,7 @@ pub fn close_app(app: AppHandle) {
 mod tests {
     use super::{
         markdown_asset_references, portable_read_text_from, rename_directory,
-        validate_portable_target, PORTABLE_TEXT_FILES,
+        validate_external_file, validate_portable_target, PORTABLE_TEXT_FILES,
     };
     use std::collections::BTreeSet;
     use std::fs;
@@ -529,6 +596,37 @@ mod tests {
             None
         );
         assert!(portable_read_text_from(&executable, "../readme.md").is_err());
+        fs::remove_dir_all(directory).expect("remove fixture");
+    }
+
+    #[test]
+    fn external_files_must_be_absolute_existing_non_symlink_regular_files() {
+        let directory = std::env::temp_dir().join(format!(
+            "recallstack-external-file-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("fixture directory");
+        let file = directory.join("outside.md");
+        fs::write(&file, "hello").expect("fixture file");
+
+        assert!(validate_external_file(file.to_str().expect("utf8 path")).is_ok());
+        assert!(validate_external_file("relative/outside.md").is_err());
+        assert!(validate_external_file(
+            directory.to_str().expect("utf8 path")
+        )
+        .is_err());
+        assert!(validate_external_file(
+            directory
+                .join("does-not-exist.md")
+                .to_str()
+                .expect("utf8 path")
+        )
+        .is_err());
+
         fs::remove_dir_all(directory).expect("remove fixture");
     }
 }

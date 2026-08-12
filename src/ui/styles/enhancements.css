@@ -10,6 +10,11 @@ html.app-booting body { visibility: hidden; }
   max-width: calc(100vw - 64px);
 }
 
+#modal-open-import .modal-dialog {
+  width: 560px;
+  max-width: calc(100vw - 64px);
+}
+
 .pane-label,
 .working-task-header {
   box-sizing: border-box;

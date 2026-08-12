@@ -35,6 +35,10 @@ interface RecallStackNativeBridge {
   verifyBackup(path: string): Promise<Record<string, unknown>>;
   restoreBackupDryRun(path: string): Promise<Record<string, unknown>>;
   checkWorkspace(): Promise<Record<string, unknown>>;
+  chooseExternalMarkdownFiles(): Promise<string[]>;
+  externalStat(path: string): Promise<{ name: string; size: number; modifiedAt: number }>;
+  externalReadText(path: string): Promise<string>;
+  externalWriteText(path: string, text: string): Promise<void>;
   rebuildIndex(): Promise<number>;
   cancelIndex(): Promise<void>;
   indexHealth(): Promise<Record<string, unknown>>;
@@ -56,12 +60,26 @@ interface Window {
   __TAURI_INTERNALS__?: Record<string, unknown>;
   __recallstackNative?: RecallStackNativeBridge;
   showDirectoryPicker(options?: { mode?: "read" | "readwrite" }): Promise<FileSystemDirectoryHandle>;
+  // Standard Chromium File System Access API — used for the "Open / Import
+  // Files" Browse button in browser (non-Tauri) mode. Not yet in TS's DOM lib.
+  showOpenFilePicker?(options?: {
+    multiple?: boolean;
+    excludeAcceptAllOption?: boolean;
+    types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+  }): Promise<FileSystemFileHandle[]>;
 }
 
 interface FileSystemDirectoryHandle {
   values(): AsyncIterableIterator<FileSystemFileHandle | FileSystemDirectoryHandle>;
   queryPermission(options?: { mode?: "read" | "readwrite" }): Promise<PermissionState>;
   requestPermission(options?: { mode?: "read" | "readwrite" }): Promise<PermissionState>;
+}
+
+interface DataTransferItem {
+  // Standard Chromium API for drag-and-drop of real files — used so a file
+  // dropped into "Open / Import Files" gets a real, writable
+  // FileSystemFileHandle in browser mode, consistent with the Browse button.
+  getAsFileSystemHandle?(): Promise<FileSystemHandle | null>;
 }
 
 interface Navigator {

@@ -384,6 +384,82 @@
     gap: 8px;
   }
 
+  /* ── Open / Import Files modal ────────────────────────────────────────────── */
+  .open-import-dropzone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    border: 1.5px dashed var(--surface1);
+    border-radius: 10px;
+    padding: 22px 16px;
+    text-align: center;
+    color: var(--overlay1);
+    font-size: 12.5px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .open-import-dropzone.drag-active {
+    border-color: var(--mauve);
+    background: color-mix(in srgb, var(--mauve) 10%, transparent);
+    color: var(--text);
+  }
+  .open-import-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .open-import-file-list:empty::before {
+    content: 'No files selected yet.';
+    color: var(--overlay0);
+    font-size: 12px;
+    font-style: italic;
+  }
+  .open-import-file-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--surface0);
+    font-size: 12.5px;
+  }
+  .open-import-file-row.first-file { border: 1px solid color-mix(in srgb, var(--mauve) 45%, transparent); }
+  .open-import-file-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+  }
+  .open-import-file-hint {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--mauve);
+  }
+  .open-import-file-remove {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--overlay1);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+  }
+  .open-import-file-remove:hover { color: var(--red); }
+  .open-import-mode-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
   /* ── Task date bar ────────────────────────────────────────────────────────── */
   #task-date-bar {
     display: flex;

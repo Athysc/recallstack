@@ -11,8 +11,12 @@ import {
   type EditorTab,
 } from "../../src/features/editor/tabs.ts";
 
-function tab(id: number, path: string, outputs = false): EditorTab {
-  return { id, path, title: path, isNew: false, dirty: false, isOutputsFile: outputs, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false };
+function tab(id: number, path: string, outputs = false, external = false): EditorTab {
+  return {
+    id, path, title: path, isNew: false, dirty: false, isOutputsFile: outputs,
+    outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false,
+    isExternalFile: external, externalPath: external ? path : null, externalFileHandle: null, pinned: false,
+  };
 }
 
 test("tab lookup, reorder, relative selection, and path remapping share one ordered model", () => {

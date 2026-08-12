@@ -9,6 +9,17 @@ export interface EditorTab {
   outputsDirHandle: FileSystemDirectoryHandle | null;
   returnToOutputs: boolean;
   returnToAllTasks: boolean;
+  // True for a file opened "Temporary — view/edit in place" from Open/Import
+  // Files: it lives outside the workspace at its original OS location. Save
+  // writes back there directly; it can never be archived, and Move behaves
+  // like Import instead of the normal in-workspace move (see runtime.ts).
+  isExternalFile: boolean;
+  // Absolute OS path used by the Tauri desktop bridge (external_fs_* commands).
+  // Null in browser mode, where externalFileHandle is used instead.
+  externalPath: string | null;
+  // Real FileSystemFileHandle used in browser (non-Tauri) mode, obtained from
+  // window.showOpenFilePicker() or a drag-and-drop DataTransferItem.
+  externalFileHandle: FileSystemFileHandle | null;
   // Pinned tabs are opened explicitly (Ctrl+click) and persist until closed.
   // At most one unpinned "dynamic" tab exists at a time — opening another
   // document without Ctrl retargets that same tab instead of adding a new
@@ -26,6 +37,9 @@ export interface EditorDocumentSnapshot {
   outputsDirHandle: FileSystemDirectoryHandle | null;
   returnToOutputs: boolean;
   returnToAllTasks: boolean;
+  isExternalFile: boolean;
+  externalPath: string | null;
+  externalFileHandle: FileSystemFileHandle | null;
 }
 
 export const findTabByPath = (tabs: EditorTab[], path: string | null): EditorTab | null =>
@@ -41,7 +55,9 @@ export function remapTabPaths(
   titleForPath: (path: string, outputs?: boolean) => string,
 ): void {
   tabs.forEach(tab => {
-    if (!tab.isOutputsFile && tab.path?.startsWith(oldPrefix)) {
+    // External-file tabs are keyed by an absolute OS path (or a handle), never
+    // by a workspace-relative path, so a workspace folder rename can't apply here.
+    if (!tab.isOutputsFile && !tab.isExternalFile && tab.path?.startsWith(oldPrefix)) {
       tab.path = newPrefix + tab.path.slice(oldPrefix.length);
       tab.title = titleForPath(tab.path, false);
     }
@@ -83,7 +99,10 @@ export function syncTabFromDocument(
     outputsDirHandle: snapshot.outputsDirHandle,
     returnToOutputs: snapshot.returnToOutputs,
     returnToAllTasks: snapshot.returnToAllTasks,
-    title: titleForPath(snapshot.path, snapshot.isOutputsFile),
+    isExternalFile: snapshot.isExternalFile,
+    externalPath: snapshot.externalPath,
+    externalFileHandle: snapshot.externalFileHandle,
+    title: titleForPath(snapshot.path, snapshot.isOutputsFile || snapshot.isExternalFile),
     dirty: snapshot.isNew
       ? snapshot.content.trim() !== "" && snapshot.content !== (snapshot.savedContent ?? "")
       : Boolean(snapshot.path) && snapshot.content !== snapshot.savedContent,
@@ -96,7 +115,9 @@ export function rememberClosedTab(
   tab: EditorTab,
   limit = 20,
 ): void {
-  if (!tab.path || tab.isOutputsFile) return;
+  // External-file tabs aren't reopenable via the normal workspace-relative
+  // path lookup that "reopen closed tab" uses, so they're excluded here too.
+  if (!tab.path || tab.isOutputsFile || tab.isExternalFile) return;
   history.push({ path: tab.path, title: tab.title });
   while (history.length > limit) history.shift();
 }
