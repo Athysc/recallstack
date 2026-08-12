@@ -1,0 +1,215 @@
+  /* ── Calendar view ───────────────────────────────────────────────────────── */
+  #calendar-view {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--base);
+  }
+  .cal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .cal-heading {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    text-align: center;
+    letter-spacing: 0.02em;
+    user-select: none;
+  }
+  .cal-nav-btn {
+    background: var(--surface0);
+    border: 1px solid var(--surface1);
+    border-radius: 6px;
+    color: var(--subtext0);
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 500;
+    padding: 5px 12px;
+    transition: background 0.12s, color 0.12s;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .cal-nav-btn:hover  { background: var(--surface1); color: var(--text); }
+  .cal-nav-btn:active { transform: scale(0.97); }
+  .cal-nav-btn.cal-today-btn { color: var(--mauve); border-color: var(--mauve); }
+  .cal-nav-btn.cal-today-btn:hover { background: var(--mauve); color: var(--crust); }
+  .cal-nav-btn.cal-view-toggle { color: var(--sapphire); border-color: var(--sapphire); }
+  .cal-nav-btn.cal-view-toggle:hover { background: var(--sapphire); color: var(--crust); }
+  .cal-nav-btn.cal-view-toggle.active { background: var(--sapphire); color: var(--crust); }
+  .cal-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .cal-weekday-label {
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--overlay1);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 4px 0;
+    user-select: none;
+    min-width: 0;
+  }
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .cal-grid.week-view .cal-day { min-height: 160px; }
+  .cal-day {
+    min-height: 72px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--surface0);
+    background: var(--mantle);
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    user-select: none;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .cal-day:hover       { background: var(--surface0); border-color: var(--surface1); }
+  .cal-day.today       { border-color: var(--mauve);  background: var(--surface0); }
+  .cal-day.other-month { opacity: 0.35; }
+  .cal-day.selected    { border-color: var(--blue);   background: var(--surface0); }
+  .cal-day-num {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--subtext1);
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .cal-day.today .cal-day-num { color: var(--mauve); font-weight: 700; }
+  .cal-dots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    align-items: flex-start;
+    align-content: flex-start;
+    flex: 1;
+    overflow: hidden;
+  }
+  .cal-dot {
+    font-size: 10px;
+    font-weight: 500;
+    border-radius: 3px;
+    padding: 1px 4px;
+    color: var(--crust);
+    white-space: normal;
+    word-break: break-word;
+    overflow: hidden;
+    max-width: 100%;
+    min-width: 0;
+    line-height: 1.4;
+  }
+  .cal-dot-due       { background: var(--red);      color: var(--crust); }
+  .cal-dot-start     { background: var(--green);    color: var(--crust); }
+  .cal-dot-completed { background: var(--lavender); color: var(--crust); }
+  .cal-dot-more      { background: var(--overlay0); color: var(--base); }
+  .cal-task-panel {
+    background: var(--mantle);
+    border: 1px solid var(--surface1);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .cal-panel-heading {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--overlay1);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+  .cal-task-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 7px;
+    background: var(--surface0);
+    border: 1px solid var(--surface1);
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .cal-task-card:hover { background: var(--surface1); border-color: var(--surface2); }
+  .cal-journal-card {
+    appearance: none;
+    width: 100%;
+    color: var(--theme-accent-readable, var(--text));
+    font: inherit;
+    text-align: left;
+    border-color: color-mix(in srgb, var(--mauve) 48%, var(--surface1));
+    background: color-mix(in srgb, var(--mauve) 12%, var(--surface0));
+  }
+  .cal-journal-card:hover {
+    border-color: var(--mauve);
+    background: color-mix(in srgb, var(--mauve) 20%, var(--surface0));
+  }
+  .cal-journal-card:focus-visible { outline: 2px solid var(--mauve); outline-offset: 2px; }
+  .cal-journal-card .cal-task-name { color: var(--theme-accent-readable, var(--text)); font-weight: 700; }
+  .cal-task-name {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cal-task-meta           { font-size: 11px; color: var(--overlay1); white-space: nowrap; flex-shrink: 0; }
+  .cal-task-meta.due       { color: var(--red); }
+  .cal-task-meta.start     { color: var(--green); }
+  .cal-task-meta.completed { color: var(--lavender); }
+  .cal-empty-day { padding: 20px; text-align: center; color: var(--overlay0); font-size: 13px; }
+
+  /* ── Calendar filter row ──────────────────────────────────────────────────── */
+  .cal-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-shrink: 0;
+    padding: 4px 2px;
+  }
+  .cal-filter-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--subtext0);
+  }
+  .cal-filter-label input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    accent-color: var(--mauve);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .cal-filter-pip {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  #btn-calendar.active { color: var(--mauve); background: var(--surface0); }

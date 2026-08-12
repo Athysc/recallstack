@@ -1,0 +1,5 @@
+
+  .settings-path-row { display:flex; gap:8px; align-items:center; }
+  .settings-path-row input { flex:1; min-width:0; }
+  .settings-help-text { margin:0; color:var(--overlay1); font-size:11px; line-height:1.4; }
+  .search-result-card.already-open { background: color-mix(in srgb, var(--green) 12%, var(--surface0)); border-color: color-mix(in srgb, var(--green) 55%, var(--surface1)); box-shadow: inset 3px 0 0 var(--green); }

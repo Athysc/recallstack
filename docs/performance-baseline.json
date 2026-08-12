@@ -1,0 +1,45 @@
+{
+  "recordedAt": "2026-08-06",
+  "fixture": {
+    "kind": "generated-temporary-workspace",
+    "notes": 1000,
+    "folders": 20,
+    "privateData": false
+  },
+  "environment": {
+    "os": "Linux 7.1.5-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 9 9900X 12-Core Processor",
+    "logicalCpus": 24,
+    "buildProfile": "cargo test (debug)",
+    "cargo": "1.97.1"
+  },
+  "nativeIndex": {
+    "coldMs": 172,
+    "coldChangedFiles": 1000,
+    "warmMs": 3,
+    "warmChangedFiles": 0
+  },
+  "releaseUi": {
+    "fixtureNotes": 1003,
+    "budgetsMs": {
+      "shellReady": 1500,
+      "workspaceOpen": 2500,
+      "folderRename": 1000,
+      "noteOpen": 1500,
+      "outputsOpen": 1000
+    },
+    "linux": {
+      "recordedAt": "2026-08-11T02:41:42.647Z",
+      "profile": "optimized release with e2e driver",
+      "shellReadyMs": 18,
+      "workspaceOpenMs": 31,
+      "folderRenameMs": 0,
+      "noteOpenMs": 28,
+      "outputsOpenMs": 19,
+      "transferredBytes": 416
+    },
+    "windows": {
+      "status": "automated in the native windows-2022 release job; awaiting the first reviewed workflow run for this revision"
+    }
+  }
+}

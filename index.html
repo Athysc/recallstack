@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en" class="app-booting">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RecallStack</title>
+</head>
+<body>
+
+<!-- Welcome screen -->
+<div id="welcome">
+  <div class="welcome-card">
+    <div class="welcome-logo">📒</div>
+    <h1>PKM</h1>
+    <p>Select your notes workspace root folder to get started.<br>
+       Expects subfolders inside <code style="color:var(--peach);font-size:11px">Data/</code> and
+       <code style="color:var(--peach);font-size:11px">DB/index.db</code> inside.</p>
+    <button class="btn btn-primary" id="btn-open-workspace">Open Workspace</button>
+    <button class="btn btn-ghost hidden" id="btn-reopen-workspace"></button>
+    <p class="welcome-note">Requires Chrome, Edge, or Brave</p>
+  </div>
+</div>
+
+<!-- App (hidden until workspace loaded) -->
+<div id="app" class="hidden">
+  <header>
+    <div class="app-bar">
+      <button class="btn-icon app-title-edit-btn" id="btn-edit-title" title="Edit title">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+      <span class="app-title" id="app-title">RecallStack</span>
+      <button class="btn-icon" id="btn-refresh-workspace" title="Refresh workspace folders and files" aria-label="Refresh workspace folders and files">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M4 18v-5h5"/><path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 11M4 13l2.4 4.6A7 7 0 0 0 17.9 15"/></svg>
+      </button>
+      <button class="btn-icon hidden" id="btn-outputs-top" title="Outputs" aria-label="Outputs">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6l2 3h8v13H4z"/><path d="M8 12h8" stroke="var(--blue)"/><path d="M8 16h5" stroke="var(--green)"/></svg>
+      </button>
+      <div class="workspace-switcher" id="workspace-switcher"></div>
+      <button class="btn-icon" id="btn-calendar" title="Calendar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </button>
+      <div class="search-wrap">
+        <button class="btn-icon" id="btn-search-clear" title="Clear search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+        <input id="search-input" type="text" placeholder="Search notes or use filters…" title="Filters: tag: folder: is:task is:working status: priority: due:today due:overdue created: modified: linksto: linkedfrom:" spellcheck="false" autocomplete="off" />
+        <button class="btn-icon" id="btn-search" title="Search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
+        <button class="btn-icon" id="btn-settings" title="Display and navigation settings" aria-label="Open display and navigation settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--appbar-bg, var(--mantle))"/><circle cx="15" cy="12" r="2" fill="var(--appbar-bg, var(--mantle))"/><circle cx="11" cy="18" r="2" fill="var(--appbar-bg, var(--mantle))"/></svg>
+        </button>
+        <button class="btn-icon" id="btn-safety-tools" title="Safety and workspace tools" aria-label="Safety and workspace tools">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-5"/></svg>
+        </button>
+      </div>
+    </div>
+    <nav class="nav-row" id="nav-row-1"></nav>
+    <nav class="nav-row hidden" id="nav-row-2"></nav>
+  </header>
+  <main>
+    <!-- File list -->
+    <div id="file-list-view">
+      <div class="list-header">
+        <div class="list-heading-group">
+          <button class="btn-icon all-tasks-mode-btn hidden" id="btn-all-tasks-mode" title="All Tasks grouping mode"></button>
+          <span class="list-heading" id="list-heading">Files</span>
+        </div>
+        <div class="list-actions">
+          <button class="btn-icon sort-btn" id="btn-sort-mtime" title="Sort by last modified">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </button>
+          <button class="btn-icon sort-btn" id="btn-sort-alpha" title="Sort A–Z">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="11" y2="6"/><line x1="4" y1="12" x2="11" y2="12"/><line x1="4" y1="18" x2="13" y2="18"/><polyline points="15 9 18 6 21 9"/><line x1="18" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <button class="btn btn-primary" id="btn-new">+ New</button>
+          <button class="btn btn-ghost hidden" id="btn-view-journal">View Jrnl Note</button>
+        </div>
+      </div>
+      <div class="task-count-bar hidden" id="task-count-bar"></div>
+      <div class="file-grid" id="file-grid"></div>
+    </div>
+    <!-- Search results -->
+    <div id="search-view" class="hidden">
+      <div class="list-header">
+        <span class="list-heading" id="search-heading">Search Results</span>
+      </div>
+      <div class="file-grid" id="search-grid"></div>
+    </div>
+    <!-- Editor -->
+    <div id="editor-view" class="hidden">
+      <div class="editor-toolbar" id="editor-toolbar">
+        <button class="btn-icon toolbar-accent-copy-md" id="btn-copy-md" title="Copy markdown to clipboard">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
+        <button class="btn-icon toolbar-accent-copy-html" id="btn-copy-html" title="Copy HTML rendered to clipboard">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+          </svg>
+        </button>
+        <button class="btn-icon toolbar-accent-copy-path" id="btn-copy-path" title="Copy selected file path to clipboard">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+        </button>
+        <button class="btn-icon toolbar-accent-copy-link" id="btn-copy-internal-link" title="Copy RecallStack internal markdown link">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            <path d="M9 8h6"/>
+            <path d="M9 12h4"/>
+            <path d="M15 12l3 3-3 3"/>
+          </svg>
+        </button>
+        <input id="title-input" type="text" placeholder="Title / Filename" spellcheck="false" autocomplete="off" />
+        <button class="btn-icon toolbar-accent-stamp-date" id="btn-stamp-date" title="Stamp / update date in filename then save">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+        </button>
+        <button class="btn btn-primary"      id="btn-save">Save</button>
+        <button class="btn-icon convert-to-task toolbar-accent-convert hidden" id="btn-convert-to-task" title="Convert to Task">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+        </button>
+        <button class="btn-icon make-copy toolbar-accent-copy-file hidden" id="btn-make-copy" title="Make Copy — save then duplicate this file">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
+        <button class="btn-icon move toolbar-accent-move hidden" id="btn-move" title="Move file">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14"/><path d="M13 6l6 6-6 6"/><path d="M5 5v14"/>
+          </svg>
+        </button>
+        <button class="btn-icon archive toolbar-accent-archive hidden" id="btn-archive" title="Archive">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>
+          </svg>
+        </button>
+        <button class="btn-icon danger toolbar-accent-delete hidden" id="btn-delete" title="Delete">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
+        <button class="btn btn-ghost"         id="btn-cancel">Cancel</button>
+        <button class="btn btn-primary"       id="btn-new-from-editor">+ New</button>
+        <button class="btn btn-ghost"         id="btn-presentation" title="Toggle presentation mode">Presentation</button>
+      </div>
+      <div id="tab-strip" class="tab-strip hidden" role="tablist" aria-label="Open files"></div>
+      <div id="presentation-exit-bar" class="hidden">
+        <span id="presentation-title"></span>
+        <button class="btn btn-primary" id="btn-exit-presentation">Exit Presentation Mode</button>
+      </div>
+      <div id="task-date-bar" class="hidden">
+        <div class="task-date-group">
+          <span class="task-meta-icon start" title="Start Date" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+          <button type="button" class="task-date-picker" data-task-date-input="task-input-start" title="Choose start date" aria-label="Choose start date"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/></svg></button><input type="hidden" id="task-input-start" class="task-date-input" />
+          <button type="button" id="task-clear-start" class="task-date-clear start" title="Clear start date" aria-label="Clear start date">×</button>
+          <button type="button" id="task-set-start-today" class="task-date-today start" title="Set start date to today" aria-label="Set start date to today"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/><circle cx="12" cy="15.5" r="2.5" fill="currentColor" stroke="none"/></svg></button>
+        </div>
+        <div class="task-date-bar-sep"></div>
+        <div class="task-date-group">
+          <span class="task-meta-icon completed" title="Completed Date" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></span>
+          <button type="button" class="task-date-picker" data-task-date-input="task-input-completed" title="Choose completed date" aria-label="Choose completed date"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/></svg></button><input type="hidden" id="task-input-completed" class="task-date-input" />
+          <button type="button" id="task-clear-completed" class="task-date-clear completed" title="Clear completed date" aria-label="Clear completed date">×</button>
+          <button type="button" id="task-set-completed-today" class="task-date-today completed" title="Set completed date to today" aria-label="Set completed date to today"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/><path d="m9 15 2 2 4-4"/></svg></button>
+        </div>
+        <div class="task-date-bar-sep"></div>
+        <div class="task-date-group">
+          <span class="task-meta-icon due" title="Due Date" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18M12 14v3m0 3h.01"/></svg></span>
+          <button type="button" class="task-date-picker" data-task-date-input="task-input-due" title="Choose due date" aria-label="Choose due date"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/></svg></button><input type="hidden" id="task-input-due" class="task-date-input" />
+          <button type="button" id="task-clear-due" class="task-date-clear due" title="Clear due date" aria-label="Clear due date">×</button>
+        </div>
+        <div class="task-date-bar-sep"></div>
+        <div class="task-date-group" role="group" aria-label="Priority">
+          <span class="task-meta-icon priority" title="Priority" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 18H3L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg></span>
+          <div id="task-input-priority" class="task-choice-set">
+            <button type="button" class="task-choice priority-high" data-priority="High" title="Priority: High" aria-label="Priority: High"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 7 9-7 9-7-9 7-9Z"/><path d="M12 8v5m0 3h.01"/></svg></button>
+            <button type="button" class="task-choice priority-normal is-selected" data-priority="Normal" title="Priority: Normal" aria-label="Priority: Normal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8h14M5 16h14"/></svg></button>
+            <button type="button" class="task-choice priority-low" data-priority="Low" title="Priority: Low" aria-label="Priority: Low"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
+            <button type="button" class="task-choice priority-blocked" data-priority="Blocked" title="Priority: Blocked" aria-label="Priority: Blocked"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="m7 7 10 10"/></svg></button>
+            <button type="button" class="task-choice priority-onhold" data-priority="OnHold" title="Priority: On hold" aria-label="Priority: On hold"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5" width="3" height="14" rx="1"/><rect x="14" y="5" width="3" height="14" rx="1"/></svg></button>
+          </div>
+        </div>
+        <div class="task-date-bar-sep"></div>
+        <div class="task-date-group" role="group" aria-label="Status">
+          <span class="task-meta-icon status" title="Status" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M8 12h8"/></svg></span>
+          <div id="task-input-status" class="task-choice-set">
+            <button type="button" class="task-choice status-clear is-selected" data-status="" title="Status: Clear" aria-label="Status: Clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 12h12"/></svg></button>
+            <button type="button" class="task-choice status-waiting" data-status="Waiting" title="Status: Waiting" aria-label="Status: Waiting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></button>
+            <button type="button" class="task-choice status-qa" data-status="QA" title="Status: In QA Review" aria-label="Status: In QA Review"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6m-5 0v5l-5 9a3 3 0 0 0 3 4h8a3 3 0 0 0 3-4l-5-9V3"/><path d="M8 15h8"/></svg></button>
+            <button type="button" class="task-choice status-deployment" data-status="Deployment" title="Status: Marked for Deployment" aria-label="Status: Marked for Deployment"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 7-9 7 9-7 9-7-9Z"/><path d="M12 12V3m0 9 7 9"/></svg></button>
+            <button type="button" class="task-choice status-deployed" data-status="Deployed" title="Status: Deployed" aria-label="Status: Deployed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg></button>
+            <button type="button" class="task-choice status-backlog" data-status="Backlog" title="Status: Backlog" aria-label="Status: Backlog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v11H4zM8 7V4h8v3m-8 5h8"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="split-pane" id="split-pane">
+        <div class="pane" id="editor-pane">
+          <div class="task-editor-layout" id="task-editor-layout">
+            <div class="task-editor-top" id="task-editor-top">
+              <div class="pane-label pane-label-row"><button class="btn-icon" id="btn-toggle-working-pane" title="Show/hide Working Tasks">▣</button> MD <button type="button" class="task-kind-indicator hidden" id="task-kind-indicator"></button><span class="task-meta-summary" id="task-meta-summary"></span></div>
+              <div id="md-editor" data-placeholder="Write your note here…"></div>
+            </div>
+            <div class="task-editor-resizer" id="task-editor-resizer"></div>
+            <div class="working-task-pane" id="working-task-pane"><div class="working-task-header">WORKING Tasks <span class="working-task-options"><button class="btn-icon" id="btn-toggle-working-completed" title="Show completed tasks from today and yesterday (Friday through Sunday on Monday)">✓</button><button class="btn-icon sort-btn" id="btn-working-sort-alpha" title="Sort working tasks alphabetically" aria-label="Sort working tasks alphabetically"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 18 6 6l4 12M3.4 14h5.2M13 6h8l-8 12h8"/></svg></button><button class="btn-icon sort-btn" id="btn-working-sort-mtime" title="Sort working tasks by last modified" aria-label="Sort working tasks by last modified">◷</button><button class="btn-icon sort-btn" id="btn-working-sort-priority" title="Sort working tasks by priority, then last modified" aria-label="Sort working tasks by priority, then last modified">!</button></span><button class="btn-working-new" id="btn-new-working-task" title="Create a new Working Task" aria-label="Create a new Working Task"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM15 3v5h4M12.5 11v6M9.5 14h6"/></svg></button></div><div class="working-task-list" id="working-task-list"></div></div>
+          </div>
+        </div>
+        <div class="resizer" id="resizer"></div>
+        <div class="pane" id="preview-pane">
+          <div class="pane-label">Preview</div>
+          <div id="preview-output"></div>
+        </div>
+      </div>
+    </div>
+    <!-- Calendar -->
+    <div id="calendar-view" class="hidden">
+      <div class="cal-header">
+        <button class="cal-nav-btn" id="cal-prev">&#8592; Prev</button>
+        <span class="cal-heading" id="cal-heading"></span>
+        <button class="cal-nav-btn cal-today-btn" id="cal-today">Today</button>
+        <button class="cal-nav-btn" id="cal-next">Next &#8594;</button>
+        <button class="cal-nav-btn cal-view-toggle" id="cal-view-toggle">Week</button>
+      </div>
+      <div class="cal-filter-row">
+        <label class="cal-filter-label">
+          <input type="checkbox" id="cal-filter-started" checked />
+          <span class="cal-filter-pip" style="background:var(--green)"></span>
+          Started
+        </label>
+        <label class="cal-filter-label">
+          <input type="checkbox" id="cal-filter-completed" checked />
+          <span class="cal-filter-pip" style="background:var(--lavender)"></span>
+          Completed
+        </label>
+        <label class="cal-filter-label">
+          <input type="checkbox" id="cal-filter-due" checked />
+          <span class="cal-filter-pip" style="background:var(--red)"></span>
+          Due
+        </label>
+      </div>
+      <div class="cal-weekdays">
+        <div class="cal-weekday-label">Sun</div>
+        <div class="cal-weekday-label">Mon</div>
+        <div class="cal-weekday-label">Tue</div>
+        <div class="cal-weekday-label">Wed</div>
+        <div class="cal-weekday-label">Thu</div>
+        <div class="cal-weekday-label">Fri</div>
+        <div class="cal-weekday-label">Sat</div>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <div class="cal-task-panel hidden" id="cal-task-panel"></div>
+    </div>
+  </main>
+  <footer id="dep-status-bar" aria-label="JavaScript library status">
+    <span class="dep-status-label">Libraries</span>
+    <div class="dep-status-list" id="dep-status-list"></div>
+    <div class="dep-status-error-line" id="dep-status-error-line" title=""></div>
+    <div class="content-zoom-control">
+      <label for="content-zoom-select">Editor/Preview zoom</label>
+      <select id="content-zoom-select" aria-label="Editor and preview content zoom">
+        <option value="0">Default (100%)</option>
+        <option value="10">+10% (110%)</option>
+        <option value="20">+20% (120%)</option>
+        <option value="30">+30% (130%)</option>
+        <option value="40">+40% (140%)</option>
+        <option value="50">+50% (150%)</option>
+        <option value="60">+60% (160%)</option>
+        <option value="70">+70% (170%)</option>
+        <option value="80">+80% (180%)</option>
+        <option value="90">+90% (190%)</option>
+        <option value="100">+100% (200%)</option>
+      </select>
+    </div>
+  </footer>
+</div>
+
+<!-- Display and navigation settings -->
+<div id="modal-settings" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="settings-dialog">
+    <div class="settings-header">
+      <div>
+        <div class="settings-eyebrow">Preferences</div>
+        <h2 id="settings-title">Display &amp; Navigation</h2>
+      </div>
+      <button class="settings-close" id="btn-settings-close" title="Close" aria-label="Close settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="settings-content">
+      <div class="settings-grid">
+      <button class="btn-icon settings-tile working-layout-toggle" id="btn-working-layout" title="Move Working Tasks to a left pane" aria-label="Move Working Tasks to a left pane">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg>
+        <span class="settings-tile-title">Working Tasks Layout</span><span class="settings-tile-description">Left pane or bottom pane</span>
+      </button>
+      <button class="btn-icon settings-tile nav-mode-btn" id="btn-nav1-mode" title="Folder nav: toggle buttons ↔ dropdown">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="8" height="10" rx="2"/><rect x="14" y="7" width="8" height="10" rx="2"/><line x1="2" y1="4" x2="22" y2="4"/></svg>
+        <span class="settings-tile-title">Folder Navigation</span><span class="settings-tile-description">Buttons or dropdown menu</span>
+      </button>
+      <button class="btn-icon settings-tile nav-mode-btn" id="btn-nav2-mode" title="Subfolder nav: toggle buttons ↔ dropdown">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="8" height="8" rx="2"/><rect x="14" y="3" width="8" height="8" rx="2"/><rect x="6" y="15" width="12" height="6" rx="2"/></svg>
+        <span class="settings-tile-title">Subfolder Navigation</span><span class="settings-tile-description">Buttons or dropdown menu</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-word-wrap" title="Word Wrapping: Off">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 10 21 10"/><path d="M3 10h11a4 4 0 0 1 0 8h-1"/><polyline points="13 15 10 18 13 21"/></svg>
+        <span class="settings-tile-title">Word Wrapping</span><span class="settings-tile-description">Wrap long editor lines</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-line-numbers" title="Line Numbers: Off" aria-label="Toggle editor line numbers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h12M9 12h12M9 18h12"/><path d="M3 6h1M3 12h1M3 18h1"/></svg>
+        <span class="settings-tile-title">Line Numbers</span><span class="settings-tile-description">Number each editor line</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-cursor-pos" title="Load Position: First Line">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="4" x2="20" y2="4"/><line x1="12" y1="4" x2="12" y2="17"/><polyline points="7 9 12 4 17 9"/></svg>
+        <span class="settings-tile-title">Load Position</span><span class="settings-tile-description">Open at first or last line</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-collapse-default" title="Preview headings: expanded by default">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="14" y2="18"/><polyline points="17 9 21 12 17 15"/></svg>
+        <span class="settings-tile-title">Preview Headings</span><span class="settings-tile-description">Start expanded or collapsed</span>
+      </button>
+      <button class="btn-icon settings-tile" id="btn-toggle-system-folders" title="Show system folders (ai-team, openbrain, shared, openbrain-shared)"><span class="settings-tile-icon" aria-hidden="true"></span><span class="settings-tile-title">System Folders</span><span class="settings-tile-description">Show hidden workspaces</span></button>
+      <button class="btn-icon settings-tile" id="btn-toggle-all-tasks" title="Disable &quot;All Tasks&quot; view"><span class="settings-tile-icon" aria-hidden="true"></span><span class="settings-tile-title">All Tasks</span><span class="settings-tile-description">Show the combined task view</span></button>
+      </div>
+      <section class="settings-theme-panel" aria-labelledby="settings-theme-title">
+        <div class="settings-theme-heading">
+          <span class="settings-theme-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c-2.5-2.2-2.5-15.8 0-18Z"/></svg></span>
+          <div><label id="settings-theme-title" for="theme-select">Theme</label><span>Choose the app colors</span></div>
+        </div>
+        <select id="theme-select" class="settings-theme-list" size="18" title="Switch theme" aria-label="Theme"><option value="catppuccin">Catppuccin</option></select>
+      </section>
+      <section class="settings-output-panel" aria-labelledby="settings-output-title">
+        <label id="settings-output-title" for="settings-outputs-path">Outputs folder</label>
+        <div class="settings-path-row">
+          <input id="settings-outputs-path" class="modal-input" type="text" value="openbrain/outputs" spellcheck="false" autocomplete="off" />
+          <button class="btn btn-primary" id="btn-save-outputs-path">Save</button>
+        </div>
+        <p class="settings-help-text">Relative to the selected workspace root. Defaults to <code>openbrain/outputs</code> and is created automatically.</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- Markdown Reference Modal -->
+<div id="modal-md-ref" class="hidden">
+  <div class="md-ref-dialog">
+    <div class="md-ref-header">
+      <span class="md-ref-title">📖 Markdown Reference</span>
+      <button class="md-ref-close" id="btn-md-ref-close" title="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="md-ref-body" id="md-ref-body"></div>
+  </div>
+</div>
+
+<!-- README / User Guide Modal -->
+<div id="modal-readme" class="hidden">
+  <div class="md-ref-dialog">
+    <div class="md-ref-header">
+      <span class="md-ref-title">ℹ️ User Guide</span>
+      <button class="md-ref-close" id="btn-readme-close" title="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="md-ref-body" id="readme-body"><div class="readme-content"></div></div>
+  </div>
+</div>
+
+<!-- What's New / Changelog Modal -->
+<div id="modal-changelog" class="hidden">
+  <div class="md-ref-dialog">
+    <div class="md-ref-header">
+      <span class="md-ref-title">🕐 What's New</span>
+      <button class="md-ref-close" id="btn-changelog-close" title="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="md-ref-body" id="changelog-body"><div class="readme-content"></div></div>
+  </div>
+</div>
+
+<div id="modal-safety-tools" class="hidden">
+  <div class="md-ref-dialog safety-tools-dialog">
+    <div class="md-ref-header">
+      <span class="md-ref-title">Safety &amp; Workspace Tools</span>
+      <button class="md-ref-close" id="btn-safety-tools-close" title="Close" aria-label="Close safety tools"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="safety-tools-body">
+      <div class="safety-tools-actions">
+        <button class="btn btn-primary" id="btn-switch-workspace">Switch Workspace</button>
+        <button class="btn btn-ghost" data-safety-action="validate">Validate Workspace</button>
+        <button class="btn btn-ghost" data-safety-action="backup">Backup Workspace</button>
+        <button class="btn btn-ghost" data-safety-action="verify-backup">Verify Backup</button>
+        <button class="btn btn-ghost" data-safety-action="rebuild">Rebuild Search Index</button>
+        <button class="btn btn-ghost" data-safety-action="trash">Inspect Trash</button>
+        <button class="btn btn-ghost" data-safety-action="versions">Current Note History</button>
+        <button class="btn btn-ghost" data-safety-action="git">Git Status</button>
+        <div class="safety-tools-divider" role="separator"></div>
+        <button class="btn btn-ghost" id="btn-changelog">What's New</button>
+        <button class="btn btn-ghost" id="btn-md-reference">Markdown Reference</button>
+        <button class="btn btn-ghost" id="btn-readme">User Guide</button>
+      </div>
+      <div class="safety-tools-output" id="safety-tools-output">Choose a tool to inspect or protect the current workspace.</div>
+    </div>
+  </div>
+</div>
+
+<!-- New File Modal -->
+<div id="modal-new-file" class="modal-overlay hidden">
+  <div class="modal-dialog modal-dialog-new-file" role="dialog" aria-modal="true" aria-labelledby="modal-new-file-title">
+    <div class="modal-title" id="modal-new-file-title">New Note</div>
+    <label class="modal-label" for="modal-new-file-name">Filename</label>
+    <input id="modal-new-file-name" class="modal-input" type="text" autocomplete="off" spellcheck="false" aria-describedby="modal-new-file-error" />
+    <div id="modal-new-file-error" class="modal-error" role="alert" aria-live="polite"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-new-file-cancel">Cancel</button>
+      <button class="btn btn-primary" id="modal-new-file-create">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Folder Modal -->
+<div id="modal-new-folder" class="modal-overlay hidden">
+  <div class="modal-dialog">
+    <div class="modal-title" id="modal-new-folder-title">New Folder</div>
+    <input id="modal-folder-name" class="modal-input" type="text" placeholder="Folder name" autocomplete="off" spellcheck="false" />
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="modal-create-btn">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rename Folder Modal -->
+<div id="modal-rename-folder" class="modal-overlay hidden">
+  <div class="modal-dialog modal-dialog-wide">
+    <div class="modal-title" id="modal-rename-title">Rename Folder</div>
+    <input id="modal-rename-input" class="modal-input" type="text" placeholder="New folder name" autocomplete="off" spellcheck="false" />
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-rename-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="modal-rename-apply-btn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Inbox Delete Confirm Modal -->
+<div id="modal-inbox-delete" class="modal-overlay hidden">
+  <div class="modal-dialog">
+    <div class="modal-title">Delete File</div>
+    <div id="modal-inbox-delete-msg" style="color:var(--subtext0);font-size:13px;line-height:1.5;margin-bottom:4px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-inbox-delete-cancel">Cancel</button>
+      <button class="btn btn-danger" id="modal-inbox-delete-confirm">Move to Trash</button>
+    </div>
+  </div>
+</div>
+
+<!-- Move File Modal -->
+<div id="modal-move-file" class="modal-overlay hidden">
+  <div class="modal-dialog modal-dialog-wide">
+    <div class="modal-title" id="modal-move-title">Move File</div>
+    <label class="modal-label">
+      Top-Level Folder
+      <select id="modal-move-l1" class="modal-input"></select>
+    </label>
+    <label class="modal-label" id="modal-move-l2-wrap">
+      Destination
+      <select id="modal-move-l2" class="modal-input"></select>
+    </label>
+    <label class="modal-checkbox-label hidden" id="modal-move-as-non-task-wrap">
+      <input id="modal-move-as-non-task" type="checkbox" />
+      Move as a regular file (remove from tasks)
+    </label>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-move-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="modal-move-apply-btn" disabled>Move</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- Bundled local rendering dependencies. -->
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

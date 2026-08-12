@@ -1,0 +1,157 @@
+  /* ── Welcome ──────────────────────────────────────────────────────────────── */
+  #welcome {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--base);
+  }
+
+  .welcome-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 48px 56px;
+    background: var(--mantle);
+    border: 1px solid var(--surface0);
+    border-radius: 16px;
+    text-align: center;
+    max-width: 400px;
+  }
+
+  .welcome-logo { font-size: 48px; }
+
+  .welcome-card h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--mauve);
+    letter-spacing: 0.04em;
+  }
+
+  .welcome-card p {
+    font-size: 13px;
+    color: var(--subtext0);
+    line-height: 1.6;
+  }
+
+  .welcome-note {
+    font-size: 11px;
+    color: var(--overlay0);
+    margin-top: -4px;
+  }
+
+  /* ── App shell ────────────────────────────────────────────────────────────── */
+  #app {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    flex-shrink: 0;
+    background: var(--mantle);
+  }
+
+  .app-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--appbar-bg, var(--mantle));
+    border-bottom: 1px solid var(--appbar-border, var(--surface0));
+  }
+
+  .app-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--appbar-title, var(--mauve));
+    letter-spacing: 0.04em;
+    user-select: none;
+  }
+
+  .workspace-name {
+    font-size: 12px;
+    color: var(--overlay0);
+    user-select: none;
+  }
+
+  /* ── Nav rows ─────────────────────────────────────────────────────────────── */
+  .nav-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 5px 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .nav-row::-webkit-scrollbar { display: none; }
+
+  #nav-row-1 {
+    min-height: 38px;
+    background: var(--nav1-bg, var(--surface0));
+    border-bottom: 1px solid var(--nav1-border, var(--surface1));
+  }
+
+  #nav-row-2 {
+    min-height: 34px;
+    background: var(--nav2-bg, var(--crust));
+    border-bottom: 1px solid var(--nav2-border, var(--surface1));
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .nav-btn {
+    background: transparent;
+    border: none;
+    color: var(--subtext0);
+    cursor: pointer;
+    padding: 4px 12px;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background 0.12s, color 0.12s;
+    user-select: none;
+  }
+  .nav-btn:hover  { background: var(--surface1); color: var(--text); }
+  .nav-btn.active { background: color-mix(in srgb, var(--mauve) 15%, transparent); color: var(--mauve); box-shadow: inset 0 -2px 0 var(--mauve); }
+  /* Scoped nav text/accent overrides — used by Special themes */
+  #nav-row-1 .nav-btn { color: var(--nav1-text, var(--subtext0)); }
+  #nav-row-1 .nav-btn:hover { background: var(--nav1-hover, var(--surface1)); color: var(--nav1-text-hi, var(--text)); }
+  #nav-row-1 .nav-btn.active {
+    background: color-mix(in srgb, var(--nav1-active, var(--mauve)) 15%, transparent);
+    color: var(--nav1-active, var(--mauve));
+    box-shadow: inset 0 -2px 0 var(--nav1-active, var(--mauve));
+  }
+  #nav-row-2 .nav-btn { color: var(--nav2-text, var(--subtext0)); }
+  #nav-row-2 .nav-btn:hover { background: var(--nav2-hover, var(--surface1)); color: var(--nav2-text-hi, var(--text)); }
+  #nav-row-2 .nav-btn.active {
+    background: color-mix(in srgb, var(--nav2-active, var(--mauve)) 15%, transparent);
+    color: var(--nav2-active, var(--mauve));
+    box-shadow: inset 0 -2px 0 var(--nav2-active, var(--mauve));
+  }
+  #nav-row-2 .nav-root-btn {
+    color: var(--root-btn-color, var(--peach));
+    font-weight: 700;
+    letter-spacing: 0.035em;
+  }
+  #nav-row-2 .nav-root-btn:hover {
+    background: color-mix(in srgb, var(--root-btn-color, var(--peach)) 12%, transparent);
+    color: var(--root-btn-color, var(--peach));
+  }
+  #nav-row-2 .nav-root-btn.active {
+    background: color-mix(in srgb, var(--root-btn-color, var(--peach)) 18%, transparent);
+    color: var(--root-btn-color, var(--peach));
+    box-shadow: inset 0 -2px 0 var(--root-btn-color, var(--peach));
+  }
+
+  /* ── Main ─────────────────────────────────────────────────────────────────── */
+  main {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+

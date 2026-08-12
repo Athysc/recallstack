@@ -1,0 +1,156 @@
+  /* ── Word-wrap toggle ─────────────────────────────────────────────────────── */
+  #md-editor.nowrap .cm-content { white-space: pre; }
+  .btn-icon.wrap-active        { color: var(--blue); background: var(--surface0); }
+  .btn-icon.cursor-pos-active  { color: var(--blue); background: var(--surface0); }
+  .btn-icon.collapse-default-active { color: var(--blue); background: var(--surface0); }
+  .btn-icon.system-folders-visible { color: var(--blue); background: var(--surface0); }
+  .btn-icon.all-tasks-disabled { color: var(--red); background: var(--surface0); }
+
+  /* ── Markdown Reference modal ────────────────────────────────────────────── */
+  #modal-md-ref {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.60);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+  }
+  .md-ref-dialog {
+    background: var(--mantle);
+    border: 1px solid var(--surface1);
+    border-radius: 14px;
+    width: min(960px, 96vw);
+    height: min(820px, 92vh);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+  }
+  .md-ref-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--surface0);
+    flex-shrink: 0;
+  }
+  .md-ref-title {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--mauve);
+    letter-spacing: 0.03em;
+  }
+  .md-ref-close {
+    background: transparent;
+    border: none;
+    color: var(--overlay1);
+    cursor: pointer;
+    padding: 5px 7px;
+    border-radius: 6px;
+    transition: background 0.12s, color 0.12s;
+  }
+  .md-ref-close:hover { background: var(--surface0); color: var(--text); }
+  .md-ref-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .md-ref-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--overlay1);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--surface0);
+  }
+  .md-ref-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .md-ref-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--overlay0);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 0 12px 8px 0;
+  }
+  .md-ref-table td {
+    padding: 6px 12px 6px 0;
+    vertical-align: top;
+    border-top: 1px solid var(--surface0);
+  }
+  .md-ref-table td:first-child {
+    width: 42%;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 12px;
+    color: var(--peach);
+    white-space: pre-wrap;
+    line-height: 1.6;
+  }
+  .md-ref-table td:last-child {
+    color: var(--text);
+    line-height: 1.65;
+  }
+  /* preview cells borrow the same preview styles */
+  .md-ref-table td:last-child h1 { color: var(--mauve);    font-size: 1.45em; margin: 0; }
+  .md-ref-table td:last-child h2 { color: var(--lavender); font-size: 1.2em;  margin: 0; }
+  .md-ref-table td:last-child h3 { color: var(--blue);     font-size: 1.05em; margin: 0; }
+  .md-ref-table td:last-child h4,
+  .md-ref-table td:last-child h5,
+  .md-ref-table td:last-child h6 { color: var(--sapphire); margin: 0; }
+  .md-ref-table td:last-child p  { margin: 0; }
+  .md-ref-table td:last-child a  { color: var(--blue); }
+  .md-ref-table td:last-child code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .875em;
+    background: var(--surface0);
+    color: var(--peach);
+    padding: .15em .4em;
+    border-radius: 4px;
+  }
+  .md-ref-table td:last-child pre {
+    background: var(--base);
+    border: 1px solid var(--surface0);
+    border-radius: 6px;
+    padding: 10px 14px;
+    overflow-x: auto;
+    margin: 0;
+  }
+  .md-ref-table td:last-child pre code { background: none; color: var(--text); padding: 0; font-size: .875em; }
+  .md-ref-table td:last-child blockquote {
+    border-left: 3px solid var(--mauve);
+    background: var(--surface0);
+    margin: 0;
+    padding: .4em .85em;
+    border-radius: 0 4px 4px 0;
+    color: var(--subtext1);
+  }
+  .md-ref-table td:last-child ul,
+  .md-ref-table td:last-child ol { margin: 0 0 0 1.2em; padding: 0; }
+  .md-ref-table td:last-child li { margin: .1em 0; }
+  .md-ref-table td:last-child table  { border-collapse: collapse; font-size: .9em; }
+  .md-ref-table td:last-child th,
+  .md-ref-table td:last-child td.inner-td { border: 1px solid var(--surface1); padding: .3em .7em; }
+  .md-ref-table td:last-child th { background: var(--surface0); color: var(--lavender); }
+  .md-ref-table td:last-child hr { border: none; border-top: 1px solid var(--surface1); margin: .5em 0; }
+  .md-ref-table td:last-child input[type="checkbox"] {
+    width: 13px; height: 13px; accent-color: var(--mauve); vertical-align: middle; margin-right: 5px; cursor: default;
+  }
+  .md-ref-note {
+    font-size: 11.5px;
+    color: var(--overlay0);
+    padding: 8px 12px;
+    background: var(--surface0);
+    border-radius: 6px;
+    line-height: 1.6;
+  }

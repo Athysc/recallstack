@@ -1,0 +1,26 @@
+  .external-change-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: color-mix(in srgb, var(--yellow) 16%, var(--mantle));
+    border-bottom: 1px solid color-mix(in srgb, var(--yellow) 55%, var(--surface1));
+    color: var(--text);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .external-change-banner > span { flex: 1; }
+  .external-change-banner button { padding: 4px 9px; }
+  .external-compare-modal .modal-dialog { width: min(1080px, 94vw); max-width: 94vw; }
+  .external-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .external-compare-grid section { min-width: 0; }
+  .external-compare-grid h3 { margin-bottom: 6px; color: var(--subtext1); font-size: 12px; }
+  .external-compare-grid pre {
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    padding: 10px;
+    background: var(--crust);
+    border: 1px solid var(--surface0);
+    border-radius: 6px;
+  }

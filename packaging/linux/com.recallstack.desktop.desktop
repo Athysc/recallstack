@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RecallStack
+Comment=Local-first Markdown workspace
+Exec=recallstack
+Icon=com.recallstack.desktop
+Terminal=false
+Categories=Utility;
+StartupWMClass=RecallStack

@@ -1,0 +1,26 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build:e2e"
+  },
+  "app": {
+    "security": {
+      "capabilities": [
+        {
+          "identifier": "e2e",
+          "description": "Test-only WebdriverIO capability.",
+          "windows": ["main"],
+          "permissions": [
+            "core:default",
+            "core:window:allow-set-size",
+            "core:window:allow-unmaximize",
+            "dialog:default",
+            "opener:default",
+            "clipboard-manager:allow-write-text",
+            "wdio:default",
+            "wdio-webdriver:default"
+          ]
+        }
+      ]
+    }
+  }
+}

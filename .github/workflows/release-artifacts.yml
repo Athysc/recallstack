@@ -1,0 +1,86 @@
+name: Build reviewed release artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-portable:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: npm ci
+      - run: npm run release:verify
+      - run: npm run test:release:performance
+      - run: npm run release:clean
+      - run: npm run build:windows:portable
+      - run: npm run package:windows:portable
+      - uses: actions/upload-artifact@v6
+        with:
+          name: recallstack-windows-portable
+          path: |
+            release/
+            performance-results/windows.json
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 xvfb
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run release:verify
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+      - run: npm run test:release:performance
+      - run: npm run release:clean
+      - run: npm run build:linux
+      - run: npm run package:linux:tar
+      - run: npm run build:linux:appimage
+      - run: npm run package:linux:appimage
+      - uses: actions/upload-artifact@v6
+        with:
+          name: recallstack-linux
+          path: |
+            release/
+            performance-results/linux.json
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - run: npm ci
+      - run: npm run release:verify
+      - run: npm run release:clean
+      - run: npm run build:macos:app
+      - run: npm run package:macos:app
+      - uses: actions/upload-artifact@v6
+        with:
+          name: recallstack-macos
+          path: release/
+          if-no-files-found: error
