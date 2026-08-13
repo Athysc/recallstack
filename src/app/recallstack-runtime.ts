@@ -4596,6 +4596,45 @@ type TaskLocation = {
     });
   }
 
+  // ── Block-level render caching ────────────────────────────────────────────────
+  // The expensive parts of a preview render are per-block: hljs.highlight() for
+  // each fenced code block and Mermaid's dagre layout for each diagram (see the
+  // 2026-08-12 freeze diagnosis). Both are cached here keyed by a hash of the
+  // block's own source text, not its position in the document — so caching is
+  // correct by construction across reordering/inserting/deleting other blocks:
+  // a block's cache key only changes when that block's own content changes.
+  // Re-opening a previously-rendered, unchanged note hits these caches for every
+  // block and skips the expensive work entirely, even though the surrounding
+  // marked.parse() + innerHTML rebuild still runs in full every time.
+  function hashBlockSource(s: string): string {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(36) + ':' + s.length;
+  }
+  function cacheGet<V>(map: Map<string, V>, key: string): V | undefined {
+    if (!map.has(key)) return undefined;
+    const value = map.get(key)!;
+    map.delete(key);
+    map.set(key, value); // refresh recency (simple LRU)
+    return value;
+  }
+  function cacheSet<V>(map: Map<string, V>, key: string, value: V, maxSize: number) {
+    map.delete(key);
+    map.set(key, value);
+    if (map.size > maxSize) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+  }
+  const codeBlockRenderCache = new Map<string, string>();
+  const CODE_BLOCK_CACHE_MAX = 1000;
+  const mermaidRenderCache = new Map<string, string>();
+  const MERMAID_CACHE_MAX = 300;
+  const pendingMermaidCacheKeys = new WeakMap<HTMLElement, string>();
+
   // Safe marked.parse wrapper — falls back to plain <pre> if the renderer throws
   function renderMarkdown(text: any) {
     const preprocessed = preserveExtraBlankLines(preprocessMarkdown(text));
@@ -4715,15 +4754,43 @@ type TaskLocation = {
 
   function postProcessPreview() {
     // ── Mermaid diagrams ──
-    const diagrams = previewOut.querySelectorAll('div.mermaid:not([data-processed])');
+    // Every full preview rebuild wipes mermaid's data-processed markers, making
+    // every diagram look "new" even when its source didn't change. Short-circuit
+    // that: diagrams whose source hashes to a previously-rendered SVG are painted
+    // straight from cache (skipping mermaid's dagre layout entirely); only
+    // genuinely new/changed diagrams go through renderer.run().
+    const diagrams = Array.from(previewOut.querySelectorAll<HTMLElement>('div.mermaid:not([data-processed])'));
     if (diagrams.length) {
-      ensureMermaidReady()
-        .then(renderer => {
-          const currentDiagrams = previewOut.querySelectorAll<HTMLElement>('div.mermaid:not([data-processed])');
-          if (currentDiagrams.length) return renderer.run({ nodes: currentDiagrams });
-        })
-        .then(() => requestAnimationFrame(updateScaledImages))
-        .catch(error => console.warn('Mermaid rendering unavailable', error));
+      const pending: HTMLElement[] = [];
+      for (const el of diagrams) {
+        const key = hashBlockSource(el.textContent || '');
+        const cached = cacheGet(mermaidRenderCache, key);
+        if (cached !== undefined) {
+          el.innerHTML = cached;
+          el.setAttribute('data-processed', 'true');
+        } else {
+          pendingMermaidCacheKeys.set(el, key);
+          pending.push(el);
+        }
+      }
+      if (pending.length) {
+        ensureMermaidReady()
+          .then(renderer => {
+            const currentDiagrams = pending.filter(el => previewOut.contains(el) && !el.hasAttribute('data-processed'));
+            if (!currentDiagrams.length) return;
+            return renderer.run({ nodes: currentDiagrams }).then(() => {
+              currentDiagrams.forEach(el => {
+                const key = pendingMermaidCacheKeys.get(el);
+                if (key !== undefined) cacheSet(mermaidRenderCache, key, el.innerHTML, MERMAID_CACHE_MAX);
+                pendingMermaidCacheKeys.delete(el);
+              });
+            });
+          })
+          .then(() => requestAnimationFrame(updateScaledImages))
+          .catch(error => console.warn('Mermaid rendering unavailable', error));
+      } else {
+        requestAnimationFrame(updateScaledImages);
+      }
     }
     // ── Collapsible headings ──
     applyCollapsibleHeadings(previewOut, !collapseDefaultOn);
@@ -7227,6 +7294,16 @@ type TaskLocation = {
           const raw   = safeLang ? (aliases[safeLang.toLowerCase()] || safeLang.toLowerCase()) : null;
           const lang_ = raw && hljs.getLanguage(raw) ? raw : null;
           if (raw && !lang_) loadHljsLang(raw);
+          // Cache by source text + resolved highlight state (not position), so
+          // reordering/inserting/deleting other blocks can't produce a stale hit.
+          // A block that fell back to plain text because its hljs grammar hadn't
+          // loaded yet gets a different key than one rendered with the grammar
+          // present, so it re-highlights on its own once the grammar arrives
+          // (loadHljsLang's completion callback triggers a fresh renderPreview()).
+          const highlightState = lang_ ? `hl:${lang_}` : (raw ? `pending:${raw}` : 'plain');
+          const cacheKey = `${hashBlockSource(safeText)}|${safeLang.toLowerCase()}|${highlightState}`;
+          const cachedHtml = cacheGet(codeBlockRenderCache, cacheKey);
+          if (cachedHtml !== undefined) return cachedHtml;
           let body;
           try {
             body = lang_
@@ -7236,7 +7313,9 @@ type TaskLocation = {
             body = esc(safeText);
           }
           const label = safeLang ? `<span class="code-lang">${esc(safeLang)}</span>` : '';
-          return `<pre class="code-block">${label}<code class="hljs${lang_ ? ' language-' + lang_ : ''}">${body}</code></pre>`;
+          const html = `<pre class="code-block">${label}<code class="hljs${lang_ ? ' language-' + lang_ : ''}">${body}</code></pre>`;
+          cacheSet(codeBlockRenderCache, cacheKey, html, CODE_BLOCK_CACHE_MAX);
+          return html;
         }
       } as any
     });
@@ -8299,6 +8378,43 @@ type TaskLocation = {
   });
   window.addEventListener('pagehide', () => autoSaveIfDirty(false));
 
+  // Warms the CodeMirror editor chunk (lazy-markdown-editor.ts's on-demand
+  // `import("./markdown-editor")`, ~197 KB gzip across 5 chunks) once the app
+  // shell has finished starting up and is interactive, so the *first* file a
+  // user opens in a session doesn't pay that fetch/parse/eval cost
+  // synchronously — it happens in the idle gap between startup finishing and
+  // the user actually clicking a file. This is a plain runtime dynamic
+  // `import()` triggered well after the module graph has loaded, not a
+  // static import, so it does not affect scripts/verify-performance-build.mjs's
+  // "editor chunk stays lazy" checks (no modulepreload link is added, and the
+  // static import-graph walk never sees a call expression like this one).
+  //
+  // Deliberately scoped to just the editor chunk. Mermaid (~975 KB gzip,
+  // public/lib/mermaid.min.js) and the highlight.js "full" language bundle
+  // (~43 KB gzip) are lazy for a different reason than CodeMirror: they're
+  // only needed for specific note *content* (an actual Mermaid diagram, or a
+  // code fence in a language outside the core hljs bundle), not universally
+  // on every file open the way the editor itself is. Warming CodeMirror
+  // trades a bit of startup time for a universal first-open win, matching
+  // Athy's decision; warming Mermaid unconditionally on every launch would
+  // mean paying ~1 MB of extra network/parse cost on startup even for
+  // sessions that never view a diagram, which is a materially different and
+  // much larger tradeoff than the one Athy signed off on — left as on-demand.
+  function warmEditorChunk(): void {
+    const load = () => {
+      void mdEditor.ready().catch(error => {
+        // Non-fatal: the chunk will simply be fetched again (on demand, with
+        // the usual soft-stall) the first time a document is actually opened.
+        console.warn('Editor chunk warm-load failed; will retry on first file open', error);
+      });
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(load, { timeout: 2000 });
+    } else {
+      setTimeout(load, 0);
+    }
+  }
+
   init()
     .catch(error => {
       console.error('RecallStack initialization failed', error);
@@ -8307,6 +8423,7 @@ type TaskLocation = {
     .finally(() => {
       performance.mark('recallstack:shell-ready');
       document.documentElement.classList.remove('app-booting');
+      warmEditorChunk();
     });
 
 })();
