@@ -330,6 +330,7 @@ type TaskLocation = {
   const btnArchive         = $id('btn-archive');
   const btnMove            = $id('btn-move');
   const btnConvertToTask   = $id('btn-convert-to-task');
+  const btnConvertToNote   = $id('btn-convert-to-note');
   const btnMakeCopy        = $id('btn-make-copy');
   const btnCopyMd          = $id('btn-copy-md');
   const btnCopyHtml        = $id('btn-copy-html');
@@ -1810,6 +1811,7 @@ type TaskLocation = {
       btnMove.classList.remove('hidden');
       btnArchive.classList.add('hidden');
       btnMakeCopy.classList.add('hidden');
+      btnConvertToNote.classList.add('hidden');
       btnNewFromEditor.classList.add('hidden');
       btnStampDate.classList.add('hidden');
 
@@ -1918,6 +1920,7 @@ type TaskLocation = {
       btnMove.classList.remove('hidden');
       btnArchive.classList.add('hidden');
       btnMakeCopy.classList.add('hidden');
+      btnConvertToNote.classList.add('hidden');
       btnNewFromEditor.classList.add('hidden');
       btnStampDate.classList.add('hidden');
 
@@ -2971,6 +2974,7 @@ type TaskLocation = {
       showView('editor');
       showTaskDateBar();
       updateConvertToTaskBtn();
+      updateConvertToNoteBtn();
       applyJournalToolbarRestrictions();
       saveLastView('file', notesRelPath);
       return true;
@@ -3349,6 +3353,7 @@ type TaskLocation = {
         btnMove.classList.toggle('hidden', isTaskNamespacePath(notesRelPath));
         btnArchive.classList.toggle('hidden', archiveDisabledForRoot || isWorkingTask(notesRelPath));
         btnMakeCopy.classList.remove('hidden');
+        updateConvertToNoteBtn();
         applyJournalToolbarRestrictions();
         if (taskFile) loadWorkingTasks();
         if (saveShouldNotify) toast('Saved ✓');
@@ -3715,7 +3720,7 @@ type TaskLocation = {
       navRow2.classList.remove('nav-row-disabled');
       refreshCalendarIfVisible();
       await openFile(finalFilename, finalPath);
-      toast('Moved ✓');
+      toast(movingTaskAsNote ? 'Converted to Note ✓' : 'Moved ✓');
     } catch (e: any) {
       toast((isExternalFile ? 'Import failed: ' : 'Move failed: ') + e.message, 'error');
     } finally {
@@ -3761,6 +3766,41 @@ type TaskLocation = {
   function updateConvertToTaskBtn() {
     const show = !isNew && !isTasksEditor() && !isWorkingTask() && !archiveMode && !!l1Active && !!currentPath;
     btnConvertToTask.classList.toggle('hidden', !show);
+  }
+
+  function updateConvertToNoteBtn() {
+    const show = !isNew && !isExternalFile && !isOutputsFile && !isWorkingTask() && isTaskNamespacePath() && !!currentPath;
+    btnConvertToNote.classList.toggle('hidden', !show);
+  }
+
+  // Reuses the Move File modal/flow: preselects "move as a regular file" and
+  // hides that checkbox since the decision is implicit for this action, then
+  // lets moveCurrentFile() do the actual move + metadata-suffix stripping via
+  // regularNoteFilename().
+  async function openConvertTaskToNoteModal() {
+    if (isWorkingTask() || !isTaskNamespacePath() || isExternalFile) return;
+    if (!currentPath || isNew) return;
+
+    const filename = currentPath!.split('/').at(-1)!;
+    moveFileTitle.textContent = `Convert "${taskDisplayTitle(filename)}" to Note`;
+    moveL1Select.innerHTML = '';
+    moveL2Select.innerHTML = '';
+    moveAsNonTaskInput.checked = true;
+    moveAsNonTaskWrap.classList.add('hidden');
+    moveL2Wrap.classList.remove('hidden');
+    moveFileApplyBtn.disabled = true;
+    moveFileApplyBtn.textContent = 'Convert to Note';
+    addMoveOption(moveL1Select, '', 'Select a top-level folder…');
+
+    try {
+      const folders = await listWorkspaceTopDirs();
+      folders.forEach(folder => addMoveOption(moveL1Select, folder.name, folder.name));
+      updateMoveApplyBtn();
+      moveFileModal.classList.remove('hidden');
+      setTimeout(() => moveL1Select.focus(), 0);
+    } catch (e: any) {
+      toast('Could not load folders: ' + e.message, 'error');
+    }
   }
 
   async function convertNoteToTask() {
@@ -3821,6 +3861,7 @@ type TaskLocation = {
     btnMove.classList.add('hidden');
     btnMakeCopy.classList.remove('hidden');
     updateConvertToTaskBtn();
+    updateConvertToNoteBtn();
     showTaskDateBar();
     setActive(navRow2, 'tasks');
     refreshCalendarIfVisible();
@@ -3867,7 +3908,7 @@ type TaskLocation = {
       ? 'Journal filenames are fixed by their daily-note date'
       : '';
     if (!journal && !isWorkingTask()) return;
-    [btnStampDate, btnConvertToTask, btnMakeCopy, btnMove, btnArchive, btnDelete]
+    [btnStampDate, btnConvertToTask, btnConvertToNote, btnMakeCopy, btnMove, btnArchive, btnDelete]
       .forEach(btn => btn.classList.add('hidden'));
   }
   function isCurrentTaskPath(path = currentPath) {
@@ -6067,6 +6108,7 @@ type TaskLocation = {
     });
   });
   btnConvertToTask.addEventListener('click', convertNoteToTask);
+  btnConvertToNote.addEventListener('click', openConvertTaskToNoteModal);
   btnMove.addEventListener('click', () => executeCommand('file.move'));
   btnArchive.addEventListener('click', () => executeCommand('file.archive'));
   btnDelete.addEventListener('click', () => executeCommand('file.trash'));

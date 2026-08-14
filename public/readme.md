@@ -450,6 +450,7 @@ RecallStack saves your work automatically — in most situations you never need 
 | Task icon | — | Convert note → task (moves to `tasks/` folder) |
 | Copy icon | — | Save, then duplicate the current file as `Name (2)`, incrementing the number when needed |
 | Move icon | — | Move file to a different folder or to a top-level folder **root** destination |
+| Convert to Note icon | — | **Tasks only** (hidden for Working Tasks and regular notes) — opens a destination picker (top-level folder, then subfolder), moves the task there, and strips its task filename metadata suffix so it becomes a regular note. Opens the same picker as Move |
 | Archive icon | — | Move file to `archived/` subfolder; hidden for root-level notes |
 | Restore icon | — | Move archived file back to active folder |
 | Trash icon | — | Move the file to recoverable RecallStack Trash |

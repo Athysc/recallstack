@@ -120,6 +120,7 @@
   .editor-toolbar .toolbar-accent-convert { color: color-mix(in srgb, var(--green) 62%, var(--overlay1)); }
   .editor-toolbar .toolbar-accent-copy-file { color: color-mix(in srgb, color-mix(in srgb, var(--blue), var(--mauve)) 62%, var(--overlay1)); }
   .editor-toolbar .toolbar-accent-move { color: color-mix(in srgb, var(--peach) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-convert-note { color: color-mix(in srgb, var(--sky) 62%, var(--overlay1)); }
   .editor-toolbar .toolbar-accent-archive { color: color-mix(in srgb, var(--yellow) 62%, var(--overlay1)); }
   .editor-toolbar .toolbar-accent-delete { color: color-mix(in srgb, var(--red) 62%, var(--overlay1)); }
 
