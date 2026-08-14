@@ -382,6 +382,7 @@ type TaskLocation = {
   const workingTaskPane = $id('working-task-pane');
   const workingTaskList = $id('working-task-list');
   const btnToggleWorkingPane = $id('btn-toggle-working-pane');
+  const btnPinCurrentFile = $id('btn-pin-current-file');
   const btnWorkingLayout = $id('btn-working-layout');
   const btnNewWorkingTask = $id('btn-new-working-task');
   const btnToggleWorkingCompleted = $id('btn-toggle-working-completed');
@@ -2673,6 +2674,14 @@ type TaskLocation = {
     return !!tab && !!protectedDailyJournalPath && !tab.isOutputsFile && !tab.isExternalFile && tab.path === protectedDailyJournalPath;
   }
 
+  // Manual drag-to-reorder only applies to ordinary pinned tabs. The protected
+  // daily journal (pinned=true internally, but position-locked) and the single
+  // unpinned dynamic tab (position-locked right after the journal) both sit
+  // outside that — see enforceDailyJournalTabPosition/enforceDynamicTabPosition.
+  function isReorderableTab(tab: EditorTab | null | undefined) {
+    return !!tab && tab.pinned && !isProtectedDailyJournalTab(tab);
+  }
+
   function enforceDailyJournalTabPosition() {
     const dailyPath = protectedDailyJournalPath;
     if (!dailyPath) return;
@@ -2681,6 +2690,23 @@ type TaskLocation = {
     const [tab] = tabs.splice(index, 1);
     tab.pinned = true;
     tabs.unshift(tab);
+  }
+
+  // The single unpinned "dynamic" tab (if one exists) always sits immediately
+  // after the daily journal tab (or at the very front, if no journal tab is
+  // open) — never wherever it happened to be created or last land.
+  function enforceDynamicTabPosition() {
+    const dynamicIndex = tabs.findIndex(tab => !tab.pinned);
+    if (dynamicIndex < 0) return;
+    const targetIndex = tabs.some(isProtectedDailyJournalTab) ? 1 : 0;
+    if (dynamicIndex === targetIndex) return;
+    const [tab] = tabs.splice(dynamicIndex, 1);
+    tabs.splice(targetIndex, 0, tab);
+  }
+
+  function enforceTabOrder() {
+    enforceDailyJournalTabPosition();
+    enforceDynamicTabPosition();
   }
 
   // Rewrites the paths of every open tab affected by a folder rename/move so
@@ -2718,11 +2744,11 @@ type TaskLocation = {
   function reorderTabs(draggedId: any, targetId: any, placeAfter: any) {
     const dragged = tabs.find(tab => tab.id === draggedId);
     const target = tabs.find(tab => tab.id === targetId);
-    // The current-day journal is a protected home tab: it stays first and cannot
-    // be dragged, nor can another tab be dropped before it.
-    if (isProtectedDailyJournalTab(dragged) || (isProtectedDailyJournalTab(target) && !placeAfter)) return;
+    // Only ordinary pinned tabs can be manually reordered — the journal tab is
+    // position-locked first, and the dynamic tab is position-locked right after it.
+    if (!isReorderableTab(dragged) || !isReorderableTab(target)) return;
     reorderOpenTabs(tabs, draggedId, targetId, placeAfter);
-    enforceDailyJournalTabPosition();
+    enforceTabOrder();
   }
 
   // Small inline-SVG icon distinguishing a tab's file kind (task / journal /
@@ -2743,7 +2769,17 @@ type TaskLocation = {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5"/></svg>';
   }
 
+  // The pin-this-file button (where the Working Tasks toggle used to live, in
+  // the editor pane's label row) only appears while the active tab is real and
+  // not already pinned — clicking it pins the tab and the button disappears.
+  function updatePinCurrentFileButton() {
+    const tab = activeTabRecord();
+    const pinnable = !!tab && !tab.pinned && !isProtectedDailyJournalTab(tab);
+    btnPinCurrentFile.classList.toggle('hidden', !pinnable);
+  }
+
   function renderTabStrip() {
+    updatePinCurrentFileButton();
     if (!tabStripEl) return;
     tabStripEl.replaceChildren();
     syncReturnToTabButton();
@@ -2761,7 +2797,7 @@ type TaskLocation = {
       const protectedDailyJournal = isProtectedDailyJournalTab(tab);
       item.classList.toggle('protected-daily-journal', protectedDailyJournal);
       item.title = (tab.path || 'Untitled') + (protectedDailyJournal ? ' (today journal, pinned)' : tab.pinned ? ' (pinned)' : '');
-      item.draggable = !protectedDailyJournal;
+      item.draggable = isReorderableTab(tab);
       const kindMarkup = tabKindIconMarkup(tab);
       const kindIcon = document.createElement('span');
       kindIcon.className = 'tab-kind-icon';
@@ -2788,7 +2824,7 @@ type TaskLocation = {
       });
       // ── Drag-to-reorder (HTML5 DnD) ──────────────────────────────────────
       item.addEventListener('dragstart', (e: any) => {
-        if (isProtectedDailyJournalTab(tab)) { e.preventDefault(); return; }
+        if (!isReorderableTab(tab)) { e.preventDefault(); return; }
         draggedTabId = tab.id;
         item.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
@@ -2800,7 +2836,7 @@ type TaskLocation = {
       });
       item.addEventListener('dragover', (e: any) => {
         if (draggedTabId == null || draggedTabId === tab.id) return;
-        if (isProtectedDailyJournalTab(tab)) return;
+        if (!isReorderableTab(tab)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         const rect = item.getBoundingClientRect();
@@ -2815,7 +2851,7 @@ type TaskLocation = {
         if (draggedTabId == null || draggedTabId === tab.id) return;
         const rect = item.getBoundingClientRect();
         const placeAfter = (e.clientX - rect.left) > rect.width / 2;
-        if (isProtectedDailyJournalTab(tab) && !placeAfter) return;
+        if (!isReorderableTab(tab)) return;
         reorderTabs(draggedTabId, tab.id, placeAfter);
         draggedTabId = null;
         renderTabStrip();
@@ -2837,7 +2873,7 @@ type TaskLocation = {
     e.preventDefault();
     const dragged = tabs.find(t => t.id === draggedTabId);
     const fromIdx = tabs.findIndex(t => t.id === draggedTabId);
-    if (fromIdx !== -1 && !isProtectedDailyJournalTab(dragged)) { const [moved] = tabs.splice(fromIdx, 1); tabs.push(moved); enforceDailyJournalTabPosition(); }
+    if (fromIdx !== -1 && isReorderableTab(dragged)) { const [moved] = tabs.splice(fromIdx, 1); tabs.push(moved); enforceTabOrder(); }
     draggedTabId = null;
     renderTabStrip();
   });
@@ -2965,14 +3001,14 @@ type TaskLocation = {
       if (dynamicTab) {
         Object.assign(dynamicTab, fields);
         activeTabId = dynamicTab.id;
-        enforceDailyJournalTabPosition();
+        enforceTabOrder();
         return { tab: dynamicTab, previousActiveId, isNewTab: false };
       }
     }
     const tab: EditorTab = { id: nextTabId++, pinned, ...fields };
     tabs.push(tab);
     activeTabId = tab.id;
-    enforceDailyJournalTabPosition();
+    enforceTabOrder();
     return { tab, previousActiveId, isNewTab: true };
   }
 
@@ -3001,7 +3037,7 @@ type TaskLocation = {
       return false;
     }
     syncActiveTabFromState();
-    enforceDailyJournalTabPosition();
+    enforceTabOrder();
     renderTabStrip();
     return true;
   }
@@ -3090,7 +3126,7 @@ type TaskLocation = {
       rememberClosedTab(closedTabHistory, tab);
     }
     tabs = tabs.filter(t => t.id === keep || isProtectedDailyJournalTab(t));
-    enforceDailyJournalTabPosition();
+    enforceTabOrder();
     renderTabStrip();
   }
 
@@ -4159,7 +4195,7 @@ type TaskLocation = {
     if (!location) throw new Error('Invalid journal date');
     protectedDailyJournalPath = location.path;
     await openJournalForDate(new Date(), rootParts, true);
-    enforceDailyJournalTabPosition();
+    enforceTabOrder();
     renderTabStrip();
   }
 
@@ -4997,7 +5033,8 @@ type TaskLocation = {
 
   // ── View switching ────────────────────────────────────────────────────────────
 
-  function showView(which: any) {
+  function showView(which: any, options: { focus?: boolean } = {}) {
+    const { focus = true } = options;
     renderAppView({
       welcome: welcomeEl, app: appEl, fileList: fileListView, search: searchView,
       editor: editorView, calendar: calViewEl, taskCountBar,
@@ -5018,7 +5055,7 @@ type TaskLocation = {
     syncReturnToTabButton();
     if (which === 'editor') {
       previewScheduler.flush();
-      setTimeout(() => mdEditor.focus(), 0);
+      if (focus) setTimeout(() => mdEditor.focus(), 0);
     }
   }
 
@@ -5165,7 +5202,7 @@ type TaskLocation = {
     if (window.__recallstackNative?.active) {
       const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
       const page = await window.__recallstackNative!.knowledgeSearch(query, prefix, 80, 0);
-      return mapNativeSearchResults(page.results as NativeSearchResult[], prefix, query, taskDisplayTitle);
+      return mapNativeSearchResults(page.results as NativeSearchResult[], prefix, query);
     }
     return searchLocalIndex(searchIndex, query);
   }
@@ -5251,7 +5288,7 @@ type TaskLocation = {
   // Entering/exiting search preserves whatever was showing underneath (the
   // editor, a folder listing, etc. are never touched while search is active),
   // so exiting just needs to flip back to that same view — no reload needed.
-  function enterSearchView() {
+  function enterSearchView(focusResults = true) {
     if (searchView.classList.contains('hidden')) {
       preSearchView = !editorView.classList.contains('hidden')   ? 'editor'
                     : !fileListView.classList.contains('hidden') ? 'list'
@@ -5259,12 +5296,12 @@ type TaskLocation = {
                     : 'welcome';
     }
     showView('search');
-    requestAnimationFrame(() => searchGrid.focus());
+    if (focusResults) requestAnimationFrame(() => searchGrid.focus());
   }
 
-  function exitSearchView() {
+  function exitSearchView(focusPrevious = true) {
     if (searchView.classList.contains('hidden')) return;
-    showView(preSearchView || 'list');
+    showView(preSearchView || 'list', { focus: focusPrevious });
     preSearchView = null;
   }
 
@@ -5275,7 +5312,7 @@ type TaskLocation = {
     _searchTimer = setTimeout(async () => {
       const query = searchInput.value.trim();
       if (query.length < 3) {
-        exitSearchView();
+        exitSearchView(false);
         return;
       }
       try {
@@ -5283,7 +5320,7 @@ type TaskLocation = {
         const results = await runSearch(query);
         if (generation !== workspaceSessionGeneration || query !== searchInput.value.trim()) return;
         renderSearchResults(results, query);
-        enterSearchView();
+        enterSearchView(false);
       } catch (error: any) {
         toast('Search failed: ' + error.message, 'error');
       }
@@ -6457,6 +6494,12 @@ type TaskLocation = {
   });
   taskKindIndicator.addEventListener('click', () => toggleWorkingTask().catch(e => toast('Could not move task: ' + e.message, 'error')));
   btnToggleWorkingPane.addEventListener('click', () => { workingPaneVisible = !workingPaneVisible; localStorage.setItem(PREFERENCE_KEYS.workingPaneVisible, workingPaneVisible ? 'on' : 'off'); updateWorkingPaneVisibility(); if (workingPaneVisible) loadWorkingTasks(); });
+  btnPinCurrentFile.addEventListener('click', () => {
+    const tab = activeTabRecord();
+    if (!tab || tab.pinned) return;
+    tab.pinned = true;
+    renderTabStrip();
+  });
   btnWorkingLayout.addEventListener('click', () => {
     workingPaneLayout = workingPaneLayout === 'left' ? 'bottom' : 'left';
     localStorage.setItem(PREFERENCE_KEYS.workingPaneLayout, workingPaneLayout);
@@ -7099,13 +7142,13 @@ type TaskLocation = {
     clearTimeout(_searchTimer);
     lastSearchBuffer = null;
     searchInput.value = '';
-    exitSearchView();
+    exitSearchView(false);
     searchInput.focus();
   });
   searchInput.addEventListener('focus', () => {
     if (lastSearchBuffer?.results.length) {
       renderSearchResults(lastSearchBuffer.results, lastSearchBuffer.query);
-      enterSearchView();
+      enterSearchView(false);
     }
   });
 

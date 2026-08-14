@@ -44,6 +44,7 @@
           <line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
       </button>
+      <button class="btn-icon" id="btn-toggle-working-pane" title="Show/hide Working Tasks">▣</button>
       <div class="search-wrap">
         <button class="btn-icon" id="btn-search-clear" title="Clear search">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -214,7 +215,7 @@
         <div class="pane" id="editor-pane">
           <div class="task-editor-layout" id="task-editor-layout">
             <div class="task-editor-top" id="task-editor-top">
-              <div class="pane-label pane-label-row"><button class="btn-icon" id="btn-toggle-working-pane" title="Show/hide Working Tasks">▣</button> MD <button type="button" class="task-kind-indicator hidden" id="task-kind-indicator"></button><span class="task-meta-summary" id="task-meta-summary"></span></div>
+              <div class="pane-label pane-label-row"><button class="btn-icon hidden" id="btn-pin-current-file" title="Pin this file as an open tab" aria-label="Pin this file as an open tab"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button> MD <button type="button" class="task-kind-indicator hidden" id="task-kind-indicator"></button><span class="task-meta-summary" id="task-meta-summary"></span></div>
               <div id="md-editor" data-placeholder="Write your note here…"></div>
             </div>
             <div class="task-editor-resizer" id="task-editor-resizer"></div>

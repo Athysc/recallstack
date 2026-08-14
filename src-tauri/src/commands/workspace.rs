@@ -273,6 +273,9 @@ fn open_db(root: &Path) -> Result<Connection, String> {
     let db = Connection::open(path).map_err(|e| e.to_string())?;
     db.busy_timeout(Duration::from_secs(3))
         .map_err(|e| e.to_string())?;
+    let previous_version: i64 = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
     db.execute_batch(
         "PRAGMA journal_mode=WAL;
          CREATE TABLE IF NOT EXISTS rs_notes (
@@ -281,15 +284,27 @@ fn open_db(root: &Path) -> Result<Connection, String> {
            content_hash TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'note', folder TEXT NOT NULL DEFAULT '',
            status TEXT, priority TEXT, start_date TEXT, due_date TEXT, completed_date TEXT, created_date TEXT
          );
-         CREATE VIRTUAL TABLE IF NOT EXISTS rs_notes_fts USING fts5(path UNINDEXED, title, body, tags);
+         CREATE VIRTUAL TABLE IF NOT EXISTS rs_notes_fts USING fts5(path UNINDEXED, title, body, tags, tokenize='trigram case_sensitive 0');
          CREATE TABLE IF NOT EXISTS rs_tags(path TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY(path, tag));
          CREATE INDEX IF NOT EXISTS rs_tags_tag ON rs_tags(tag);
          CREATE TABLE IF NOT EXISTS rs_links(source_path TEXT NOT NULL, target_path TEXT NOT NULL, anchor TEXT, kind TEXT NOT NULL, PRIMARY KEY(source_path, target_path, anchor, kind));
          CREATE INDEX IF NOT EXISTS rs_links_target ON rs_links(target_path);
          CREATE TABLE IF NOT EXISTS rs_saved_searches(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, query TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS rs_index_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         PRAGMA user_version=2;"
+         PRAGMA user_version=3;"
     ).map_err(|e| e.to_string())?;
+    // Pre-existing rs_notes_fts tables were created with the default (word-token)
+    // tokenizer. Rebuild the FTS shadow table with the trigram tokenizer so search
+    // matches substrings case-insensitively (e.g. "geico" inside "GEICOClaim"),
+    // repopulating it from rs_notes' plain columns rather than rescanning disk.
+    if previous_version < 3 {
+        db.execute_batch(
+            "DROP TABLE IF EXISTS rs_notes_fts;
+             CREATE VIRTUAL TABLE rs_notes_fts USING fts5(path UNINDEXED, title, body, tags, tokenize='trigram case_sensitive 0');
+             INSERT INTO rs_notes_fts(path, title, body, tags) SELECT path, title, body, tags FROM rs_notes;",
+        )
+        .map_err(|e| e.to_string())?;
+    }
     let columns = db
         .prepare("PRAGMA table_info(rs_notes)")
         .and_then(|mut statement| {
@@ -2180,6 +2195,43 @@ mod tests {
         assert_eq!(page.results[0].kind, "working");
         assert_eq!(page.results[0].tags, vec!["release"]);
         assert!(search_knowledge_inner(&root, "tag:' OR 1=1 --", "", 20, 0).is_ok());
+        fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn search_matches_substrings_case_insensitively_across_note_kinds() {
+        let root = temporary_workspace("case-insensitive-substring-search");
+        fs::create_dir_all(root.join("Data/notes/tasks/working")).expect("task folders");
+        fs::write(
+            root.join("Data/notes/insurance.md"),
+            "# Insurance\n\nMy GEICO policy renews soon.",
+        )
+        .expect("note");
+        fs::write(
+            root.join("Data/notes/tasks/Call insurer -- s20260801_c00000000_due20260810_high.md"),
+            "# Call insurer\n\nFollow up with geico about the claim.",
+        )
+        .expect("task");
+        fs::write(
+            root.join(
+                "Data/notes/tasks/working/Renew policy -- s20260801_c00000000_due20260810_normal.md",
+            ),
+            "# Renew policy\n\nMentions AGEICOBRAND, a substring hit only, not a standalone word.",
+        )
+        .expect("working task");
+        assert_eq!(rebuild_index_inner(&root).expect("index"), 3);
+
+        for query in ["geico", "GEICO", "Geico"] {
+            let page = search_knowledge_inner(&root, query, "", 20, 0)
+                .unwrap_or_else(|e| panic!("search for {query:?} failed: {e}"));
+            let mut kinds: Vec<&str> = page.results.iter().map(|r| r.kind.as_str()).collect();
+            kinds.sort_unstable();
+            assert_eq!(
+                page.total, 3,
+                "query {query:?} should match the note, task, and working task (substring, case-insensitive)"
+            );
+            assert_eq!(kinds, vec!["note", "task", "working"]);
+        }
         fs::remove_dir_all(&root).expect("cleanup");
     }
 }

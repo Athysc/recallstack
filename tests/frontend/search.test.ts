@@ -10,14 +10,14 @@ test("search index updates immutably and ranks filename matches first", () => {
   assert.deepEqual(removeSearchEntry(added, "notes/a.md").map(entry => entry.name), ["needle.md"]);
 });
 
-test("native search mapping strips literal prefixes and formats task titles", () => {
+test("native search mapping strips literal prefixes and preserves the raw filename", () => {
   assert.equal(stripWorkspacePrefix("personal.v1/notes/a.md", "personal.v1"), "notes/a.md");
   assert.equal(mapNativeIndex([{ path: "personal.v1/notes/a.md", name: "a.md" }], "personal.v1")[0].notesRelPath, "notes/a.md");
   const [result] = mapNativeSearchResults([{
     path: "personal/tasks/Ship.md", name: "Ship.md", kind: "task", snippet: "ship it", tags: ["release"],
-  }], "personal", "ship", name => `Task: ${name}`);
+  }], "personal", "ship");
   assert.equal(result.notesRelPath, "tasks/Ship.md");
-  assert.equal(result.displayTitle, "Task: Ship.md");
+  assert.equal(result.name, "Ship.md");
   assert.equal(result.matchInName, true);
   assert.equal(highlightMatch("A <needle>", "needle", value => value.replaceAll("<", "&lt;").replaceAll(">", "&gt;")), "A &lt;<mark>needle</mark>&gt;");
 });

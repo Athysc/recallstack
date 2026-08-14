@@ -1,3 +1,5 @@
+import { taskDisplayTitle } from "../tasks/filenames.ts";
+
 export interface SearchIndexEntry {
   notesRelPath: string;
   name: string;
@@ -8,7 +10,6 @@ export interface SearchIndexEntry {
 }
 
 export interface SearchResult extends SearchIndexEntry {
-  displayTitle?: string;
   snippet: string;
   matchInName: boolean;
   folder?: string | null;
@@ -116,11 +117,9 @@ export function mapNativeSearchResults(
   results: readonly NativeSearchResult[],
   prefix: string,
   query: string,
-  taskTitle: (name: string) => string,
 ): SearchResult[] {
   return results.map(result => ({
     notesRelPath: stripWorkspacePrefix(result.path, prefix), name: result.name, content: "",
-    displayTitle: result.kind === "task" || result.kind === "working" ? taskTitle(result.name) : result.title || result.name.replace(/\.md$/i, ""),
     snippet: result.snippet || "", tags: result.tags || [], kind: result.kind,
     folder: result.folder, status: result.status, priority: result.priority, dueDate: result.dueDate,
     modifiedAt: result.modifiedAt, matchInName: result.name.toLowerCase().includes(query.toLowerCase()),
@@ -151,7 +150,7 @@ export function renderSearchResults(
     const card = document.createElement("div");
     card.className = "search-result-card";
     const folder = result.notesRelPath.split("/").slice(0, -1).join("/");
-    const name = result.displayTitle || result.name.replace(/\.md$/, "");
+    const name = taskDisplayTitle(result.name);
     const title = result.matchInName ? highlightMatch(name, query, escape) : escape(name);
     const snippet = result.snippet ? highlightMatch(result.snippet, query, escape) : "";
     const metadata = [result.kind, result.priority, result.status, result.dueDate, ...(result.tags || []).map(tag => `#${tag}`)]
