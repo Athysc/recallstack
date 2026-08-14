@@ -6265,6 +6265,21 @@ type TaskLocation = {
     }
   });
 
+  // A plain Ctrl+C/right-click-Copy text selection inside the editor is
+  // handled entirely natively by the webview (never touches copyPlainText()
+  // above) — on Linux that means it still routes through WebKitGTK's own
+  // clipboard bridge and can log the same "Gdk-WARNING: Error writing
+  // selection data: Broken pipe" a clipboard-history tool triggers. Intercept
+  // the copy event and write the selected text through the native plugin
+  // instead, same as every other explicit copy action in the app.
+  mdEditor.addEventListener('copy', (e: any) => {
+    if (!window.__recallstackNative?.active) return;
+    const text = mdEditor.value.slice(mdEditor.selectionStart, mdEditor.selectionEnd);
+    if (!text) return;
+    e.preventDefault();
+    void copyPlainText(text);
+  });
+
   // Browser (non-Tauri) mode only: real OS files dragged into a Tauri desktop
   // window are intercepted at the native webview layer once dragDropEnabled
   // is true (see tauri.conf.json and the onDragDropEvent routing below) and
