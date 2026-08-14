@@ -78,7 +78,7 @@ pub struct AppState {
     pub workspace: Mutex<Option<PathBuf>>,
     pub watcher: Mutex<Option<workspace::WorkspaceWatcher>>,
     pub watcher_health: Mutex<String>,
-    internal_writes: Mutex<HashMap<String, Instant>>,
+    internal_writes: Mutex<HashMap<String, (Instant, Duration)>>,
     watcher_sequences: Mutex<HashMap<String, u64>>,
     watcher_generation: Mutex<u64>,
     pub backup_cancel: AtomicBool,
@@ -101,20 +101,45 @@ impl Default for AppState {
 }
 
 impl AppState {
+    // Baseline suppression window for a write of negligible duration. Also the
+    // floor for the adaptive window below, so a fast write never gets *less*
+    // grace than the old fixed behavior did.
+    const DEFAULT_INTERNAL_WRITE_WINDOW: Duration = Duration::from_millis(900);
+    // Upper bound so one pathologically slow write can't suppress a genuine
+    // external edit to the same path for an unreasonable amount of time.
+    const MAX_INTERNAL_WRITE_WINDOW: Duration = Duration::from_secs(10);
+    const INTERNAL_WRITE_RETENTION: Duration = Duration::from_secs(12);
+
     pub fn record_internal_write(&self, relative_path: &str) {
+        self.record_internal_write_with_window(relative_path, Self::DEFAULT_INTERNAL_WRITE_WINDOW);
+    }
+
+    // Call after a content write completes, sized to how long that specific
+    // write actually took rather than a fixed guess. Watcher event delivery
+    // latency tracks disk/IPC latency, not a constant — on a slow or just-woken
+    // disk, or a reconnecting network/encrypted mount, the OS change event for
+    // our own save can legitimately arrive well after a short fixed window,
+    // which misclassifies it as an external change and triggers an unnecessary
+    // reload/reconcile right as the user resumes typing.
+    pub fn record_internal_write_timed(&self, relative_path: &str, write_duration: Duration) {
+        let window = (write_duration * 3).clamp(Self::DEFAULT_INTERNAL_WRITE_WINDOW, Self::MAX_INTERNAL_WRITE_WINDOW);
+        self.record_internal_write_with_window(relative_path, window);
+    }
+
+    fn record_internal_write_with_window(&self, relative_path: &str, window: Duration) {
         let now = Instant::now();
         let mut writes = self.internal_writes.lock();
-        writes.retain(|_, recorded| now.duration_since(*recorded) < Duration::from_secs(2));
-        writes.insert(relative_path.replace('\\', "/"), now);
+        writes.retain(|_, (recorded, _)| now.duration_since(*recorded) < Self::INTERNAL_WRITE_RETENTION);
+        writes.insert(relative_path.replace('\\', "/"), (now, window));
     }
 
     pub fn is_recent_internal_write(&self, relative_path: &str) -> bool {
         let now = Instant::now();
         let mut writes = self.internal_writes.lock();
-        writes.retain(|_, recorded| now.duration_since(*recorded) < Duration::from_secs(2));
+        writes.retain(|_, (recorded, _)| now.duration_since(*recorded) < Self::INTERNAL_WRITE_RETENTION);
         writes
             .get(&relative_path.replace('\\', "/"))
-            .is_some_and(|recorded| now.duration_since(*recorded) < Duration::from_millis(900))
+            .is_some_and(|(recorded, window)| now.duration_since(*recorded) < *window)
     }
 
     pub fn next_watcher_sequence(&self, workspace_id: &str) -> u64 {

@@ -1113,8 +1113,11 @@ pub fn write_note(
     }
     state.record_internal_write(&format!("Data/{path}"));
     let _ = safety::preserve_version(&app, &root, &note, &format!("Data/{path}"))?;
+    let started = std::time::Instant::now();
     safety::atomic_write(&note, content.as_bytes())?;
-    index_note(&root, &path, &content)
+    index_note(&root, &path, &content)?;
+    state.record_internal_write_timed(&format!("Data/{path}"), started.elapsed());
+    Ok(())
 }
 
 #[tauri::command]
@@ -1131,8 +1134,10 @@ pub fn create_note(
     }
     fs::create_dir_all(note.parent().expect("note has parent")).map_err(|e| e.to_string())?;
     state.record_internal_write(&format!("Data/{path}"));
+    let started = std::time::Instant::now();
     safety::atomic_write(&note, content.as_bytes())?;
     index_note(&root, &path, &content)?;
+    state.record_internal_write_timed(&format!("Data/{path}"), started.elapsed());
     Ok(Note {
         name: note
             .file_stem()

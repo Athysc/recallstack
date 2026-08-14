@@ -74,8 +74,20 @@ export async function indexMarkdownDirectory(
   return target;
 }
 
+const TAG_RE = /(^|\s)#[\p{L}\p{N}_-]+/gu;
+
+// Extracted once per index update rather than rescanned on every tag-completion
+// keystroke — see the 2026-08-14 typing-freeze investigation, where scanning
+// every note's full content on every `#` autocomplete trigger blocked the main
+// thread for however long the whole workspace's text took to regex-match.
+export function extractTags(content: string): string[] {
+  const tags = new Set<string>();
+  (content.match(TAG_RE) || []).forEach(match => tags.add(match.trim().slice(1)));
+  return [...tags];
+}
+
 export function upsertSearchEntry(index: SearchIndexEntry[], notesRelPath: string, content: string): SearchIndexEntry[] {
-  const entry = { notesRelPath, name: notesRelPath.split("/").at(-1)!, content };
+  const entry = { notesRelPath, name: notesRelPath.split("/").at(-1)!, content, tags: extractTags(content) };
   const position = index.findIndex(item => item.notesRelPath === notesRelPath);
   if (position === -1) return [...index, entry];
   const next = [...index];

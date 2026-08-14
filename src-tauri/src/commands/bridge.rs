@@ -107,6 +107,20 @@ fn record_internal_write(state: &State<'_, Arc<AppState>>, path: &Path) -> Resul
     Ok(())
 }
 
+// Re-records the same path with a window sized to how long the write actually
+// took, so a slow write (waking disk, reconnecting mount) still gets enough
+// grace for the watcher event to arrive and be recognized as our own —
+// see AppState::record_internal_write_timed.
+fn record_internal_write_timed(
+    state: &State<'_, Arc<AppState>>,
+    path: &Path,
+    write_duration: std::time::Duration,
+) -> Result<(), String> {
+    let workspace = root(state)?;
+    state.record_internal_write_timed(&relative_string(&workspace, path)?, write_duration);
+    Ok(())
+}
+
 fn native_entry(workspace: &Path, path: &Path) -> Result<NativeEntry, String> {
     let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
     let modified = metadata
@@ -356,7 +370,9 @@ pub fn fs_write(
     let workspace = root(&state)?;
     let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
     record_internal_write(&state, &target)?;
-    safety::atomic_write(&target, &bytes)
+    let started = std::time::Instant::now();
+    safety::atomic_write(&target, &bytes)?;
+    record_internal_write_timed(&state, &target, started.elapsed())
 }
 
 #[tauri::command]
@@ -374,7 +390,9 @@ pub fn fs_write_text(
     let workspace = root(&state)?;
     let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
     record_internal_write(&state, &target)?;
-    safety::atomic_write(&target, text.as_bytes())
+    let started = std::time::Instant::now();
+    safety::atomic_write(&target, text.as_bytes())?;
+    record_internal_write_timed(&state, &target, started.elapsed())
 }
 
 #[tauri::command]
@@ -401,7 +419,9 @@ pub fn fs_write_text_versioned(
     }
     let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
     record_internal_write(&state, &target)?;
+    let started = std::time::Instant::now();
     safety::atomic_write(&target, text.as_bytes())?;
+    record_internal_write_timed(&state, &target, started.elapsed())?;
     Ok(native_entry(&workspace, &target)?.version)
 }
 

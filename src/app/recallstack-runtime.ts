@@ -351,7 +351,7 @@ type TaskLocation = {
           .map(note => ({ label: note.notesRelPath.replace(/\.md$/i, ''), type: 'text' }));
       }
       const tags = new Set<string>();
-      searchIndex.forEach(note => (note.content.match(/(^|\s)#[\p{L}\p{N}_-]+/gu) || []).forEach(tag => tags.add(tag.trim().slice(1))));
+      searchIndex.forEach(note => (note.tags || []).forEach(tag => tags.add(tag)));
       return [...tags].filter(tag => !query || tag.toLowerCase().includes(query.toLowerCase())).slice(0, 50).map(label => ({ label, type: 'keyword' }));
     },
   });
@@ -5891,7 +5891,7 @@ type TaskLocation = {
       .slice(0, 100).map(note => ({ id:`note:${note.notesRelPath}`, title:taskDisplayTitle(note.name), meta:note.notesRelPath, run:() => openFile(note.name, note.notesRelPath) }));
     if (parsed.mode === 'tags') {
       const tags = new Set<string>();
-      searchIndex.forEach(note => (note.content.match(/(^|\s)#[\p{L}\p{N}_-]+/gu) || []).forEach(tag => tags.add(tag.trim())));
+      searchIndex.forEach(note => (note.tags || []).forEach(tag => tags.add(`#${tag}`)));
       return [...tags].filter(tag => !parsed.query || tag.toLowerCase().includes(parsed.query.toLowerCase())).sort().map(tag => ({ id:`tag:${tag}`, title:tag, meta:'Search tag', run:async() => { searchInput.value=tag; await executeSearch(tag); } }));
     }
     if (parsed.mode === 'help') return [
