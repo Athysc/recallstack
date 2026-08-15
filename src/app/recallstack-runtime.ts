@@ -28,7 +28,7 @@ import { createLazyMarkdownEditor } from "../features/editor/lazy-markdown-edito
 import { PreviewScheduler } from "../features/editor/preview-scheduler";
 import { contentZoomScale, nextContentZoom, normalizeContentZoom, scaledMediaWidth } from "../features/editor/content-zoom";
 import { assetMarkdownLink, isScreenshotItem, joinDroppedAssetLinks } from "../features/editor/assets";
-import { nativeDraftPath as resolveNativeDraftPath, rewriteAssetLinks, toggleMarkdownCheckbox } from "../features/editor/lifecycle";
+import { nativeDraftPath as resolveNativeDraftPath, rewriteAssetLinks, runBestEffort, toggleMarkdownCheckbox } from "../features/editor/lifecycle";
 import {
   activeTab as findActiveTab,
   findTabByPath as findTabForPath,
@@ -3375,31 +3375,41 @@ type TaskLocation = {
     if (!confirm(`Move "${name}" to RecallStack Trash?`)) return;
 
     if (isOutputsFile && currentOutputsDirFh) {
+      // Only the removal itself is essential — everything after it is either
+      // in-memory state reset (can't throw) or the unconditional finishing
+      // steps, so a caught failure here can only mean the removal failed.
       try {
         await currentOutputsDirFh.removeEntry(name);
-        isOutputsFile       = false;
-        currentOutputsFh    = null;
-        currentOutputsDirFh = null;
-        returnToOutputs     = true;
-        toast('Moved to Trash');
-        removeTabRecord(activeTabId);
-        cancelEdit();
       } catch (e: any) {
         toast('Delete failed: ' + e.message, 'error');
+        return;
       }
-      return;
-    }
-
-    try {
-      await removeMdFile(currentPath);
-      removeFromSearchIndex(currentPath);
-      refreshCalendarIfVisible();
+      isOutputsFile       = false;
+      currentOutputsFh    = null;
+      currentOutputsDirFh = null;
+      returnToOutputs     = true;
       toast('Moved to Trash');
       removeTabRecord(activeTabId);
       cancelEdit();
+      return;
+    }
+
+    // Only removeMdFile() is essential to "did the delete succeed" — a
+    // failure there, and only there, should produce "Delete failed" and skip
+    // the rest. removeFromSearchIndex()/refreshCalendarIfVisible() are
+    // best-effort housekeeping that must never mask an already-successful
+    // removal or block cancelEdit() (the actual list refresh) from running —
+    // see runBestEffort()'s doc comment for why this was previously broken.
+    try {
+      await removeMdFile(currentPath);
     } catch (e: any) {
       toast('Delete failed: ' + e.message, 'error');
+      return;
     }
+    runBestEffort([() => removeFromSearchIndex(currentPath!), refreshCalendarIfVisible]);
+    toast('Moved to Trash');
+    removeTabRecord(activeTabId);
+    cancelEdit();
   }
 
   async function archiveNote() {
@@ -3417,57 +3427,75 @@ type TaskLocation = {
     }
     const name = currentPath!.split('/').at(-1)!;
     if (!isTasksEditor() && !confirm(`Archive "${name}"?\n\nThe file will be moved to the archived/ subfolder.`)) return;
+    // Only the write-then-remove pair is essential ("did the archive really
+    // happen") — the search-index/calendar housekeeping after it is
+    // best-effort and must not mask a successful archive or block
+    // cancelEdit() (the list refresh). See runBestEffort()'s doc comment.
+    let archivedRelPath: string;
+    let content: string;
     try {
       if (!await saveNote()) return;
       const rawContent = mdEditor.value;
       // Rewrite asset links: assets/ → ../assets/ so they remain valid one level deeper
-      const content = rewriteAssetLinks(rawContent, '](assets/', '](../assets/');
-      const parts   = currentPath!.split('/');
-      const archivedRelPath = await uniquePathInFolder([...parts.slice(0, -1), 'archived'], parts.at(-1)!);
+      content = rewriteAssetLinks(rawContent, '](assets/', '](../assets/');
+      const parts = currentPath!.split('/');
+      archivedRelPath = await uniquePathInFolder([...parts.slice(0, -1), 'archived'], parts.at(-1)!);
       await writeMdFile(archivedRelPath, content);
       await removeMdFile(currentPath);
-      removeFromSearchIndex(currentPath);
-      updateSearchIndex(archivedRelPath, content);
-      refreshCalendarIfVisible();
-      toast('Archived ✓');
-      if (isTaskNamespacePath(archivedRelPath)) {
-        archiveMode = false;
-        returnToAllTasks = true;
-      }
-      removeTabRecord(activeTabId);
-      cancelEdit();
     } catch (e: any) {
       toast('Archive failed: ' + e.message, 'error');
+      return;
     }
+    runBestEffort([
+      () => removeFromSearchIndex(currentPath!),
+      () => updateSearchIndex(archivedRelPath, content),
+      refreshCalendarIfVisible,
+    ]);
+    toast('Archived ✓');
+    if (isTaskNamespacePath(archivedRelPath)) {
+      archiveMode = false;
+      returnToAllTasks = true;
+    }
+    removeTabRecord(activeTabId);
+    cancelEdit();
   }
 
   async function restoreNote() {
     if (isWorkingTask()) return;
     if (!currentPath) return;
     if (isExternalFile) return;
+    // Same shape as archiveNote(): only the write-then-remove pair is
+    // essential; search-index/calendar housekeeping is best-effort and must
+    // not mask a successful restore or block cancelEdit(). See
+    // runBestEffort()'s doc comment.
+    let restoredPath: string;
+    let content: string;
     try {
       if (!await saveNote()) return;
       const rawContent = mdEditor.value;
       // Rewrite asset links back: ../assets/ → assets/ so they remain valid one level up
-      const content = rewriteAssetLinks(rawContent, '](../assets/', '](assets/');
-      const parts   = currentPath!.split('/');
+      content = rewriteAssetLinks(rawContent, '](../assets/', '](assets/');
+      const parts = currentPath!.split('/');
       // Remove the 'archived' segment: [...parent, filename]
-      const restoredPath = await uniquePathInFolder(parts.slice(0, -2), parts.at(-1)!);
+      restoredPath = await uniquePathInFolder(parts.slice(0, -2), parts.at(-1)!);
       await writeMdFile(restoredPath, content);
       await removeMdFile(currentPath);
-      removeFromSearchIndex(currentPath);
-      updateSearchIndex(restoredPath, content);
-      refreshCalendarIfVisible();
-      toast('Restored ✓');
-      if (isTaskNamespacePath(restoredPath)) returnToAllTasks = true;
-      archiveMode = false;
-      btnNew.classList.remove('hidden');
-      updateArchiveToggleBtn();
-      removeTabRecord(activeTabId);
-      cancelEdit();
     } catch (e: any) {
       toast('Restore failed: ' + e.message, 'error');
+      return;
     }
+    runBestEffort([
+      () => removeFromSearchIndex(currentPath!),
+      () => updateSearchIndex(restoredPath, content),
+      refreshCalendarIfVisible,
+    ]);
+    toast('Restored ✓');
+    if (isTaskNamespacePath(restoredPath)) returnToAllTasks = true;
+    archiveMode = false;
+    btnNew.classList.remove('hidden');
+    updateArchiveToggleBtn();
+    removeTabRecord(activeTabId);
+    cancelEdit();
   }
 
   function refreshCalendarIfVisible() {

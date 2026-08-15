@@ -1,3 +1,4 @@
+use crate::error_log::{logged, logged_async};
 use crate::{commands::safety, AppState};
 use chrono::Utc;
 use notify::event::{MetadataKind, ModifyKind};
@@ -855,28 +856,33 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
 pub fn workspace_summary(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Option<WorkspaceSummary>, String> {
-    let Some(path) = state.workspace.lock().clone() else {
-        return Ok(None);
-    };
-    Ok(Some(summary(&path)))
+    logged("workspace_summary", || {
+        let Some(path) = state.workspace.lock().clone() else {
+            return Ok(None);
+        };
+        Ok(Some(summary(&path)))
+    })
 }
 
 #[tauri::command]
 pub async fn pick_workspace(app: AppHandle) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("Open RecallStack workspace")
-            .blocking_pick_folder()
-            .map(|path| {
-                path.into_path()
-                    .map(|path| path.to_string_lossy().to_string())
-                    .map_err(|e| e.to_string())
-            })
-            .transpose()
+    logged_async("pick_workspace", async {
+        tauri::async_runtime::spawn_blocking(move || {
+            app.dialog()
+                .file()
+                .set_title("Open RecallStack workspace")
+                .blocking_pick_folder()
+                .map(|path| {
+                    path.into_path()
+                        .map(|path| path.to_string_lossy().to_string())
+                        .map_err(|e| e.to_string())
+                })
+                .transpose()
+        })
+        .await
+        .map_err(|e| e.to_string())?
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 // `fs::canonicalize` returns Windows' verbatim `\\?\C:\...` extended-length form.
@@ -913,76 +919,88 @@ pub fn set_workspace(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<WorkspaceSummary, String> {
-    let root = fs::canonicalize(&path).map_err(|e| format!("Cannot open workspace: {e}"))?;
-    if !root.is_dir() {
-        return Err(err("The selected workspace is not a directory"));
-    }
-    prepare_workspace(&root)?;
-    *state.workspace.lock() = Some(root.clone());
-    save_recent(&app, &root)?;
-    watch_workspace(&app, state.inner(), root.clone())?;
-    let result = summary(&root);
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let started = Instant::now();
-        let _ = app_handle.emit(
-            "index://status",
-            IndexStatus {
-                state: "indexing".into(),
-                indexed: 0,
-                duration_ms: 0,
-                error: None,
-            },
-        );
-        match reconcile_index(&root) {
-            Ok(indexed) => {
-                let _ = app_handle.emit(
-                    "index://status",
-                    IndexStatus {
-                        state: "ready".into(),
-                        indexed,
-                        duration_ms: started.elapsed().as_millis(),
-                        error: None,
-                    },
-                );
-            }
-            Err(error) => {
-                let _ = app_handle.emit(
-                    "index://status",
-                    IndexStatus {
-                        state: "error".into(),
-                        indexed: 0,
-                        duration_ms: started.elapsed().as_millis(),
-                        error: Some(error),
-                    },
-                );
-            }
+    logged("set_workspace", || {
+        let root = fs::canonicalize(&path).map_err(|e| format!("Cannot open workspace: {e}"))?;
+        if !root.is_dir() {
+            return Err(err("The selected workspace is not a directory"));
         }
-    });
-    Ok(result)
+        prepare_workspace(&root)?;
+        *state.workspace.lock() = Some(root.clone());
+        save_recent(&app, &root)?;
+        watch_workspace(&app, state.inner(), root.clone())?;
+        let result = summary(&root);
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let started = Instant::now();
+            let _ = app_handle.emit(
+                "index://status",
+                IndexStatus {
+                    state: "indexing".into(),
+                    indexed: 0,
+                    duration_ms: 0,
+                    error: None,
+                },
+            );
+            match reconcile_index(&root) {
+                Ok(indexed) => {
+                    let _ = app_handle.emit(
+                        "index://status",
+                        IndexStatus {
+                            state: "ready".into(),
+                            indexed,
+                            duration_ms: started.elapsed().as_millis(),
+                            error: None,
+                        },
+                    );
+                }
+                Err(error) => {
+                    // Reported to the frontend via an event, not this
+                    // command's own Result (the command already returned
+                    // Ok(result) above by the time indexing finishes in the
+                    // background) — logged() above can't see this path, so
+                    // it's logged directly here.
+                    crate::error_log::log_command_error("set_workspace_reconcile", &error);
+                    let _ = app_handle.emit(
+                        "index://status",
+                        IndexStatus {
+                            state: "error".into(),
+                            indexed: 0,
+                            duration_ms: started.elapsed().as_millis(),
+                            error: Some(error),
+                        },
+                    );
+                }
+            }
+        });
+        Ok(result)
+    })
 }
 
 #[tauri::command]
 pub fn recent_workspaces(app: AppHandle) -> Result<Vec<WorkspaceSummary>, String> {
-    Ok(load_recents(&app)?
-        .into_iter()
-        .filter_map(|item| {
-            let path = PathBuf::from(item.path);
-            path.is_dir().then(|| summary(&path))
-        })
-        .collect())
+    logged("recent_workspaces", || {
+        Ok(load_recents(&app)?
+            .into_iter()
+            .filter_map(|item| {
+                let path = PathBuf::from(item.path);
+                path.is_dir().then(|| summary(&path))
+            })
+            .collect())
+    })
 }
 
 #[tauri::command]
 pub fn remove_recent_workspace(app: AppHandle, path: String) -> Result<(), String> {
-    let recents_path = recents_path(&app)?;
-    let mut entries = load_recents(&app)?;
-    entries.retain(|item| item.path != path);
-    fs::write(
-        recents_path,
-        serde_json::to_vec_pretty(&entries).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())
+    logged("remove_recent_workspace", || {
+        let recents_path = recents_path(&app)?;
+        let mut entries = load_recents(&app)?;
+        entries.retain(|item| item.path != path);
+        fs::write(
+            recents_path,
+            serde_json::to_vec_pretty(&entries).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]
@@ -991,36 +1009,80 @@ pub fn list_entries(
     path: Option<String>,
     recursive: Option<bool>,
 ) -> Result<Vec<Entry>, String> {
-    let root = active_workspace(&state)?;
-    let relative = path.unwrap_or_default();
-    if !relative.is_empty() && !is_safe_relative(&relative) {
-        return Err(err("Invalid folder path"));
-    }
-    let directory = data_path(&root).join(relative);
-    if recursive.unwrap_or(false) {
-        let mut entries = WalkDir::new(&directory)
-            .into_iter()
+    logged("list_entries", || {
+        let root = active_workspace(&state)?;
+        let relative = path.unwrap_or_default();
+        if !relative.is_empty() && !is_safe_relative(&relative) {
+            return Err(err("Invalid folder path"));
+        }
+        let directory = data_path(&root).join(relative);
+        if recursive.unwrap_or(false) {
+            let mut entries = WalkDir::new(&directory)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter_map(|entry| {
+                    if !entry.file_type().is_file()
+                        || !entry
+                            .path()
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                        || entry
+                            .path()
+                            .to_string_lossy()
+                            .contains(".recallstack-trash")
+                    {
+                        return None;
+                    }
+                    let path = entry
+                        .path()
+                        .strip_prefix(data_path(&root))
+                        .ok()?
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let modified_at = entry
+                        .metadata()
+                        .ok()?
+                        .modified()
+                        .ok()?
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|x| x.as_secs() as i64);
+                    Some(Entry {
+                        path,
+                        name,
+                        is_dir: false,
+                        modified_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            entries.sort_by_key(|entry| entry.path.to_lowercase());
+            return Ok(entries);
+        }
+        let mut entries = fs::read_dir(directory)
+            .map_err(|e| e.to_string())?
             .filter_map(Result::ok)
             .filter_map(|entry| {
-                if !entry.file_type().is_file()
-                    || !entry
+                let file_type = entry.file_type().ok()?;
+                let is_dir = file_type.is_dir();
+                if !is_dir
+                    && !entry
                         .path()
                         .extension()
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-                    || entry
-                        .path()
-                        .to_string_lossy()
-                        .contains(".recallstack-trash")
                 {
                     return None;
                 }
-                let path = entry
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name == ".recallstack-trash" {
+                    return None;
+                }
+                let rel = entry
                     .path()
                     .strip_prefix(data_path(&root))
                     .ok()?
                     .to_string_lossy()
                     .replace('\\', "/");
-                let name = entry.file_name().to_string_lossy().to_string();
                 let modified_at = entry
                     .metadata()
                     .ok()?
@@ -1030,72 +1092,32 @@ pub fn list_entries(
                     .ok()
                     .map(|x| x.as_secs() as i64);
                 Some(Entry {
-                    path,
+                    path: rel,
                     name,
-                    is_dir: false,
+                    is_dir,
                     modified_at,
                 })
             })
             .collect::<Vec<_>>();
-        entries.sort_by_key(|entry| entry.path.to_lowercase());
-        return Ok(entries);
-    }
-    let mut entries = fs::read_dir(directory)
-        .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let file_type = entry.file_type().ok()?;
-            let is_dir = file_type.is_dir();
-            if !is_dir
-                && !entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-            {
-                return None;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name == ".recallstack-trash" {
-                return None;
-            }
-            let rel = entry
-                .path()
-                .strip_prefix(data_path(&root))
-                .ok()?
-                .to_string_lossy()
-                .replace('\\', "/");
-            let modified_at = entry
-                .metadata()
-                .ok()?
-                .modified()
-                .ok()?
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()
-                .map(|x| x.as_secs() as i64);
-            Some(Entry {
-                path: rel,
-                name,
-                is_dir,
-                modified_at,
-            })
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
-    Ok(entries)
+        entries.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
+        Ok(entries)
+    })
 }
 
 #[tauri::command]
 pub fn read_note(state: State<'_, Arc<AppState>>, path: String) -> Result<Note, String> {
-    let root = active_workspace(&state)?;
-    let note = note_path(&root, &path)?;
-    Ok(Note {
-        name: note
-            .file_stem()
-            .and_then(|x| x.to_str())
-            .unwrap_or("Untitled")
-            .to_string(),
-        path,
-        content: fs::read_to_string(note).map_err(|e| e.to_string())?,
+    logged("read_note", || {
+        let root = active_workspace(&state)?;
+        let note = note_path(&root, &path)?;
+        Ok(Note {
+            name: note
+                .file_stem()
+                .and_then(|x| x.to_str())
+                .unwrap_or("Untitled")
+                .to_string(),
+            path,
+            content: fs::read_to_string(note).map_err(|e| e.to_string())?,
+        })
     })
 }
 
@@ -1106,18 +1128,20 @@ pub fn write_note(
     path: String,
     content: String,
 ) -> Result<(), String> {
-    let root = active_workspace(&state)?;
-    let note = note_path(&root, &path)?;
-    if !note.exists() {
-        return Err(err("Note does not exist; use create_note"));
-    }
-    state.record_internal_write(&format!("Data/{path}"));
-    let _ = safety::preserve_version(&app, &root, &note, &format!("Data/{path}"))?;
-    let started = std::time::Instant::now();
-    safety::atomic_write(&note, content.as_bytes())?;
-    index_note(&root, &path, &content)?;
-    state.record_internal_write_timed(&format!("Data/{path}"), started.elapsed());
-    Ok(())
+    logged("write_note", || {
+        let root = active_workspace(&state)?;
+        let note = note_path(&root, &path)?;
+        if !note.exists() {
+            return Err(err("Note does not exist; use create_note"));
+        }
+        state.record_internal_write(&format!("Data/{path}"));
+        let _ = safety::preserve_version(&app, &root, &note, &format!("Data/{path}"))?;
+        let started = std::time::Instant::now();
+        safety::atomic_write(&note, content.as_bytes())?;
+        index_note(&root, &path, &content)?;
+        state.record_internal_write_timed(&format!("Data/{path}"), started.elapsed());
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -1127,25 +1151,27 @@ pub fn create_note(
     path: String,
     content: String,
 ) -> Result<Note, String> {
-    let root = active_workspace(&state)?;
-    let note = note_path(&root, &path)?;
-    if note.exists() {
-        return Err(err("A note with that name already exists"));
-    }
-    fs::create_dir_all(note.parent().expect("note has parent")).map_err(|e| e.to_string())?;
-    state.record_internal_write(&format!("Data/{path}"));
-    let started = std::time::Instant::now();
-    safety::atomic_write(&note, content.as_bytes())?;
-    index_note(&root, &path, &content)?;
-    state.record_internal_write_timed(&format!("Data/{path}"), started.elapsed());
-    Ok(Note {
-        name: note
-            .file_stem()
-            .and_then(|x| x.to_str())
-            .unwrap_or("Untitled")
-            .to_string(),
-        path,
-        content,
+    logged("create_note", || {
+        let root = active_workspace(&state)?;
+        let note = note_path(&root, &path)?;
+        if note.exists() {
+            return Err(err("A note with that name already exists"));
+        }
+        fs::create_dir_all(note.parent().expect("note has parent")).map_err(|e| e.to_string())?;
+        state.record_internal_write(&format!("Data/{path}"));
+        let started = std::time::Instant::now();
+        safety::atomic_write(&note, content.as_bytes())?;
+        index_note(&root, &path, &content)?;
+        state.record_internal_write_timed(&format!("Data/{path}"), started.elapsed());
+        Ok(Note {
+            name: note
+                .file_stem()
+                .and_then(|x| x.to_str())
+                .unwrap_or("Untitled")
+                .to_string(),
+            path,
+            content,
+        })
     })
 }
 
@@ -1155,14 +1181,16 @@ pub fn move_to_trash(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<String, String> {
-    let root = active_workspace(&state)?;
-    note_path(&root, &path)?;
-    let result = safety::trash_workspace_path(&app, &state, &format!("Data/{path}"))?;
-    remove_indexed_note(&open_db(&root)?, &path)?;
-    Ok(result
-        .recovery
-        .map(|recovery| recovery.id)
-        .unwrap_or(result.operation_id))
+    logged("move_to_trash", || {
+        let root = active_workspace(&state)?;
+        note_path(&root, &path)?;
+        let result = safety::trash_workspace_path(&app, &state, &format!("Data/{path}"))?;
+        remove_indexed_note(&open_db(&root)?, &path)?;
+        Ok(result
+            .recovery
+            .map(|recovery| recovery.id)
+            .unwrap_or(result.operation_id))
+    })
 }
 
 fn coalesce_change(changes: &mut HashMap<String, WorkspaceChange>, change: WorkspaceChange) {
@@ -1325,29 +1353,32 @@ pub async fn rebuild_index(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<usize, String> {
-    let root = active_workspace(&state)?;
-    let app_state = Arc::clone(state.inner());
-    app_state
-        .index_cancel
-        .store(false, std::sync::atomic::Ordering::SeqCst);
-    tauri::async_runtime::spawn_blocking(move || {
-        rebuild_index_inner_with(
-            &root,
-            || {
-                app_state
-                    .index_cancel
-                    .load(std::sync::atomic::Ordering::SeqCst)
-            },
-            |completed, total, path| {
-                let _ = app.emit(
-                    "index://progress",
-                    serde_json::json!({"completed":completed,"total":total,"path":path}),
-                );
-            },
-        )
+    logged_async("rebuild_index", async {
+        let root = active_workspace(&state)?;
+        let app_state = Arc::clone(state.inner());
+        app_state
+            .index_cancel
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        tauri::async_runtime::spawn_blocking(move || {
+            rebuild_index_inner_with(
+                &root,
+                || {
+                    app_state
+                        .index_cancel
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                },
+                |completed, total, path| {
+                    let _ = app.emit(
+                        "index://progress",
+                        serde_json::json!({"completed":completed,"total":total,"path":path}),
+                    );
+                },
+            )
+        })
+        .await
+        .map_err(|error| error.to_string())?
     })
     .await
-    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1359,33 +1390,37 @@ pub fn cancel_index(state: State<'_, Arc<AppState>>) {
 
 #[tauri::command]
 pub fn reconcile_workspace(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
-    reconcile_index(&active_workspace(&state)?)
+    logged("reconcile_workspace", || {
+        reconcile_index(&active_workspace(&state)?)
+    })
 }
 
 #[tauri::command]
 pub fn index_health(state: State<'_, Arc<AppState>>) -> Result<IndexHealth, String> {
-    let db = open_db(&active_workspace(&state)?)?;
-    let count = |table: &str| {
-        db.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
-            row.get::<_, i64>(0)
+    logged("index_health", || {
+        let db = open_db(&active_workspace(&state)?)?;
+        let count = |table: &str| {
+            db.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map(|value| value as usize)
+            .map_err(|e| e.to_string())
+        };
+        Ok(IndexHealth {
+            schema_version: db
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .map_err(|e| e.to_string())?,
+            files: count("rs_notes")?,
+            tags: count("rs_tags")?,
+            links: count("rs_links")?,
+            last_reconciled: db
+                .query_row(
+                    "SELECT value FROM rs_index_meta WHERE key='last_reconciled'",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok(),
         })
-        .map(|value| value as usize)
-        .map_err(|e| e.to_string())
-    };
-    Ok(IndexHealth {
-        schema_version: db
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|e| e.to_string())?,
-        files: count("rs_notes")?,
-        tags: count("rs_tags")?,
-        links: count("rs_links")?,
-        last_reconciled: db
-            .query_row(
-                "SELECT value FROM rs_index_meta WHERE key='last_reconciled'",
-                [],
-                |row| row.get(0),
-            )
-            .ok(),
     })
 }
 
@@ -1648,13 +1683,15 @@ pub fn search_knowledge(
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<KnowledgeSearchPage, String> {
-    search_knowledge_inner(
-        &active_workspace(&state)?,
-        &query,
-        &prefix.unwrap_or_default(),
-        limit.unwrap_or(80),
-        offset.unwrap_or(0),
-    )
+    logged("search_knowledge", || {
+        search_knowledge_inner(
+            &active_workspace(&state)?,
+            &query,
+            &prefix.unwrap_or_default(),
+            limit.unwrap_or(80),
+            offset.unwrap_or(0),
+        )
+    })
 }
 
 #[tauri::command]
@@ -1663,33 +1700,35 @@ pub fn search_notes(
     query: String,
     prefix: Option<String>,
 ) -> Result<Vec<SearchResult>, String> {
-    let prefix = prefix
-        .unwrap_or_default()
-        .trim_start_matches('/')
-        .to_string();
-    Ok(
-        search_knowledge_inner(&active_workspace(&state)?, &query, &prefix, 80, 0)?
-            .results
-            .into_iter()
-            .map(|result| {
-                let path = result
-                    .path
-                    .strip_prefix(&prefix)
-                    .unwrap_or(&result.path)
-                    .trim_start_matches('/')
-                    .to_string();
-                SearchResult {
-                    name: Path::new(&path)
-                        .file_name()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or(&path)
-                        .to_string(),
-                    path,
-                    snippet: result.snippet,
-                }
-            })
-            .collect(),
-    )
+    logged("search_notes", || {
+        let prefix = prefix
+            .unwrap_or_default()
+            .trim_start_matches('/')
+            .to_string();
+        Ok(
+            search_knowledge_inner(&active_workspace(&state)?, &query, &prefix, 80, 0)?
+                .results
+                .into_iter()
+                .map(|result| {
+                    let path = result
+                        .path
+                        .strip_prefix(&prefix)
+                        .unwrap_or(&result.path)
+                        .trim_start_matches('/')
+                        .to_string();
+                    SearchResult {
+                        name: Path::new(&path)
+                            .file_name()
+                            .and_then(|value| value.to_str())
+                            .unwrap_or(&path)
+                            .to_string(),
+                        path,
+                        snippet: result.snippet,
+                    }
+                })
+                .collect(),
+        )
+    })
 }
 
 #[tauri::command]
@@ -1697,37 +1736,39 @@ pub fn indexed_note_catalog(
     state: State<'_, Arc<AppState>>,
     prefix: Option<String>,
 ) -> Result<Vec<IndexedNoteSummary>, String> {
-    let root = active_workspace(&state)?;
-    let db = open_db(&root)?;
-    let prefix = prefix
-        .unwrap_or_default()
-        .trim_start_matches('/')
-        .to_string();
-    let mut statement = db.prepare("SELECT path,title,tags,kind,modified_at FROM rs_notes WHERE path LIKE ?1 ORDER BY path LIMIT 10000").map_err(|e| e.to_string())?;
-    let results = statement
-        .query_map([format!("{prefix}%")], |row| {
-            let path: String = row.get(0)?;
-            Ok(IndexedNoteSummary {
-                name: Path::new(&path)
-                    .file_name()
-                    .and_then(|v| v.to_str())
-                    .unwrap_or(&path)
-                    .to_string(),
-                path,
-                title: row.get(1)?,
-                tags: row
-                    .get::<_, String>(2)?
-                    .split_whitespace()
-                    .map(str::to_string)
-                    .collect(),
-                kind: row.get(3)?,
-                modified_at: row.get(4)?,
+    logged("indexed_note_catalog", || {
+        let root = active_workspace(&state)?;
+        let db = open_db(&root)?;
+        let prefix = prefix
+            .unwrap_or_default()
+            .trim_start_matches('/')
+            .to_string();
+        let mut statement = db.prepare("SELECT path,title,tags,kind,modified_at FROM rs_notes WHERE path LIKE ?1 ORDER BY path LIMIT 10000").map_err(|e| e.to_string())?;
+        let results = statement
+            .query_map([format!("{prefix}%")], |row| {
+                let path: String = row.get(0)?;
+                Ok(IndexedNoteSummary {
+                    name: Path::new(&path)
+                        .file_name()
+                        .and_then(|v| v.to_str())
+                        .unwrap_or(&path)
+                        .to_string(),
+                    path,
+                    title: row.get(1)?,
+                    tags: row
+                        .get::<_, String>(2)?
+                        .split_whitespace()
+                        .map(str::to_string)
+                        .collect(),
+                    kind: row.get(3)?,
+                    modified_at: row.get(4)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(results)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(results)
+    })
 }
 
 #[tauri::command]
@@ -1735,47 +1776,51 @@ pub fn backlinks(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Vec<BacklinkResult>, String> {
-    if !is_safe_relative(&path) {
-        return Err("Invalid note path".into());
-    }
-    let root = active_workspace(&state)?;
-    let db = open_db(&root)?;
-    let stem = path.trim_end_matches(".md");
-    let mut statement=db.prepare("SELECT l.source_path,n.title,l.anchor,l.kind FROM rs_links l JOIN rs_notes n ON n.path=l.source_path WHERE lower(l.target_path)=lower(?1) OR lower(l.target_path)=lower(?2) OR lower(?1) LIKE '%/' || lower(l.target_path) ORDER BY n.title").map_err(|e|e.to_string())?;
-    let results = statement
-        .query_map(params![path, stem], |row| {
-            Ok(BacklinkResult {
-                source_path: row.get(0)?,
-                source_title: row.get(1)?,
-                anchor: row.get(2)?,
-                kind: row.get(3)?,
+    logged("backlinks", || {
+        if !is_safe_relative(&path) {
+            return Err("Invalid note path".into());
+        }
+        let root = active_workspace(&state)?;
+        let db = open_db(&root)?;
+        let stem = path.trim_end_matches(".md");
+        let mut statement=db.prepare("SELECT l.source_path,n.title,l.anchor,l.kind FROM rs_links l JOIN rs_notes n ON n.path=l.source_path WHERE lower(l.target_path)=lower(?1) OR lower(l.target_path)=lower(?2) OR lower(?1) LIKE '%/' || lower(l.target_path) ORDER BY n.title").map_err(|e|e.to_string())?;
+        let results = statement
+            .query_map(params![path, stem], |row| {
+                Ok(BacklinkResult {
+                    source_path: row.get(0)?,
+                    source_title: row.get(1)?,
+                    anchor: row.get(2)?,
+                    kind: row.get(3)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(results)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(results)
+    })
 }
 
 #[tauri::command]
 pub fn list_saved_searches(state: State<'_, Arc<AppState>>) -> Result<Vec<SavedSearch>, String> {
-    let db = open_db(&active_workspace(&state)?)?;
-    let mut statement = db
-        .prepare("SELECT id,name,query,sort_order FROM rs_saved_searches ORDER BY sort_order,name")
-        .map_err(|e| e.to_string())?;
-    let results = statement
-        .query_map([], |row| {
-            Ok(SavedSearch {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                query: row.get(2)?,
-                sort_order: row.get(3)?,
+    logged("list_saved_searches", || {
+        let db = open_db(&active_workspace(&state)?)?;
+        let mut statement = db
+            .prepare("SELECT id,name,query,sort_order FROM rs_saved_searches ORDER BY sort_order,name")
+            .map_err(|e| e.to_string())?;
+        let results = statement
+            .query_map([], |row| {
+                Ok(SavedSearch {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    query: row.get(2)?,
+                    sort_order: row.get(3)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(results)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(results)
+    })
 }
 
 #[tauri::command]
@@ -1784,34 +1829,38 @@ pub fn save_search(
     name: String,
     query: String,
 ) -> Result<SavedSearch, String> {
-    let name = name.trim();
-    if name.is_empty() || query.trim().is_empty() {
-        return Err("Saved searches require a name and query".into());
-    }
-    parse_knowledge_query(&query)?;
-    let db = open_db(&active_workspace(&state)?)?;
-    db.execute("INSERT INTO rs_saved_searches(name,query,sort_order) VALUES(?1,?2,(SELECT coalesce(max(sort_order),-1)+1 FROM rs_saved_searches)) ON CONFLICT(name) DO UPDATE SET query=excluded.query",params![name,query]).map_err(|e|e.to_string())?;
-    db.query_row(
-        "SELECT id,name,query,sort_order FROM rs_saved_searches WHERE name=?1",
-        [name],
-        |row| {
-            Ok(SavedSearch {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                query: row.get(2)?,
-                sort_order: row.get(3)?,
-            })
-        },
-    )
-    .map_err(|e| e.to_string())
+    logged("save_search", || {
+        let name = name.trim();
+        if name.is_empty() || query.trim().is_empty() {
+            return Err("Saved searches require a name and query".into());
+        }
+        parse_knowledge_query(&query)?;
+        let db = open_db(&active_workspace(&state)?)?;
+        db.execute("INSERT INTO rs_saved_searches(name,query,sort_order) VALUES(?1,?2,(SELECT coalesce(max(sort_order),-1)+1 FROM rs_saved_searches)) ON CONFLICT(name) DO UPDATE SET query=excluded.query",params![name,query]).map_err(|e|e.to_string())?;
+        db.query_row(
+            "SELECT id,name,query,sort_order FROM rs_saved_searches WHERE name=?1",
+            [name],
+            |row| {
+                Ok(SavedSearch {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    query: row.get(2)?,
+                    sort_order: row.get(3)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]
 pub fn delete_saved_search(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
-    Ok(open_db(&active_workspace(&state)?)?
-        .execute("DELETE FROM rs_saved_searches WHERE id=?1", [id])
-        .map_err(|e| e.to_string())?
-        > 0)
+    logged("delete_saved_search", || {
+        Ok(open_db(&active_workspace(&state)?)?
+            .execute("DELETE FROM rs_saved_searches WHERE id=?1", [id])
+            .map_err(|e| e.to_string())?
+            > 0)
+    })
 }
 
 #[tauri::command]
@@ -1819,60 +1868,68 @@ pub fn task_files(
     state: State<'_, Arc<AppState>>,
     prefix: Option<String>,
 ) -> Result<Vec<TaskFileResult>, String> {
-    let root = active_workspace(&state)?;
-    let db = open_db(&root)?;
-    let prefix = prefix
-        .unwrap_or_default()
-        .trim_start_matches('/')
-        .to_string();
-    let like_prefix = format!("{prefix}tasks/%");
-    let mut statement = db
-        .prepare("SELECT path, body, modified_at FROM rs_notes WHERE path LIKE ?1 ORDER BY path")
-        .map_err(|e| e.to_string())?;
-    let rows = statement
-        .query_map([like_prefix], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    let mut results = Vec::new();
-    for row in rows {
-        let (indexed_path, content, modified_at) = row.map_err(|e| e.to_string())?;
-        let relative = indexed_path
-            .strip_prefix(&prefix)
-            .unwrap_or(&indexed_path)
-            .trim_start_matches('/');
-        let parts = relative.split('/').collect::<Vec<_>>();
-        let (folder, name, in_working) = match parts.as_slice() {
-            ["tasks", name] if name.ends_with(".md") => ("tasks", *name, false),
-            ["tasks", "working", name] if name.ends_with(".md") => ("tasks", *name, true),
-            _ => continue,
-        };
-        results.push(TaskFileResult {
-            path: relative.to_string(),
-            folder: folder.to_string(),
-            name: name.to_string(),
-            content,
-            modified_at: modified_at.saturating_mul(1000),
-            in_working,
-        });
-    }
-    Ok(results)
+    logged("task_files", || {
+        let root = active_workspace(&state)?;
+        let db = open_db(&root)?;
+        let prefix = prefix
+            .unwrap_or_default()
+            .trim_start_matches('/')
+            .to_string();
+        let like_prefix = format!("{prefix}tasks/%");
+        let mut statement = db
+            .prepare("SELECT path, body, modified_at FROM rs_notes WHERE path LIKE ?1 ORDER BY path")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([like_prefix], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut results = Vec::new();
+        for row in rows {
+            let (indexed_path, content, modified_at) = row.map_err(|e| e.to_string())?;
+            let relative = indexed_path
+                .strip_prefix(&prefix)
+                .unwrap_or(&indexed_path)
+                .trim_start_matches('/');
+            let parts = relative.split('/').collect::<Vec<_>>();
+            let (folder, name, in_working) = match parts.as_slice() {
+                ["tasks", name] if name.ends_with(".md") => ("tasks", *name, false),
+                ["tasks", "working", name] if name.ends_with(".md") => ("tasks", *name, true),
+                _ => continue,
+            };
+            results.push(TaskFileResult {
+                path: relative.to_string(),
+                folder: folder.to_string(),
+                name: name.to_string(),
+                content,
+                modified_at: modified_at.saturating_mul(1000),
+                in_working,
+            });
+        }
+        Ok(results)
+    })
 }
 
 #[tauri::command]
 pub fn reveal_path(state: State<'_, Arc<AppState>>, path: Option<String>) -> Result<(), String> {
-    let root = active_workspace(&state)?;
-    let target = match path {
-        Some(path) => note_path(&root, &path)?,
-        None => root,
-    };
-    tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())
+    logged("reveal_path", || {
+        let root = active_workspace(&state)?;
+        let target = match path {
+            Some(path) => note_path(&root, &path)?,
+            None => root,
+        };
+        tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())
+    })
 }
 
+// Not separately wrapped with logged() — it's a pure pass-through to
+// reveal_path() above, which already logs under its own name; wrapping here
+// too would just double-log the same single failure under two context
+// labels for one user action.
 #[tauri::command]
 pub fn open_workspace_folder(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     reveal_path(state, None)

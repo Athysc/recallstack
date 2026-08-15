@@ -1,3 +1,4 @@
+use crate::error_log::logged;
 use crate::{commands::safety, AppState};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -145,7 +146,9 @@ fn native_entry(workspace: &Path, path: &Path) -> Result<NativeEntry, String> {
 
 #[tauri::command]
 pub fn portable_read_text(name: String) -> Result<Option<String>, String> {
-    portable_read_text_from(&std::env::current_exe().map_err(|e| e.to_string())?, &name)
+    logged("portable_read_text", || {
+        portable_read_text_from(&std::env::current_exe().map_err(|e| e.to_string())?, &name)
+    })
 }
 
 fn portable_read_text_from(executable: &Path, name: &str) -> Result<Option<String>, String> {
@@ -166,24 +169,26 @@ fn portable_read_text_from(executable: &Path, name: &str) -> Result<Option<Strin
 
 #[tauri::command]
 pub fn fs_list(state: State<'_, Arc<AppState>>, path: String) -> Result<Vec<NativeEntry>, String> {
-    let workspace = root(&state)?;
-    let directory = if path.is_empty() {
-        workspace.clone()
-    } else {
-        safe_path(&state, &path)?
-    };
-    let mut entries = fs::read_dir(directory)
-        .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            if entry.file_type().ok()?.is_symlink() {
-                return None;
-            }
-            native_entry(&workspace, &entry.path()).ok()
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
-    Ok(entries)
+    logged("fs_list", || {
+        let workspace = root(&state)?;
+        let directory = if path.is_empty() {
+            workspace.clone()
+        } else {
+            safe_path(&state, &path)?
+        };
+        let mut entries = fs::read_dir(directory)
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                if entry.file_type().ok()?.is_symlink() {
+                    return None;
+                }
+                native_entry(&workspace, &entry.path()).ok()
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
+        Ok(entries)
+    })
 }
 
 fn visible_entry(entry: &DirEntry) -> bool {
@@ -199,22 +204,24 @@ pub fn fs_list_recursive(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Vec<NativeEntry>, String> {
-    let workspace = root(&state)?;
-    let directory = safe_path(&state, &path)?;
-    let mut entries = Vec::new();
-    for item in WalkDir::new(directory)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(visible_entry)
-    {
-        let entry = item.map_err(|error| error.to_string())?;
-        if entry.depth() == 0 || entry.file_type().is_dir() || entry.file_type().is_symlink() {
-            continue;
+    logged("fs_list_recursive", || {
+        let workspace = root(&state)?;
+        let directory = safe_path(&state, &path)?;
+        let mut entries = Vec::new();
+        for item in WalkDir::new(directory)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(visible_entry)
+        {
+            let entry = item.map_err(|error| error.to_string())?;
+            if entry.depth() == 0 || entry.file_type().is_dir() || entry.file_type().is_symlink() {
+                continue;
+            }
+            entries.push(native_entry(&workspace, entry.path())?);
         }
-        entries.push(native_entry(&workspace, entry.path())?);
-    }
-    entries.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(entries)
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(entries)
+    })
 }
 
 fn markdown_asset_references(text: &str, references: &mut BTreeSet<String>) {
@@ -242,28 +249,30 @@ pub fn fs_referenced_assets(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Vec<String>, String> {
-    let directory = safe_path(&state, &path)?;
-    let mut references = BTreeSet::new();
-    let walker = WalkDir::new(directory)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| visible_entry(entry) && entry.file_name() != "assets");
-    for item in walker {
-        let entry = item.map_err(|error| error.to_string())?;
-        if entry.file_type().is_file()
-            && !entry.file_type().is_symlink()
-            && entry
-                .path()
-                .extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
-        {
-            if let Ok(text) = fs::read_to_string(entry.path()) {
-                markdown_asset_references(&text, &mut references);
+    logged("fs_referenced_assets", || {
+        let directory = safe_path(&state, &path)?;
+        let mut references = BTreeSet::new();
+        let walker = WalkDir::new(directory)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|entry| visible_entry(entry) && entry.file_name() != "assets");
+        for item in walker {
+            let entry = item.map_err(|error| error.to_string())?;
+            if entry.file_type().is_file()
+                && !entry.file_type().is_symlink()
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+            {
+                if let Ok(text) = fs::read_to_string(entry.path()) {
+                    markdown_asset_references(&text, &mut references);
+                }
             }
         }
-    }
-    Ok(references.into_iter().collect())
+        Ok(references.into_iter().collect())
+    })
 }
 
 #[tauri::command]
@@ -272,17 +281,19 @@ pub fn fs_rename(
     from: String,
     to: String,
 ) -> Result<NativeEntry, String> {
-    if from.is_empty() || to.is_empty() {
-        return Err("Workspace root cannot be renamed".to_string());
-    }
-    validate_portable_target(&to)?;
-    let workspace = root(&state)?;
-    let source = safe_path(&state, &from)?;
-    let destination = safe_path(&state, &to)?;
-    rename_directory(&source, &destination)?;
-    state.record_internal_write(&from);
-    state.record_internal_write(&to);
-    native_entry(&workspace, &destination)
+    logged("fs_rename", || {
+        if from.is_empty() || to.is_empty() {
+            return Err("Workspace root cannot be renamed".to_string());
+        }
+        validate_portable_target(&to)?;
+        let workspace = root(&state)?;
+        let source = safe_path(&state, &from)?;
+        let destination = safe_path(&state, &to)?;
+        rename_directory(&source, &destination)?;
+        state.record_internal_write(&from);
+        state.record_internal_write(&to);
+        native_entry(&workspace, &destination)
+    })
 }
 
 fn rename_directory(source: &Path, destination: &Path) -> Result<(), String> {
@@ -309,22 +320,28 @@ pub fn fs_stat(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Option<NativeEntry>, String> {
-    let workspace = root(&state)?;
-    let target = safe_path(&state, &path)?;
-    if !target.exists() {
-        return Ok(None);
-    }
-    native_entry(&workspace, &target).map(Some)
+    logged("fs_stat", || {
+        let workspace = root(&state)?;
+        let target = safe_path(&state, &path)?;
+        if !target.exists() {
+            return Ok(None);
+        }
+        native_entry(&workspace, &target).map(Some)
+    })
 }
 
 #[tauri::command]
 pub fn fs_read(state: State<'_, Arc<AppState>>, path: String) -> Result<Vec<u8>, String> {
-    fs::read(safe_path(&state, &path)?).map_err(|e| e.to_string())
+    logged("fs_read", || {
+        fs::read(safe_path(&state, &path)?).map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]
 pub fn fs_read_text(state: State<'_, Arc<AppState>>, path: String) -> Result<String, String> {
-    fs::read_to_string(safe_path(&state, &path)?).map_err(|e| e.to_string())
+    logged("fs_read_text", || {
+        fs::read_to_string(safe_path(&state, &path)?).map_err(|e| e.to_string())
+    })
 }
 
 #[derive(Serialize)]
@@ -339,20 +356,22 @@ pub fn fs_read_text_versioned(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<VersionedText, String> {
-    let workspace = root(&state)?;
-    let target = safe_path(&state, &path)?;
-    for _ in 0..2 {
-        let before = native_entry(&workspace, &target)?.version;
-        let text = fs::read_to_string(&target).map_err(|e| e.to_string())?;
-        let after = native_entry(&workspace, &target)?.version;
-        if before == after {
-            return Ok(VersionedText {
-                text,
-                version: after,
-            });
+    logged("fs_read_text_versioned", || {
+        let workspace = root(&state)?;
+        let target = safe_path(&state, &path)?;
+        for _ in 0..2 {
+            let before = native_entry(&workspace, &target)?.version;
+            let text = fs::read_to_string(&target).map_err(|e| e.to_string())?;
+            let after = native_entry(&workspace, &target)?.version;
+            if before == after {
+                return Ok(VersionedText {
+                    text,
+                    version: after,
+                });
+            }
         }
-    }
-    Err("The file changed while it was being read; try opening it again".to_string())
+        Err("The file changed while it was being read; try opening it again".to_string())
+    })
 }
 
 #[tauri::command]
@@ -362,17 +381,19 @@ pub fn fs_write(
     path: String,
     bytes: Vec<u8>,
 ) -> Result<(), String> {
-    validate_portable_target(&path)?;
-    let target = safe_path(&state, &path)?;
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let workspace = root(&state)?;
-    let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
-    record_internal_write(&state, &target)?;
-    let started = std::time::Instant::now();
-    safety::atomic_write(&target, &bytes)?;
-    record_internal_write_timed(&state, &target, started.elapsed())
+    logged("fs_write", || {
+        validate_portable_target(&path)?;
+        let target = safe_path(&state, &path)?;
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let workspace = root(&state)?;
+        let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
+        record_internal_write(&state, &target)?;
+        let started = std::time::Instant::now();
+        safety::atomic_write(&target, &bytes)?;
+        record_internal_write_timed(&state, &target, started.elapsed())
+    })
 }
 
 #[tauri::command]
@@ -382,17 +403,19 @@ pub fn fs_write_text(
     path: String,
     text: String,
 ) -> Result<(), String> {
-    validate_portable_target(&path)?;
-    let target = safe_path(&state, &path)?;
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let workspace = root(&state)?;
-    let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
-    record_internal_write(&state, &target)?;
-    let started = std::time::Instant::now();
-    safety::atomic_write(&target, text.as_bytes())?;
-    record_internal_write_timed(&state, &target, started.elapsed())
+    logged("fs_write_text", || {
+        validate_portable_target(&path)?;
+        let target = safe_path(&state, &path)?;
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let workspace = root(&state)?;
+        let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
+        record_internal_write(&state, &target)?;
+        let started = std::time::Instant::now();
+        safety::atomic_write(&target, text.as_bytes())?;
+        record_internal_write_timed(&state, &target, started.elapsed())
+    })
 }
 
 #[tauri::command]
@@ -403,34 +426,38 @@ pub fn fs_write_text_versioned(
     text: String,
     expected_version: Option<String>,
 ) -> Result<String, String> {
-    validate_portable_target(&path)?;
-    let workspace = root(&state)?;
-    let target = safe_path(&state, &path)?;
-    if let Some(expected) = expected_version {
-        if target.exists() {
-            let current = native_entry(&workspace, &target)?.version;
-            if current != expected {
-                return Err("The file changed on disk after it was opened".to_string());
+    logged("fs_write_text_versioned", || {
+        validate_portable_target(&path)?;
+        let workspace = root(&state)?;
+        let target = safe_path(&state, &path)?;
+        if let Some(expected) = expected_version {
+            if target.exists() {
+                let current = native_entry(&workspace, &target)?.version;
+                if current != expected {
+                    return Err("The file changed on disk after it was opened".to_string());
+                }
             }
         }
-    }
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
-    record_internal_write(&state, &target)?;
-    let started = std::time::Instant::now();
-    safety::atomic_write(&target, text.as_bytes())?;
-    record_internal_write_timed(&state, &target, started.elapsed())?;
-    Ok(native_entry(&workspace, &target)?.version)
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
+        record_internal_write(&state, &target)?;
+        let started = std::time::Instant::now();
+        safety::atomic_write(&target, text.as_bytes())?;
+        record_internal_write_timed(&state, &target, started.elapsed())?;
+        Ok(native_entry(&workspace, &target)?.version)
+    })
 }
 
 #[tauri::command]
 pub fn fs_create_dir(state: State<'_, Arc<AppState>>, path: String) -> Result<(), String> {
-    validate_portable_target(&path)?;
-    let target = safe_path(&state, &path)?;
-    record_internal_write(&state, &target)?;
-    fs::create_dir_all(target).map_err(|e| e.to_string())
+    logged("fs_create_dir", || {
+        validate_portable_target(&path)?;
+        let target = safe_path(&state, &path)?;
+        record_internal_write(&state, &target)?;
+        fs::create_dir_all(target).map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]
@@ -440,13 +467,15 @@ pub fn fs_remove(
     path: String,
     recursive: bool,
 ) -> Result<safety::MutationResult, String> {
-    let _ = recursive;
-    safety::trash_workspace_path(&app, &state, &path)
+    logged("fs_remove", || {
+        let _ = recursive;
+        safety::trash_workspace_path(&app, &state, &path)
+    })
 }
 
 #[tauri::command]
 pub fn fs_exists(state: State<'_, Arc<AppState>>, path: String) -> Result<bool, String> {
-    Ok(safe_path(&state, &path)?.exists())
+    logged("fs_exists", || Ok(safe_path(&state, &path)?.exists()))
 }
 
 // ── External file access (Open / Import Files) ─────────────────────────────
@@ -529,29 +558,33 @@ pub struct ExternalFileInfo {
 
 #[tauri::command]
 pub fn external_fs_stat(path: String) -> Result<ExternalFileInfo, String> {
-    let candidate = validate_external_file(&path)?;
-    let metadata = fs::metadata(&candidate).map_err(|e| e.to_string())?;
-    let modified_at = metadata
-        .modified()
-        .map_err(|e| e.to_string())?
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_millis() as u64;
-    Ok(ExternalFileInfo {
-        name: candidate
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default()
-            .to_string(),
-        size: metadata.len(),
-        modified_at,
+    logged("external_fs_stat", || {
+        let candidate = validate_external_file(&path)?;
+        let metadata = fs::metadata(&candidate).map_err(|e| e.to_string())?;
+        let modified_at = metadata
+            .modified()
+            .map_err(|e| e.to_string())?
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_millis() as u64;
+        Ok(ExternalFileInfo {
+            name: candidate
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_string(),
+            size: metadata.len(),
+            modified_at,
+        })
     })
 }
 
 #[tauri::command]
 pub fn external_fs_read_text(path: String) -> Result<String, String> {
-    let candidate = validate_external_file(&path)?;
-    fs::read_to_string(candidate).map_err(|e| e.to_string())
+    logged("external_fs_read_text", || {
+        let candidate = validate_external_file(&path)?;
+        fs::read_to_string(candidate).map_err(|e| e.to_string())
+    })
 }
 
 // Binary counterpart to external_fs_read_text — used for external assets
@@ -561,14 +594,18 @@ pub fn external_fs_read_text(path: String) -> Result<String, String> {
 // just against validate_external_file's trust boundary instead of safe_path.
 #[tauri::command]
 pub fn external_fs_read(path: String) -> Result<Vec<u8>, String> {
-    let candidate = validate_external_file(&path)?;
-    fs::read(candidate).map_err(|e| e.to_string())
+    logged("external_fs_read", || {
+        let candidate = validate_external_file(&path)?;
+        fs::read(candidate).map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]
 pub fn external_fs_write_text(path: String, text: String) -> Result<(), String> {
-    let candidate = validate_external_file(&path)?;
-    safety::atomic_write(&candidate, text.as_bytes())
+    logged("external_fs_write_text", || {
+        let candidate = validate_external_file(&path)?;
+        safety::atomic_write(&candidate, text.as_bytes())
+    })
 }
 
 // ── External directory access (Outputs folder) ──────────────────────────────
@@ -616,18 +653,24 @@ fn list_external_directory_recursive(directory: &Path) -> Result<Vec<NativeEntry
 
 #[tauri::command]
 pub fn external_fs_list(path: String) -> Result<Vec<NativeEntry>, String> {
-    list_external_directory(&validate_external_directory(&path)?)
+    logged("external_fs_list", || {
+        list_external_directory(&validate_external_directory(&path)?)
+    })
 }
 
 #[tauri::command]
 pub fn external_fs_list_recursive(path: String) -> Result<Vec<NativeEntry>, String> {
-    list_external_directory_recursive(&validate_external_directory(&path)?)
+    logged("external_fs_list_recursive", || {
+        list_external_directory_recursive(&validate_external_directory(&path)?)
+    })
 }
 
 #[tauri::command]
 pub fn external_fs_remove(path: String) -> Result<(), String> {
-    let candidate = validate_external_file(&path)?;
-    fs::remove_file(candidate).map_err(|e| e.to_string())
+    logged("external_fs_remove", || {
+        let candidate = validate_external_file(&path)?;
+        fs::remove_file(candidate).map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]

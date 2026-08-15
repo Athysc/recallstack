@@ -1,4 +1,5 @@
 mod commands;
+mod error_log;
 
 use commands::{backup, bridge, health, safety, workspace};
 use parking_lot::Mutex;
@@ -161,6 +162,23 @@ impl AppState {
 }
 
 pub fn run() {
+    // Always on, independent of the e2e-only tracing subscriber below: logs
+    // a Rust panic to today's daily error log beside the executable before
+    // running Rust's own default hook. Without this a panic in a portable
+    // release build (Windows release builds are GUI-subsystem, see
+    // main.rs — no attached console at all) would be completely invisible.
+    // See task_20260815_0003.
+    error_log::install_panic_hook();
+
+    // e2e-only: without a `tracing` subscriber, tauri-plugin-wdio-webdriver's
+    // startup/bind errors (tracing::error! in its embedded server thread) go
+    // nowhere — see the tracing-subscriber dependency comment in Cargo.toml
+    // and task_20260815_0002. Stdout is what CI actually captures per-step,
+    // independent of whether @wdio/tauri-service's own captureBackendLogs
+    // log-scraping recognizes the format.
+    #[cfg(feature = "e2e")]
+    tracing_subscriber::fmt().with_writer(std::io::stdout).init();
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())

@@ -1,3 +1,4 @@
+use crate::error_log::logged;
 use crate::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -129,6 +130,23 @@ fn audit(app: &AppHandle, root: &Path, result: &MutationResult) -> Result<(), St
     file.write_all(b"\n").map_err(|error| error.to_string())
 }
 
+// audit() is a best-effort diagnostic trail (appends to mutations.jsonl), not
+// part of the mutation it's called after — trash_workspace_path()/
+// restore_trash()/restore_version() all call it as their very last step,
+// once the real filesystem move/write has already completed successfully.
+// Propagating an audit-log I/O failure with `?` at that point (the previous
+// behavior) turns an already-successful trash/restore into a reported
+// failure for the caller — see task_20260815_0001, where this was the most
+// concrete match found for RecallStack reporting a delete as failed with a
+// filesystem-ish error even though the file really had already been moved to
+// Trash. Log and continue instead: the operation's own success/failure must
+// be judged by the real mutation, not by whether we could also log it.
+fn audit_best_effort(app: &AppHandle, root: &Path, result: &MutationResult) {
+    if let Err(error) = audit(app, root, result) {
+        eprintln!("Warning: could not append audit log entry for {}: {error}", result.operation_id);
+    }
+}
+
 fn directory_size(path: &Path) -> u64 {
     if path.is_file() {
         return fs::metadata(path)
@@ -223,7 +241,7 @@ pub fn trash_workspace_path(
         }),
         warnings: Vec::new(),
     };
-    audit(app, &root, &result)?;
+    audit_best_effort(app, &root, &result);
     Ok(result)
 }
 
@@ -233,7 +251,7 @@ pub fn trash_path(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<MutationResult, String> {
-    trash_workspace_path(&app, &state, &path)
+    logged("trash_path", || trash_workspace_path(&app, &state, &path))
 }
 
 fn read_trash_record(entry: &Path) -> Result<TrashRecord, String> {
@@ -245,17 +263,19 @@ fn read_trash_record(entry: &Path) -> Result<TrashRecord, String> {
 
 #[tauri::command]
 pub fn list_trash(state: State<'_, Arc<AppState>>) -> Result<Vec<TrashRecord>, String> {
-    let directory = workspace(&state)?.join("Data").join(TRASH_DIRECTORY);
-    if !directory.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut records = fs::read_dir(directory)
-        .map_err(|error| error.to_string())?
-        .filter_map(Result::ok)
-        .filter_map(|entry| read_trash_record(&entry.path()).ok())
-        .collect::<Vec<_>>();
-    records.sort_by(|left, right| right.deleted_at.cmp(&left.deleted_at));
-    Ok(records)
+    logged("list_trash", || {
+        let directory = workspace(&state)?.join("Data").join(TRASH_DIRECTORY);
+        if !directory.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut records = fs::read_dir(directory)
+            .map_err(|error| error.to_string())?
+            .filter_map(Result::ok)
+            .filter_map(|entry| read_trash_record(&entry.path()).ok())
+            .collect::<Vec<_>>();
+        records.sort_by(|left, right| right.deleted_at.cmp(&left.deleted_at));
+        Ok(records)
+    })
 }
 
 #[tauri::command]
@@ -265,43 +285,47 @@ pub fn restore_trash(
     id: String,
     restore_as: Option<String>,
 ) -> Result<MutationResult, String> {
-    validate_relative(&id)?;
-    let root = workspace(&state)?;
-    let entry = root.join("Data").join(TRASH_DIRECTORY).join(&id);
-    let record = read_trash_record(&entry)?;
-    let relative = restore_as.unwrap_or_else(|| record.original_path.clone());
-    let destination = workspace_target(&root, &relative)?;
-    if destination.exists() {
-        return Err("The restore destination already exists; choose Restore As".to_string());
-    }
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    fs::rename(entry.join("payload"), &destination).map_err(|error| error.to_string())?;
-    fs::remove_dir_all(&entry).map_err(|error| error.to_string())?;
-    state.record_internal_write(&relative);
-    let operation_id = operation_id("restore");
-    let result = MutationResult {
-        operation_id,
-        changed: vec![relative],
-        recovery: None,
-        warnings: Vec::new(),
-    };
-    audit(&app, &root, &result)?;
-    Ok(result)
+    logged("restore_trash", || {
+        validate_relative(&id)?;
+        let root = workspace(&state)?;
+        let entry = root.join("Data").join(TRASH_DIRECTORY).join(&id);
+        let record = read_trash_record(&entry)?;
+        let relative = restore_as.unwrap_or_else(|| record.original_path.clone());
+        let destination = workspace_target(&root, &relative)?;
+        if destination.exists() {
+            return Err("The restore destination already exists; choose Restore As".to_string());
+        }
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::rename(entry.join("payload"), &destination).map_err(|error| error.to_string())?;
+        fs::remove_dir_all(&entry).map_err(|error| error.to_string())?;
+        state.record_internal_write(&relative);
+        let operation_id = operation_id("restore");
+        let result = MutationResult {
+            operation_id,
+            changed: vec![relative],
+            recovery: None,
+            warnings: Vec::new(),
+        };
+        audit_best_effort(&app, &root, &result);
+        Ok(result)
+    })
 }
 
 #[tauri::command]
 pub fn empty_trash(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
-    let directory = workspace(&state)?.join("Data").join(TRASH_DIRECTORY);
-    if !directory.is_dir() {
-        return Ok(0);
-    }
-    let count = fs::read_dir(&directory)
-        .map_err(|error| error.to_string())?
-        .count();
-    fs::remove_dir_all(directory).map_err(|error| error.to_string())?;
-    Ok(count)
+    logged("empty_trash", || {
+        let directory = workspace(&state)?.join("Data").join(TRASH_DIRECTORY);
+        if !directory.is_dir() {
+            return Ok(0);
+        }
+        let count = fs::read_dir(&directory)
+            .map_err(|error| error.to_string())?
+            .count();
+        fs::remove_dir_all(directory).map_err(|error| error.to_string())?;
+        Ok(count)
+    })
 }
 
 fn version_directory(app: &AppHandle, root: &Path, id: &str) -> Result<PathBuf, String> {
@@ -417,20 +441,22 @@ pub fn list_versions(
     state: State<'_, Arc<AppState>>,
     path: Option<String>,
 ) -> Result<Vec<VersionRecord>, String> {
-    let root = workspace(&state)?;
-    let directory = app_safety_root(&app, &root)?.join("versions");
-    if !directory.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut records = fs::read_dir(directory)
-        .map_err(|error| error.to_string())?
-        .filter_map(Result::ok)
-        .filter_map(|entry| fs::read(entry.path().join("metadata.json")).ok())
-        .filter_map(|bytes| serde_json::from_slice::<VersionRecord>(&bytes).ok())
-        .filter(|record| path.as_ref().is_none_or(|path| &record.path == path))
-        .collect::<Vec<_>>();
-    records.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-    Ok(records)
+    logged("list_versions", || {
+        let root = workspace(&state)?;
+        let directory = app_safety_root(&app, &root)?.join("versions");
+        if !directory.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut records = fs::read_dir(directory)
+            .map_err(|error| error.to_string())?
+            .filter_map(Result::ok)
+            .filter_map(|entry| fs::read(entry.path().join("metadata.json")).ok())
+            .filter_map(|bytes| serde_json::from_slice::<VersionRecord>(&bytes).ok())
+            .filter(|record| path.as_ref().is_none_or(|path| &record.path == path))
+            .collect::<Vec<_>>();
+        records.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        Ok(records)
+    })
 }
 
 #[tauri::command]
@@ -439,31 +465,33 @@ pub fn restore_version(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<MutationResult, String> {
-    validate_relative(&id)?;
-    let root = workspace(&state)?;
-    let directory = version_directory(&app, &root, &id)?;
-    let record: VersionRecord = serde_json::from_slice(
-        &fs::read(directory.join("metadata.json")).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    let target = workspace_target(&root, &record.path)?;
-    let _ = preserve_version(&app, &root, &target, &record.path)?;
-    atomic_write(
-        &target,
-        &fs::read(directory.join("payload")).map_err(|error| error.to_string())?,
-    )?;
-    state.record_internal_write(&record.path);
-    let result = MutationResult {
-        operation_id: operation_id("version-restore"),
-        changed: vec![record.path],
-        recovery: Some(RecoveryReference {
-            kind: "version".into(),
-            id,
-        }),
-        warnings: Vec::new(),
-    };
-    audit(&app, &root, &result)?;
-    Ok(result)
+    logged("restore_version", || {
+        validate_relative(&id)?;
+        let root = workspace(&state)?;
+        let directory = version_directory(&app, &root, &id)?;
+        let record: VersionRecord = serde_json::from_slice(
+            &fs::read(directory.join("metadata.json")).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        let target = workspace_target(&root, &record.path)?;
+        let _ = preserve_version(&app, &root, &target, &record.path)?;
+        atomic_write(
+            &target,
+            &fs::read(directory.join("payload")).map_err(|error| error.to_string())?,
+        )?;
+        state.record_internal_write(&record.path);
+        let result = MutationResult {
+            operation_id: operation_id("version-restore"),
+            changed: vec![record.path],
+            recovery: Some(RecoveryReference {
+                kind: "version".into(),
+                id,
+            }),
+            warnings: Vec::new(),
+        };
+        audit_best_effort(&app, &root, &result);
+        Ok(result)
+    })
 }
 
 fn draft_path(app: &AppHandle, root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -485,19 +513,21 @@ pub fn save_draft(
     path: String,
     text: String,
 ) -> Result<(), String> {
-    let root = workspace(&state)?;
-    let destination = draft_path(&app, &root, &path)?;
-    fs::create_dir_all(destination.parent().expect("draft has parent"))
-        .map_err(|error| error.to_string())?;
-    atomic_write(
-        &destination,
-        &serde_json::to_vec(&DraftRecord {
-            path,
-            text,
-            saved_at: Utc::now().to_rfc3339(),
-        })
-        .map_err(|error| error.to_string())?,
-    )
+    logged("save_draft", || {
+        let root = workspace(&state)?;
+        let destination = draft_path(&app, &root, &path)?;
+        fs::create_dir_all(destination.parent().expect("draft has parent"))
+            .map_err(|error| error.to_string())?;
+        atomic_write(
+            &destination,
+            &serde_json::to_vec(&DraftRecord {
+                path,
+                text,
+                saved_at: Utc::now().to_rfc3339(),
+            })
+            .map_err(|error| error.to_string())?,
+        )
+    })
 }
 
 #[tauri::command]
@@ -506,15 +536,17 @@ pub fn load_draft(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Option<String>, String> {
-    let root = workspace(&state)?;
-    let source = draft_path(&app, &root, &path)?;
-    if !source.is_file() {
-        return Ok(None);
-    }
-    let record: DraftRecord =
-        serde_json::from_slice(&fs::read(source).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?;
-    Ok((record.path == path).then_some(record.text))
+    logged("load_draft", || {
+        let root = workspace(&state)?;
+        let source = draft_path(&app, &root, &path)?;
+        if !source.is_file() {
+            return Ok(None);
+        }
+        let record: DraftRecord =
+            serde_json::from_slice(&fs::read(source).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+        Ok((record.path == path).then_some(record.text))
+    })
 }
 
 #[tauri::command]
@@ -523,12 +555,14 @@ pub fn clear_draft(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<(), String> {
-    let root = workspace(&state)?;
-    let source = draft_path(&app, &root, &path)?;
-    if source.exists() {
-        fs::remove_file(source).map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    logged("clear_draft", || {
+        let root = workspace(&state)?;
+        let source = draft_path(&app, &root, &path)?;
+        if source.exists() {
+            fs::remove_file(source).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    })
 }
 
 #[cfg(test)]

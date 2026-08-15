@@ -28,6 +28,19 @@ export const config = {
     driverProvider: "embedded",
     embeddedPort: 4445,
     captureBackendLogs: true,
+    // tauri-plugin-wdio-webdriver's embedded server binds its own OS thread
+    // and a fresh Tokio runtime (see server::start() in that crate) rather
+    // than signalling readiness back to the plugin's setup() hook
+    // synchronously, so the first /status poll can race a slow/busy CI host
+    // (a just-linked release binary's very first launch, disk contention,
+    // etc.). @wdio/tauri-service's own docs call this out explicitly under
+    // statusPollTimeout: "a healthy-but-busy server may miss the default
+    // deadline and trigger a false-positive restart" — default is 2000ms,
+    // which this repo's CI runs (both GitHub-hosted Windows and Linux
+    // release-artifacts.yml jobs, and the frontend-e2e.yml Linux job) have
+    // observed exactly that failure signature against: a WebDriver timeout
+    // on the very first command. See task_20260815_0002.
+    statusPollTimeout: 15_000,
   }]],
   reporters: ["spec"],
   framework: "mocha",

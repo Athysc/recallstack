@@ -1,3 +1,4 @@
+use crate::error_log::logged;
 use crate::AppState;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -186,55 +187,57 @@ fn scan_workspace_links(data: &Path) -> Result<WorkspaceLinkScan, String> {
 
 #[tauri::command]
 pub fn check_workspace(state: State<'_, Arc<AppState>>) -> Result<HealthReport, String> {
-    let root = state
-        .workspace
-        .lock()
-        .clone()
-        .ok_or_else(|| "No workspace is open".to_string())?;
-    let data = root.join("Data");
-    let (notes, assets, references) = scan_workspace_links(&data)?;
-    let broken_links: Vec<String> = references
-        .iter()
-        .filter(|link| !link.is_empty() && !data.join(link).exists())
-        .cloned()
-        .collect();
-    let orphan_assets: Vec<String> = assets
-        .iter()
-        .filter(|asset| !references.contains(*asset))
-        .cloned()
-        .collect();
-    let mut findings = broken_links
-        .iter()
-        .map(|path| HealthFinding {
-            severity: "error".into(),
-            code: "broken-link".into(),
-            path: Some(path.clone()),
-            message: "Link target does not exist".into(),
-        })
-        .collect::<Vec<_>>();
-    findings.extend(orphan_assets.iter().map(|path| HealthFinding {
-        severity: "warning".into(),
-        code: "orphan-asset".into(),
-        path: Some(path.clone()),
-        message: "Asset is not referenced by a Markdown file".into(),
-    }));
-    let watcher = state.watcher_health.lock().clone();
-    if watcher != "running" {
-        findings.push(HealthFinding {
+    logged("check_workspace", || {
+        let root = state
+            .workspace
+            .lock()
+            .clone()
+            .ok_or_else(|| "No workspace is open".to_string())?;
+        let data = root.join("Data");
+        let (notes, assets, references) = scan_workspace_links(&data)?;
+        let broken_links: Vec<String> = references
+            .iter()
+            .filter(|link| !link.is_empty() && !data.join(link).exists())
+            .cloned()
+            .collect();
+        let orphan_assets: Vec<String> = assets
+            .iter()
+            .filter(|asset| !references.contains(*asset))
+            .cloned()
+            .collect();
+        let mut findings = broken_links
+            .iter()
+            .map(|path| HealthFinding {
+                severity: "error".into(),
+                code: "broken-link".into(),
+                path: Some(path.clone()),
+                message: "Link target does not exist".into(),
+            })
+            .collect::<Vec<_>>();
+        findings.extend(orphan_assets.iter().map(|path| HealthFinding {
             severity: "warning".into(),
-            code: "watcher".into(),
-            path: None,
-            message: format!("Filesystem watcher: {watcher}"),
-        });
-    }
-    let git = git_status_for(&root);
-    Ok(HealthReport {
-        notes: notes.len(),
-        broken_links,
-        orphan_assets,
-        watcher,
-        findings,
-        git,
+            code: "orphan-asset".into(),
+            path: Some(path.clone()),
+            message: "Asset is not referenced by a Markdown file".into(),
+        }));
+        let watcher = state.watcher_health.lock().clone();
+        if watcher != "running" {
+            findings.push(HealthFinding {
+                severity: "warning".into(),
+                code: "watcher".into(),
+                path: None,
+                message: format!("Filesystem watcher: {watcher}"),
+            });
+        }
+        let git = git_status_for(&root);
+        Ok(HealthReport {
+            notes: notes.len(),
+            broken_links,
+            orphan_assets,
+            watcher,
+            findings,
+            git,
+        })
     })
 }
 
@@ -286,10 +289,12 @@ mod tests {
 
 #[tauri::command]
 pub fn git_status(state: State<'_, Arc<AppState>>) -> Result<GitStatus, String> {
-    let root = state
-        .workspace
-        .lock()
-        .clone()
-        .ok_or_else(|| "No workspace is open".to_string())?;
-    Ok(git_status_for(&root))
+    logged("git_status", || {
+        let root = state
+            .workspace
+            .lock()
+            .clone()
+            .ok_or_else(|| "No workspace is open".to_string())?;
+        Ok(git_status_for(&root))
+    })
 }

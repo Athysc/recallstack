@@ -1,3 +1,4 @@
+use crate::error_log::{logged, logged_async};
 use crate::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -198,45 +199,48 @@ pub async fn backup_workspace(
     destination: Option<String>,
     include_cache: Option<bool>,
 ) -> Result<BackupResult, String> {
-    let root = workspace(&state)?;
-    let app_state = Arc::clone(state.inner());
-    app_state.backup_cancel.store(false, Ordering::SeqCst);
-    let destination = if let Some(value) = destination {
-        PathBuf::from(value)
-    } else {
-        app.path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("backups")
-            .join(format!(
-                "recallstack-{}.zip",
-                Utc::now().format("%Y%m%d-%H%M%S")
-            ))
-    };
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = create_backup(
-            &root,
-            &destination,
-            include_cache.unwrap_or(false),
-            || app_state.backup_cancel.load(Ordering::SeqCst),
-            |completed, total, path| {
-                let _ = app.emit(
-                    "backup://progress",
-                    BackupProgress {
-                        completed,
-                        total,
-                        path: path.to_string(),
-                    },
-                );
-            },
-        )?;
-        Ok(BackupResult {
-            verified: verify_backup_file(&destination)?.verified,
-            ..result
+    logged_async("backup_workspace", async {
+        let root = workspace(&state)?;
+        let app_state = Arc::clone(state.inner());
+        app_state.backup_cancel.store(false, Ordering::SeqCst);
+        let destination = if let Some(value) = destination {
+            PathBuf::from(value)
+        } else {
+            app.path()
+                .app_data_dir()
+                .map_err(|error| error.to_string())?
+                .join("backups")
+                .join(format!(
+                    "recallstack-{}.zip",
+                    Utc::now().format("%Y%m%d-%H%M%S")
+                ))
+        };
+        tauri::async_runtime::spawn_blocking(move || {
+            let result = create_backup(
+                &root,
+                &destination,
+                include_cache.unwrap_or(false),
+                || app_state.backup_cancel.load(Ordering::SeqCst),
+                |completed, total, path| {
+                    let _ = app.emit(
+                        "backup://progress",
+                        BackupProgress {
+                            completed,
+                            total,
+                            path: path.to_string(),
+                        },
+                    );
+                },
+            )?;
+            Ok(BackupResult {
+                verified: verify_backup_file(&destination)?.verified,
+                ..result
+            })
         })
+        .await
+        .map_err(|error| error.to_string())?
     })
     .await
-    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -305,7 +309,7 @@ fn verify_backup_file(path: &Path) -> Result<BackupVerification, String> {
 
 #[tauri::command]
 pub fn verify_backup(path: String) -> Result<BackupVerification, String> {
-    verify_backup_file(Path::new(&path))
+    logged("verify_backup", || verify_backup_file(Path::new(&path)))
 }
 
 #[tauri::command]
@@ -313,48 +317,50 @@ pub fn restore_backup_dry_run(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<RestoreDryRun, String> {
-    let root = workspace(&state)?;
-    let verification = verify_backup_file(Path::new(&path))?;
-    if !verification.verified {
-        return Err(format!(
-            "Backup verification failed: {}",
-            verification.errors.join("; ")
-        ));
-    }
-    let file = File::open(&path).map_err(|error| error.to_string())?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-    let manifest: BackupManifest = {
-        let mut entry = archive
-            .by_name("recallstack-manifest.json")
-            .map_err(|_| "Backup manifest is missing".to_string())?;
-        let mut bytes = Vec::new();
-        entry
-            .read_to_end(&mut bytes)
-            .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?
-    };
-    let mut conflicts = Vec::new();
-    for entry in &manifest.files {
-        let relative = Path::new(&entry.path);
-        if relative.is_absolute()
-            || relative
-                .components()
-                .any(|part| !matches!(part, std::path::Component::Normal(_)))
-        {
-            return Err(format!("Unsafe path in backup manifest: {}", entry.path));
+    logged("restore_backup_dry_run", || {
+        let root = workspace(&state)?;
+        let verification = verify_backup_file(Path::new(&path))?;
+        if !verification.verified {
+            return Err(format!(
+                "Backup verification failed: {}",
+                verification.errors.join("; ")
+            ));
         }
-        if root.join(relative).exists() {
-            conflicts.push(entry.path.clone());
+        let file = File::open(&path).map_err(|error| error.to_string())?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+        let manifest: BackupManifest = {
+            let mut entry = archive
+                .by_name("recallstack-manifest.json")
+                .map_err(|_| "Backup manifest is missing".to_string())?;
+            let mut bytes = Vec::new();
+            entry
+                .read_to_end(&mut bytes)
+                .map_err(|error| error.to_string())?;
+            serde_json::from_slice(&bytes).map_err(|error| error.to_string())?
+        };
+        let mut conflicts = Vec::new();
+        for entry in &manifest.files {
+            let relative = Path::new(&entry.path);
+            if relative.is_absolute()
+                || relative
+                    .components()
+                    .any(|part| !matches!(part, std::path::Component::Normal(_)))
+            {
+                return Err(format!("Unsafe path in backup manifest: {}", entry.path));
+            }
+            if root.join(relative).exists() {
+                conflicts.push(entry.path.clone());
+            }
         }
-    }
-    let mut warnings = Vec::new();
-    if manifest.workspace_id != workspace_id(&root) {
-        warnings.push("Backup was created from a different workspace".into());
-    }
-    Ok(RestoreDryRun {
-        files: manifest.files.len(),
-        conflicts,
-        warnings,
+        let mut warnings = Vec::new();
+        if manifest.workspace_id != workspace_id(&root) {
+            warnings.push("Backup was created from a different workspace".into());
+        }
+        Ok(RestoreDryRun {
+            files: manifest.files.len(),
+            conflicts,
+            warnings,
+        })
     })
 }
 

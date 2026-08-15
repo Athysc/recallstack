@@ -7,7 +7,7 @@ license-file = "../LICENSE"
 edition = "2021"
 
 [features]
-e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
+e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver", "dep:tracing-subscriber"]
 
 [lib]
 name = "recallstack_lib"
@@ -32,6 +32,21 @@ tauri-plugin-opener = "2"
 tauri-plugin-wdio = { version = "1", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 thiserror = "2"
+# e2e-only: tauri-plugin-wdio-webdriver's embedded WebDriver server reports
+# startup/bind failures exclusively via `tracing::error!` (see its
+# src/server/mod.rs) with no fallback — without a subscriber those events are
+# silently dropped. Nothing in this app installs one otherwise, so CI runs
+# that hit "the embedded server never comes up" (task_20260815_0002) have no
+# way to show *why*. Gated to the e2e feature only — zero effect on
+# production builds. default-features off, and "tracing-log" deliberately
+# left out: that feature would additionally claim the `log` crate's global
+# logger slot to bridge log->tracing, but tauri-plugin-wdio's own log
+# forwarding (for @wdio/tauri-service's captureBackendLogs) already installs
+# its own `log` logger on startup — confirmed locally that enabling
+# tracing-log makes that install fail ("Failed to set global logger").
+# tauri-plugin-wdio-webdriver's own diagnostics go through `tracing`
+# directly, not the `log` crate, so this subscriber doesn't need that bridge.
+tracing-subscriber = { version = "0.3", optional = true, default-features = false, features = ["fmt", "ansi", "std"] }
 walkdir = "2"
 zip = { version = "4", default-features = false, features = ["deflate"] }
 
