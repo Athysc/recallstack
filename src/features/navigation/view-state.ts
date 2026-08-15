@@ -45,6 +45,31 @@ export function createCurrentViewStore(initial?: Partial<CurrentViewState>) {
   };
 }
 
+// Mirrors the branch order reloadActiveList() in recallstack-runtime.ts uses
+// to decide which render function to re-invoke after something like a
+// sort-mode change. Extracted as a pure function so the *dispatch* itself has
+// direct unit-test coverage, not just each render call in isolation — the
+// Outputs sort-buttons bug (reloadActiveList() had no branch for
+// outputsMode at all, so toggling sort while viewing Outputs updated the
+// button state but never re-rendered the file grid) was exactly a missing
+// case here.
+export type ListReloadMode = "all-tasks" | "outputs" | "folder" | "none";
+
+export interface ListReloadState {
+  allTasksMode: boolean;
+  outputsMode: boolean;
+  outputsActiveFolder: unknown;
+  l1Active: unknown;
+  l2Active: unknown;
+}
+
+export function listReloadMode(state: ListReloadState): ListReloadMode {
+  if (state.allTasksMode) return "all-tasks";
+  if (state.outputsMode) return state.outputsActiveFolder ? "outputs" : "none";
+  if (state.l2Active || state.l1Active) return "folder";
+  return "none";
+}
+
 export interface LastFolderView {
   l1: string;
   l2: string | null;

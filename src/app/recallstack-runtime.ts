@@ -63,7 +63,7 @@ import {
   setActiveNavigation,
   syncNavModeButtons,
 } from "../features/navigation/dom";
-import { createCurrentViewStore, parseLastFolderView, serializeLastFolderView } from "../features/navigation/view-state";
+import { createCurrentViewStore, listReloadMode, parseLastFolderView, serializeLastFolderView } from "../features/navigation/view-state";
 import {
   discoverWorkspaces,
   readWorkspaceNavigationPreferences,
@@ -5481,10 +5481,11 @@ type TaskLocation = {
   });
 
   async function reloadActiveList() {
-    if (allTasksMode) {
-      await loadAllTasks();
-    } else if (l2Active || l1Active) {
-      await loadFiles(activeDirHandle(), activeFolderHeading());
+    switch (listReloadMode({ allTasksMode, outputsMode, outputsActiveFolder, l1Active, l2Active })) {
+      case "all-tasks": await loadAllTasks(); break;
+      case "outputs": await loadOutputsFiles(outputsActiveFolder); break;
+      case "folder": await loadFiles(activeDirHandle(), activeFolderHeading()); break;
+      case "none": break;
     }
   }
 
