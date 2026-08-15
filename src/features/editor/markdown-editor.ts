@@ -11,10 +11,61 @@ import {
   rectangularSelection,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentLess } from "@codemirror/commands";
-import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, foldGutter, foldKeymap, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap, type CompletionContext } from "@codemirror/autocomplete";
+import { tags } from "@lezer/highlight";
+
+// CodeMirror's built-in defaultHighlightStyle ships fixed hex colors per
+// syntax tag (e.g. tags.meta -> "#404740", a near-black green meant for a
+// light background) with zero awareness of this app's theme system. That's
+// what made markdown syntax marks (#, *, _, `, [ ] ( )) hard to see in dark
+// themes: @lezer/markdown tags all of those literal mark characters as
+// tags.processingInstruction (a specialization of tags.meta — see
+// "HeaderMark HardBreak QuoteMark ListMark LinkMark EmphasisMark CodeMark" in
+// @lezer/markdown's styleTags call), which defaultHighlightStyle only colors
+// via that inherited tags.meta rule.
+//
+// This app is theme-aware everywhere else via CSS custom properties set on
+// :root per theme (see applyThemeVariables() in src/features/themes/runtime.ts
+// and src/ui/styles/tokens.css/editor.css) — 31 themes, mixed light/dark,
+// each with different --base/--overlay*/--subtext* values, so no single
+// hardcoded hex can look right in all of them. Building the HighlightStyle
+// with var(--...) strings (rather than colors resolved once at definition
+// time) keeps it correctly theme-reactive: applyThemeVariables() sets these
+// custom properties directly on document.documentElement, so the browser
+// re-resolves var(--overlay1) etc. live on every theme switch with no need
+// to rebuild this style or the editor.
+//
+// --overlay1 was chosen for the mark characters over --overlay0 (too close
+// to --base/--mantle in several dark themes, e.g. flatly-fog/cosmo-fog sit
+// under 2.5:1) — --overlay1 stays >=3.5:1 against --base in every shipped
+// dark theme except the deliberately low-contrast "quartz" (whose own
+// --text tops out at 4.6:1 against its unusually light "dark" base, so no
+// muted token could clear much more there either), while remaining
+// comfortably >=3.6:1 in every light theme. It's also already this app's
+// established "muted helper text" token elsewhere (e.g. .settings-help-text).
+const markdownHighlightStyle = HighlightStyle.define([
+  // The literal markup characters themselves — the reported bug.
+  { tag: [tags.processingInstruction, tags.contentSeparator], color: "var(--overlay1)" },
+  // Content that used to get a hardcoded color from defaultHighlightStyle
+  // (comment/escape/url/label/string) is remapped to theme tokens instead of
+  // being dropped, so nothing regresses to unstyled plain text.
+  { tag: tags.comment, color: "var(--overlay1)", fontStyle: "italic" },
+  { tag: tags.escape, color: "var(--subtext1)" },
+  { tag: [tags.url, tags.labelName], color: "var(--blue)" },
+  { tag: tags.string, color: "var(--green)" },
+  { tag: tags.invalid, color: "var(--red)" },
+  // Non-color decorations are unchanged from defaultHighlightStyle — these
+  // tags had no hardcoded color to begin with, so they already inherited
+  // --text from .cm-editor and don't need remapping.
+  { tag: tags.link, textDecoration: "underline" },
+  { tag: tags.heading, textDecoration: "underline", fontWeight: "bold" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strong, fontWeight: "bold" },
+  { tag: tags.strikethrough, textDecoration: "line-through" },
+]);
 
 export interface MarkdownCompletion { label: string; type?: "text" | "keyword" }
 export interface MarkdownEditorOptions {
@@ -87,7 +138,7 @@ export class MarkdownEditorAdapter {
         extensions: [
           highlightSpecialChars(), history(), drawSelection(), dropCursor(), rectangularSelection(), crosshairCursor(),
           highlightActiveLine(), bracketMatching(), foldGutter(), highlightSelectionMatches(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          syntaxHighlighting(markdownHighlightStyle, { fallback: true }),
           keymap.of([{ key: "Shift-Tab", run: indentLess }, ...historyKeymap, ...foldKeymap, ...completionKeymap, ...defaultKeymap.filter(binding => binding.key !== "Enter" && binding.key !== "Tab" && binding.key !== "Shift-Tab")]),
           autocompletion({ override: [completionSource(options.getCompletions)] }),
           this.#gutters.of(this.#lineNumbers ? lineNumbers() : []),

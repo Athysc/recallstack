@@ -194,6 +194,131 @@ import { assertPortableName } from "./portable-names";
     async requestPermission() { return 'granted'; }
   }
 
+  // ── External directory access (Outputs folder) ──────────────────────────
+  // Parallels NativeFileHandle/NativeWritable/NativeDirectoryHandle above,
+  // but every operation goes through the external_fs_* commands instead of
+  // the workspace-scoped fs_* ones — see validate_external_directory() /
+  // validate_external_file() in src-tauri/src/commands/bridge.rs. Used only
+  // for the Outputs folder, which the user can point at any directory on
+  // disk via chooseOutputsFolder() below, not just one inside the open
+  // workspace. Paths on these classes are always absolute OS paths.
+
+  class NativeExternalTextFile {
+    readonly path: string;
+    readonly name: string;
+    readonly type: string;
+    readonly size: number;
+    readonly lastModified: number;
+
+    constructor(path: string, name: string, metadata: NativeMetadata = {}) {
+      this.path = path;
+      this.name = name;
+      this.type = mimeType(name);
+      this.size = metadata.size || 0;
+      this.lastModified = metadata.modifiedAt || Date.now();
+    }
+
+    async text() { return invoke('external_fs_read_text', { path: this.path }); }
+    async arrayBuffer() { return new TextEncoder().encode(await this.text()).buffer; }
+  }
+
+  class NativeExternalFileHandle {
+    readonly kind = 'file' as const;
+    readonly path: string;
+    readonly name: string;
+    readonly metadata: NativeMetadata;
+
+    constructor(path: string, metadata: NativeMetadata = {}) {
+      this.path = path;
+      this.name = metadata.name || baseName(path);
+      this.metadata = metadata;
+    }
+
+    async getFile() {
+      if (isTextFile(this.name)) return new NativeExternalTextFile(this.path, this.name, this.metadata);
+      const bytes = await invoke('external_fs_read', { path: this.path });
+      return new File([new Uint8Array(bytes)], this.name, {
+        type: mimeType(this.name),
+        lastModified: this.metadata.modifiedAt || Date.now(),
+      });
+    }
+
+    async createWritable() {
+      return new NativeExternalWritable(this.path);
+    }
+
+    async isSameEntry(other: NativeHandle) {
+      return other?.kind === 'file' && other.path === this.path;
+    }
+
+    async queryPermission() { return 'granted'; }
+    async requestPermission() { return 'granted'; }
+  }
+
+  // Only text writes are needed: Outputs files are always edited in place as
+  // Markdown (see currentOutputsFh.createWritable() in recallstack-runtime.ts),
+  // and — unlike the workspace-scoped NativeWritable — external_fs_write_text
+  // requires the target to already exist, which every Outputs file does since
+  // it was only ever reached by listing an existing folder.
+  class NativeExternalWritable {
+    readonly path: string;
+    private parts: string[] = [];
+    private closed = false;
+
+    constructor(path: string) { this.path = path; }
+
+    async write(value: string | NativeWriteCommand): Promise<void> {
+      if (this.closed) throw new DOMException('Writable is closed', 'InvalidStateError');
+      if (typeof value === 'string') { this.parts.push(value); return; }
+      if (value && typeof value === 'object' && 'type' in value && value.type === 'write' && typeof value.data === 'string') {
+        return this.write(value.data);
+      }
+      throw new TypeError('Only text writes are supported for the outputs folder');
+    }
+
+    async close() {
+      if (this.closed) return;
+      await invoke('external_fs_write_text', { path: this.path, text: this.parts.join('') });
+      this.closed = true;
+    }
+  }
+
+  class NativeExternalDirectoryHandle {
+    readonly kind = 'directory' as const;
+    readonly path: string;
+    readonly name: string;
+
+    constructor(path: string, name: string | null = null) {
+      this.path = path;
+      this.name = name || baseName(path);
+    }
+
+    async *values() {
+      const entries = await invoke<NativeMetadata[]>('external_fs_list', { path: this.path });
+      for (const entry of entries) {
+        yield entry.isDir
+          ? new NativeExternalDirectoryHandle(entry.path || join(this.path, entry.name || ''), entry.name)
+          : new NativeExternalFileHandle(entry.path || join(this.path, entry.name || ''), entry);
+      }
+    }
+
+    async *entries() {
+      for await (const entry of this.values()) yield [entry.name, entry];
+    }
+
+    async removeEntry(name: string) {
+      validateName(name);
+      return invoke('external_fs_remove', { path: join(this.path, name) });
+    }
+
+    async isSameEntry(other: NativeHandle) {
+      return other?.kind === 'directory' && other.path === this.path;
+    }
+
+    async queryPermission() { return 'granted'; }
+    async requestPermission() { return 'granted'; }
+  }
+
   function validateName(name: string) {
     assertPortableName(name);
   }
@@ -326,6 +451,19 @@ import { assertPortableName } from "./portable-names";
     externalReadText(path) { return invoke('external_fs_read_text', { path }); },
     externalRead(path) { return invoke('external_fs_read', { path }); },
     externalWriteText(path, text) { return invoke('external_fs_write_text', { path, text }); },
+    // Outputs folder: a native "choose any folder" dialog (same dialog plugin
+    // call as chooseBackupDestination()/chooseBackupFile() above, just with
+    // directory:true) — no dedicated Rust command needed for the picking
+    // itself. Once chosen, the folder is browsed/read/written/deleted through
+    // externalDirectoryHandle()/externalFileHandle() below and the
+    // external_fs_list*/external_fs_remove commands, since it's no longer
+    // guaranteed to live inside the open workspace.
+    async chooseOutputsFolder() {
+      if (typeof window.__TAURI__?.dialog?.open !== 'function') return null;
+      const value = await window.__TAURI__.dialog.open({ title: 'Choose Outputs Folder', directory: true, multiple: false });
+      if (!value) return null;
+      return typeof value === 'string' ? value : value.path || String(value);
+    },
     rebuildIndex() { return invoke('rebuild_index'); },
     cancelIndex() { return invoke('cancel_index'); },
     indexHealth() { return invoke('index_health'); },
@@ -342,6 +480,9 @@ import { assertPortableName } from "./portable-names";
     fileHandle(path, metadata = {}) { return new NativeFileHandle(path, metadata as NativeMetadata) as unknown as FileSystemFileHandle; },
     directoryHandle(path) { return new NativeDirectoryHandle(path) as unknown as FileSystemDirectoryHandle; },
     listFilesRecursive(path) { return invoke('fs_list_recursive', { path }); },
+    externalFileHandle(path, metadata = {}) { return new NativeExternalFileHandle(path, metadata as NativeMetadata) as unknown as FileSystemFileHandle; },
+    externalDirectoryHandle(path) { return new NativeExternalDirectoryHandle(path) as unknown as FileSystemDirectoryHandle; },
+    listExternalFilesRecursive(path) { return invoke('external_fs_list_recursive', { path }); },
     referencedAssets(path) { return invoke('fs_referenced_assets', { path }); },
     renamePath(from, to) { return invoke('fs_rename', { from, to }); },
     assetUrl(path) {

@@ -475,6 +475,50 @@ fn validate_external_file(path: &str) -> Result<PathBuf, String> {
     Ok(candidate)
 }
 
+// Directory counterpart to validate_external_file — same trust boundary
+// (absolute path, no symlinks), used by the Outputs folder feature, which
+// the user points at an arbitrary directory anywhere on disk via a native
+// folder-choose dialog (see chooseOutputsFolder() in desktop-bridge.ts).
+fn validate_external_directory(path: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(path);
+    if !candidate.is_absolute() {
+        return Err("External folder path must be absolute".to_string());
+    }
+    let metadata = fs::symlink_metadata(&candidate).map_err(|e| e.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("Symbolic links are not allowed for the outputs folder".to_string());
+    }
+    if !metadata.is_dir() {
+        return Err("Path is not a directory".to_string());
+    }
+    Ok(candidate)
+}
+
+// External counterpart to native_entry() above — same NativeEntry shape, but
+// `path` is the entry's absolute OS path rather than a path relative to the
+// workspace root, since external entries have no workspace to be relative to.
+fn external_native_entry(path: &Path) -> Result<NativeEntry, String> {
+    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
+    let modified = metadata
+        .modified()
+        .map_err(|e| e.to_string())?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?;
+    let modified_at = modified.as_millis() as u64;
+    Ok(NativeEntry {
+        name: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string(),
+        path: path.to_string_lossy().replace('\\', "/"),
+        is_dir: metadata.is_dir(),
+        size: metadata.len(),
+        modified_at,
+        version: format!("{}:{}", metadata.len(), modified.as_nanos()),
+    })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalFileInfo {
@@ -527,6 +571,65 @@ pub fn external_fs_write_text(path: String, text: String) -> Result<(), String> 
     safety::atomic_write(&candidate, text.as_bytes())
 }
 
+// ── External directory access (Outputs folder) ──────────────────────────────
+//
+// The Outputs folder can now be any directory on disk, not just one inside
+// the open workspace — see validate_external_directory() above. These three
+// commands mirror fs_list / fs_list_recursive / fs_remove but operate against
+// that external trust boundary instead of safe_path()+root(), and always
+// return/accept absolute paths since there's no workspace root to be
+// relative to. Reads and single-file writes for files found this way still
+// go through the existing external_fs_read*/external_fs_write_text commands
+// above — those already work on any absolute path.
+
+fn list_external_directory(directory: &Path) -> Result<Vec<NativeEntry>, String> {
+    let mut entries = fs::read_dir(directory)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            if entry.file_type().ok()?.is_symlink() {
+                return None;
+            }
+            external_native_entry(&entry.path()).ok()
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
+    Ok(entries)
+}
+
+fn list_external_directory_recursive(directory: &Path) -> Result<Vec<NativeEntry>, String> {
+    let mut entries = Vec::new();
+    for item in WalkDir::new(directory)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(visible_entry)
+    {
+        let entry = item.map_err(|error| error.to_string())?;
+        if entry.depth() == 0 || entry.file_type().is_dir() || entry.file_type().is_symlink() {
+            continue;
+        }
+        entries.push(external_native_entry(entry.path())?);
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn external_fs_list(path: String) -> Result<Vec<NativeEntry>, String> {
+    list_external_directory(&validate_external_directory(&path)?)
+}
+
+#[tauri::command]
+pub fn external_fs_list_recursive(path: String) -> Result<Vec<NativeEntry>, String> {
+    list_external_directory_recursive(&validate_external_directory(&path)?)
+}
+
+#[tauri::command]
+pub fn external_fs_remove(path: String) -> Result<(), String> {
+    let candidate = validate_external_file(&path)?;
+    fs::remove_file(candidate).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn close_app(app: AppHandle) {
     app.exit(0);
@@ -535,7 +638,8 @@ pub fn close_app(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        markdown_asset_references, portable_read_text_from, rename_directory,
+        list_external_directory, list_external_directory_recursive, markdown_asset_references,
+        portable_read_text_from, rename_directory, validate_external_directory,
         validate_external_file, validate_portable_target, PORTABLE_TEXT_FILES,
     };
     use std::collections::BTreeSet;
@@ -657,6 +761,65 @@ mod tests {
                 .expect("utf8 path")
         )
         .is_err());
+
+        fs::remove_dir_all(directory).expect("remove fixture");
+    }
+
+    #[test]
+    fn external_directories_must_be_absolute_existing_non_symlink_directories() {
+        let directory = std::env::temp_dir().join(format!(
+            "recallstack-external-dir-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("fixture directory");
+        let file = directory.join("not-a-dir.md");
+        fs::write(&file, "hello").expect("fixture file");
+
+        assert!(validate_external_directory(directory.to_str().expect("utf8 path")).is_ok());
+        assert!(validate_external_directory("relative/outside").is_err());
+        assert!(validate_external_directory(file.to_str().expect("utf8 path")).is_err());
+        assert!(validate_external_directory(
+            directory
+                .join("does-not-exist")
+                .to_str()
+                .expect("utf8 path")
+        )
+        .is_err());
+
+        fs::remove_dir_all(directory).expect("remove fixture");
+    }
+
+    #[test]
+    fn external_listing_covers_one_level_and_recursive_files_outside_the_workspace() {
+        let directory = std::env::temp_dir().join(format!(
+            "recallstack-external-list-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(directory.join("category/nested")).expect("fixture directories");
+        fs::write(directory.join("top-level.md"), "top").expect("fixture file");
+        fs::write(directory.join("category/child.md"), "child").expect("fixture file");
+        fs::write(directory.join("category/nested/grandchild.md"), "grandchild")
+            .expect("fixture file");
+
+        let top = list_external_directory(&directory).expect("one-level listing");
+        assert_eq!(top.len(), 2, "expected the file and the category folder only");
+        assert!(top.iter().any(|entry| entry.name == "top-level.md" && !entry.is_dir));
+        assert!(top.iter().any(|entry| entry.name == "category" && entry.is_dir));
+
+        let recursive = list_external_directory_recursive(&directory).expect("recursive listing");
+        let mut names: Vec<&str> = recursive.iter().map(|entry| entry.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["child.md", "grandchild.md", "top-level.md"]);
+        // Entries carry absolute paths — there is no workspace root to be relative to.
+        assert!(recursive.iter().all(|entry| std::path::Path::new(&entry.path).is_absolute()));
 
         fs::remove_dir_all(directory).expect("remove fixture");
     }

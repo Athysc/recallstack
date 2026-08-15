@@ -129,23 +129,6 @@
   .nav-all-tasks-btn svg { flex: 0 0 auto; }
   .nav-all-tasks-btn:hover  { background: var(--surface0); color: var(--text); }
   .nav-all-tasks-btn.active { background: var(--surface0); color: var(--yellow); }
-  /* ── Nav Outputs button ──────────────────────────────────────────────────── */
-  .nav-outputs-btn {
-    background: transparent;
-    border: none;
-    color: var(--subtext0);
-    cursor: pointer;
-    padding: 4px 10px;
-    border-radius: 5px;
-    font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-    transition: background 0.12s, color 0.12s;
-    user-select: none;
-    letter-spacing: 0.02em;
-  }
-  .nav-outputs-btn:hover  { background: var(--surface0); color: var(--text); }
-  .nav-outputs-btn.active { background: var(--surface0); color: var(--sapphire); }
   .nav-return-tab-btn {
     flex: 0 0 auto;
     width: 29px;

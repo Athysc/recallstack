@@ -11,7 +11,11 @@ export function rewriteAssetLinks(markdown: string, from: string, to: string): s
 
 export function nativeDraftPath(path: string | null, dbPrefix: string): string | null {
   if (!path) return null;
-  if (/^(?:openbrain|openbrain-shared)\/outputs\//.test(path)) return path;
+  // Outputs-mode tabs are keyed by a pseudo-path (outputDocumentPath() in
+  // features/outputs/files.ts) that isn't workspace-relative — the Outputs
+  // folder can live anywhere on disk — so it must not be prefixed with the
+  // active workspace's dbPrefix like a normal note path.
+  if (/^outputs\//.test(path)) return path;
   return `${dbPrefix || ""}${path}`.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/{2,}/g, "/");
 }
 

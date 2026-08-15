@@ -10,7 +10,7 @@ test("asset links are rewritten outside fenced code only", () => {
 
 test("draft and dropped-asset helpers preserve editor conventions", () => {
   assert.equal(nativeDraftPath("project/notes/a.md", "Data/personal/"), "Data/personal/project/notes/a.md");
-  assert.equal(nativeDraftPath("openbrain/outputs/a.md", "Data/personal/"), "openbrain/outputs/a.md");
+  assert.equal(nativeDraftPath("outputs/category/a.md", "Data/personal/"), "outputs/category/a.md");
   assert.equal(assetMarkdownLink("a.png", "assets/a.png", true), "![a.png](assets/a.png)");
   assert.equal(joinDroppedAssetLinks(["[a](a)", "[b](b)"], true), "\n[a](a)\n[b](b)");
   assert.equal(isScreenshotItem({ name: "image.png" }), true);

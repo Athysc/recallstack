@@ -44,8 +44,16 @@ export function groupOutputFiles(files: OutputFile[], mode: FileSortMode): Map<s
   return grouped;
 }
 
-export function outputDocumentPath(root: string, folder: string, subPath: string): string {
-  return `${root}/outputs/${folder}/${subPath}`;
+// Purely a stable pseudo-path used for tab identity/dedup, the editor's doc
+// id, and the recovery-draft key — never a real filesystem path (Outputs
+// reads/writes always go through the file's own handle, see
+// currentOutputsFh/currentOutputsDirFh in recallstack-runtime.ts). There is
+// only ever one Outputs root active, so no root-name segment is needed to
+// keep these unique (previously this also encoded which of two possible
+// Outputs roots — "openbrain" vs "openbrain-shared" — a file came from; that
+// second root has been removed).
+export function outputDocumentPath(folder: string, subPath: string): string {
+  return `outputs/${folder}/${subPath}`;
 }
 
 export interface OutputRenderActions {

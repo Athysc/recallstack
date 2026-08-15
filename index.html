@@ -351,10 +351,10 @@
       <section class="settings-output-panel" aria-labelledby="settings-output-title">
         <label id="settings-output-title" for="settings-outputs-path">Outputs folder</label>
         <div class="settings-path-row">
-          <input id="settings-outputs-path" class="modal-input" type="text" value="openbrain/outputs" spellcheck="false" autocomplete="off" />
-          <button class="btn btn-primary" id="btn-save-outputs-path">Save</button>
+          <input id="settings-outputs-path" class="modal-input" type="text" value="" placeholder="Not set" spellcheck="false" autocomplete="off" readonly />
+          <button class="btn btn-primary" id="btn-browse-outputs-path" type="button" title="Choose an outputs folder">Browse…</button>
         </div>
-        <p class="settings-help-text">Relative to the selected workspace root. Defaults to <code>openbrain/outputs</code> and is created automatically.</p>
+        <p class="settings-help-text">Any folder on disk. Files placed there by other tools appear in RecallStack's Outputs view.</p>
       </section>
     </div>
   </div>

@@ -219,12 +219,15 @@ type TaskLocation = {
   let allTasksStatusMode  = true;   // true: group All Tasks by priority/status; false: by folder
   let listLoadGeneration  = 0;      // prevents stale async list responses from repainting the UI
   let outputsMode         = false;  // true when in Outputs view
+  // The configured Outputs folder — any directory on disk, not necessarily
+  // inside the open workspace. Native mode: an absolute-path-backed handle
+  // re-derived each time from OUTPUTS_FOLDER_PATH_KEY (see
+  // ensureConfiguredOutputsHandle()). Browser mode: a FileSystemDirectoryHandle
+  // from showDirectoryPicker(), held in memory only for the current session —
+  // see chooseOutputsFolder() below for why this isn't persisted across reloads.
   let outputsHandle: FileSystemDirectoryHandle | null = null;
-  let outputsAvailable    = false;  // true if openbrain/outputs exists in root
-  let outputsSharedHandle: FileSystemDirectoryHandle | null = null;
-  let outputsSharedAvailable = false; // true if openbrain-shared/outputs exists in root
+  let outputsAvailable    = false;  // true if the configured outputs folder is currently reachable
   let outputsActiveFolder: NamedDirectory | null = null;
-  let outputsActiveRoot: "openbrain" | "openbrain-shared" = 'openbrain';
   let returnToOutputs     = false;  // true when a file was opened from Outputs view
   let isOutputsFile       = false;  // true when currently editing a file from Outputs
   let currentOutputsFh: FileSystemFileHandle | null = null;
@@ -1059,16 +1062,29 @@ type TaskLocation = {
     showView('list');
   }
 
-  async function configuredOutputsParts() {
-    const raw = (localStorage.getItem(OUTPUTS_FOLDER_PATH_KEY) || 'openbrain/outputs').trim() || 'openbrain/outputs';
-    return normalizeAppPath(raw).split('/').filter(Boolean);
-  }
-
+  // Re-derives the live handle for the configured Outputs folder, which can
+  // now be any directory on disk (see the outputsHandle declaration above).
+  // Native mode: OUTPUTS_FOLDER_PATH_KEY holds an absolute OS path, so the
+  // handle can always be rebuilt without user interaction — a listing probe
+  // confirms the folder still exists/is reachable rather than assuming so
+  // (unlike the old workspace-relative version, a missing external folder is
+  // never auto-created). Browser mode: there is no path string to rebuild
+  // from (File System Access API handles are opaque) and no existing
+  // precedent in this codebase for persisting a directory handle across
+  // reloads — not even the workspace root itself persists in browser mode,
+  // see loadWorkspaceHandle() above — so the in-memory handle from
+  // chooseOutputsFolder() is simply left as-is here.
   async function ensureConfiguredOutputsHandle() {
-    if (!rootHandle) return null;
-    const parts = await configuredOutputsParts();
-    if (!parts.length) return null;
-    return getDirHandle(rootHandle, parts, true);
+    if (!window.__recallstackNative?.active) return outputsHandle;
+    const path = (localStorage.getItem(OUTPUTS_FOLDER_PATH_KEY) || '').trim();
+    if (!path) return null;
+    const handle = window.__recallstackNative!.externalDirectoryHandle(path);
+    try {
+      await listDirs(handle);
+      return handle;
+    } catch {
+      return null;
+    }
   }
 
   async function openWorkspace(handle: FileSystemDirectoryHandle, options: OpenWorkspaceOptions = {}) {
@@ -1082,16 +1098,6 @@ type TaskLocation = {
 
       outputsHandle = await ensureConfiguredOutputsHandle();
       outputsAvailable = !!outputsHandle;
-
-      // Check if ../openbrain-shared/outputs exists relative to the workspace root
-      try {
-        const _obsDir = await rootHandle!.getDirectoryHandle('openbrain-shared');
-        outputsSharedHandle    = await _obsDir.getDirectoryHandle('outputs');
-        outputsSharedAvailable = true;
-      } catch {
-        outputsSharedHandle    = null;
-        outputsSharedAvailable = false;
-      }
 
       if (!workspaces.length) {
         toast('No workspace folders found — create a Data/ subfolder or add system workspaces.', 'error');
@@ -1239,13 +1245,13 @@ type TaskLocation = {
 
   function syncOutputsTopButton() {
     btnOutputsTop.classList.toggle('hidden', !outputsAvailable || isManagedSystemWorkspace());
-    btnOutputsTop.classList.toggle('active', outputsMode && outputsActiveRoot === 'openbrain');
+    btnOutputsTop.classList.toggle('active', outputsMode);
   }
 
   btnRefreshWorkspace.addEventListener('click', () => {
     refreshEverything().catch(error => toast('Could not refresh workspace: ' + (error?.message || error), 'error'));
   });
-  btnOutputsTop.addEventListener('click', () => selectOutputs('openbrain'));
+  btnOutputsTop.addEventListener('click', () => selectOutputs());
 
   // ── Navigation ────────────────────────────────────────────────────────────────
 
@@ -1300,9 +1306,8 @@ type TaskLocation = {
     navRow1.innerHTML = '';
     navRow1.appendChild(mkNavNewBtn(1));
     navRow1.appendChild(mkNavRenameBtn(1));
-    // The primary Outputs entry now lives in the app header as an icon button.
-    // Do not duplicate it as a text button in the top-level folder navigation.
-    if (outputsSharedAvailable && !isManagedSystemWorkspace()) navRow1.appendChild(mkNavOutputsBtn('openbrain-shared', 'Outputs-Shared', 'btn-outputs-shared'));
+    // The Outputs entry lives in the app header as an icon button (btnOutputsTop) —
+    // not duplicated here as a text button in the top-level folder navigation.
     // Keep the Journal and Tasks icon shortcuts beside each other before folder tabs.
     navRow1.appendChild(mkReturnToTabBtn());
     navRow1.appendChild(mkNavAllTasksBtn());
@@ -1568,15 +1573,6 @@ type TaskLocation = {
     return btn;
   }
 
-  function mkNavOutputsBtn(rootName: "openbrain" | "openbrain-shared" = 'openbrain', label = 'Outputs', id = 'btn-outputs') {
-    const btn = document.createElement('button');
-    btn.id        = id;
-    btn.className = 'nav-outputs-btn';
-    btn.textContent = label;
-    btn.addEventListener('click', () => selectOutputs(rootName));
-    return btn;
-  }
-
   function lastSelectedTab() {
     return activeTabRecord() || tabs.at(-1)! || null;
   }
@@ -1611,33 +1607,22 @@ type TaskLocation = {
     return btn;
   }
 
-  function activeOutputsHandle() {
-    return outputsActiveRoot === 'openbrain-shared' ? outputsSharedHandle : outputsHandle;
-  }
-
-  function activeOutputsLabel() {
-    return outputsActiveRoot === 'openbrain-shared' ? 'Outputs-Shared' : 'Outputs';
-  }
-
+  // The header icon button (btnOutputsTop) is the only Outputs nav control now
+  // that Outputs-Shared is gone, and syncOutputsTopButton() already keeps its
+  // own active/hidden state in sync with outputsMode/outputsAvailable — so
+  // "clearing" outputs nav-active state is just re-syncing that one button.
   function clearOutputsNavActive() {
-    const outputsBtn = $maybe('btn-outputs');
-    if (outputsBtn) outputsBtn.classList.remove('active');
-    const outputsSharedBtn = $maybe('btn-outputs-shared');
-    if (outputsSharedBtn) outputsSharedBtn.classList.remove('active');
     syncOutputsTopButton();
   }
 
   // ── Outputs mode ─────────────────────────────────────────────────────────────
 
-  async function selectOutputs(rootName: "openbrain" | "openbrain-shared" = 'openbrain') {
-    const handle = rootName === 'openbrain-shared' ? outputsSharedHandle : outputsHandle;
-    const available = rootName === 'openbrain-shared' ? outputsSharedAvailable : outputsAvailable;
-    if (!available || !handle) return;
+  async function selectOutputs() {
+    if (!outputsAvailable || !outputsHandle) return;
     if (!await checkUnsavedNewNote()) return;
     if (!await autoSaveIfDirty()) return;
 
     outputsMode         = true;
-    outputsActiveRoot   = rootName;
     returnToOutputs     = false;
     allTasksMode        = false;
     isOutputsFile       = false;
@@ -1654,9 +1639,7 @@ type TaskLocation = {
     if (allTasksBtn) allTasksBtn.classList.remove('active');
     updateAllTasksGroupingModeBtn();
     navRow1.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    clearOutputsNavActive();
-    const outputsBtn = $maybe(rootName === 'openbrain-shared' ? 'btn-outputs-shared' : 'btn-outputs');
-    if (outputsBtn) outputsBtn.classList.add('active');
+    syncOutputsTopButton();
 
     const r1Rename = $maybe('btn-rename-folder-1');
     if (r1Rename) r1Rename.disabled = true;
@@ -1673,13 +1656,13 @@ type TaskLocation = {
     navRow2.classList.remove('hidden');
 
     try {
-      const subs = await listDirs(activeOutputsHandle()!);
+      const subs = await listDirs(outputsHandle!);
       subs.forEach(f => navRow2.appendChild(mkNavBtn(f.name, () => selectOutputsFolder(f))));
       if (subs.length) {
         await selectOutputsFolder(subs[0]);
       } else {
         showView('list');
-        listHeading.textContent = activeOutputsLabel();
+        listHeading.textContent = 'Outputs';
         fileGrid.innerHTML = `<div class="empty-state"><div class="empty-icon">📂</div><div class="empty-text">No output folders found.</div></div>`;
       }
     } catch (e: any) {
@@ -1703,15 +1686,20 @@ type TaskLocation = {
     try {
       let raw;
       if (window.__recallstackNative?.active) {
-        const basePath = `${outputsActiveRoot}/outputs/${folder.name}`;
-        const entries = await window.__recallstackNative!.listFilesRecursive(basePath);
+        // folder.handle is a NativeExternalDirectoryHandle (see
+        // externalDirectoryHandle() in desktop-bridge.ts) whose .path is
+        // already the folder's absolute OS path — the Outputs folder can be
+        // anywhere on disk now, so there's no workspace-relative path to
+        // reconstruct here the way there used to be.
+        const basePath = (folder.handle as { path: string }).path;
+        const entries = await window.__recallstackNative!.listExternalFilesRecursive(basePath);
         raw = entries.map(entry => {
           const subPath = entry.path.slice(basePath.length).replace(/^\/+/, '');
           const parentPath = entry.path.split('/').slice(0, -1).join('/');
           return {
             name: entry.name,
-            handle: window.__recallstackNative!.fileHandle(entry.path, entry),
-            dirHandle: window.__recallstackNative!.directoryHandle(parentPath),
+            handle: window.__recallstackNative!.externalFileHandle(entry.path, entry),
+            dirHandle: window.__recallstackNative!.externalDirectoryHandle(parentPath),
             mtime: entry.modifiedAt,
             subPath,
           };
@@ -1734,7 +1722,7 @@ type TaskLocation = {
   }
 
   async function openOutputsFile(f: any, event?: MouseEvent) {
-    const outputsPath = outputDocumentPath(outputsActiveRoot, outputsActiveFolder!.name, f.subPath);
+    const outputsPath = outputDocumentPath(outputsActiveFolder!.name, f.subPath);
     return openOutputsFileInTab(outputsPath, f, isPinnedClick(event));
   }
 
@@ -4556,8 +4544,6 @@ type TaskLocation = {
       currentExternalPath = null;
       currentExternalFileHandle = null;
       clearOutputsNavActive();
-      const outputsBtn = $maybe(outputsActiveRoot === 'openbrain-shared' ? 'btn-outputs-shared' : 'btn-outputs');
-      if (outputsBtn) outputsBtn.classList.add('active');
       if (outputsActiveFolder) {
         setActive(navRow2, outputsActiveFolder!.name);
         loadOutputsFiles(outputsActiveFolder).catch(e => toast('Load failed: ' + e.message, 'error'));
@@ -7527,32 +7513,54 @@ type TaskLocation = {
   const btnSettings = $id('btn-settings');
   const btnSettingsClose = $id('btn-settings-close');
   const outputsPathInput = $id('settings-outputs-path');
-  const btnSaveOutputsPath = $id('btn-save-outputs-path');
+  const btnBrowseOutputsPath = $id('btn-browse-outputs-path');
 
+  // Outputs folder can now be any directory on disk (native: an absolute OS
+  // path chosen via window.__recallstackNative.chooseOutputsFolder(), which
+  // opens the same Tauri dialog plugin used by chooseBackupDestination();
+  // browser: any FileSystemDirectoryHandle chosen via showDirectoryPicker(),
+  // which is not restricted to any parent folder either). There is nothing
+  // to hand-type or "Save" — like choosing the workspace root itself
+  // (chooseAndOpenWorkspace()), picking commits immediately, so the input is
+  // a read-only display of the current choice, not an editable field.
   function syncOutputsPathInput() {
-    outputsPathInput.value = localStorage.getItem(OUTPUTS_FOLDER_PATH_KEY) || 'openbrain/outputs';
+    outputsPathInput.value = window.__recallstackNative?.active
+      ? (localStorage.getItem(OUTPUTS_FOLDER_PATH_KEY) || '')
+      : (outputsHandle?.name || '');
   }
+
+  async function chooseOutputsFolder() {
+    if (window.__recallstackNative?.active) {
+      const path = await window.__recallstackNative!.chooseOutputsFolder();
+      if (!path) return;
+      localStorage.setItem(OUTPUTS_FOLDER_PATH_KEY, path);
+      outputsHandle    = await ensureConfiguredOutputsHandle();
+      outputsAvailable = !!outputsHandle;
+      if (!outputsAvailable) toast('Could not open that folder', 'error');
+      else toast('Outputs folder set ✓');
+    } else {
+      try {
+        outputsHandle    = await window.showDirectoryPicker({ mode: 'readwrite' });
+        outputsAvailable = true;
+        toast('Outputs folder set ✓');
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') toast('Could not open that folder: ' + e.message, 'error');
+        return;
+      }
+    }
+    syncOutputsPathInput();
+    await initNav({ restoreView: false });
+  }
+
+  btnBrowseOutputsPath.addEventListener('click', () => {
+    chooseOutputsFolder().catch(e => toast('Could not open that folder: ' + (e?.message || e), 'error'));
+  });
 
   createModalController({
     overlay: modalSettings,
     closeButton: btnSettingsClose,
     trigger: btnSettings,
     beforeOpen: () => { syncOutputsPathInput(); applyWorkingPaneLayout(false); },
-  });
-
-  btnSaveOutputsPath.addEventListener('click', async () => {
-    const normalized = normalizeAppPath(outputsPathInput.value || 'openbrain/outputs');
-    if (!normalized || normalized.startsWith('../') || normalized.includes('/../')) {
-      toast('Outputs folder must be a relative path inside the workspace root', 'error');
-      return;
-    }
-    localStorage.setItem(OUTPUTS_FOLDER_PATH_KEY, normalized);
-    if (rootHandle) {
-      outputsHandle = await ensureConfiguredOutputsHandle();
-      outputsAvailable = !!outputsHandle;
-      toast('Outputs folder saved');
-      await initNav({ restoreView: false });
-    }
   });
 
   // ── Nav row mode toggle buttons ───────────────────────────────────────────────

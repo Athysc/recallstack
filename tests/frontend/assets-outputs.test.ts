@@ -21,5 +21,5 @@ test("outputs helpers group and construct stable editor paths", () => {
   const grouped = groupOutputFiles(files, "mtime");
   assert.equal(grouped.get("markdown")?.[0].name, "z.md");
   assert.equal(grouped.get("image")?.[0].name, "a.png");
-  assert.equal(outputDocumentPath("openbrain", "reports", "nested/z.md"), "openbrain/outputs/reports/nested/z.md");
+  assert.equal(outputDocumentPath("reports", "nested/z.md"), "outputs/reports/nested/z.md");
 });
