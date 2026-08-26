@@ -23,14 +23,16 @@ import { assertPortableName } from "./portable-names";
   const rawInvoke = window.__TAURI__.core.invoke as (command: string, args?: Record<string, unknown>) => Promise<any>;
   const metrics: {
     startedAt: number;
-    calls: Record<string, { count: number; durationMs: number }>;
+    calls: Record<string, { count: number; durationMs: number; maxDurationMs: number; slowCount: number }>;
     transferredBytes: number;
-  } = { startedAt: performance.now(), calls: {}, transferredBytes: 0 };
+    slowCalls: Array<{ command: string; durationMs: number; completedAt: number }>;
+    indexEvents: Array<{ state: string; indexed: number; durationMs: number; occurredAt: number }>;
+  } = { startedAt: performance.now(), calls: {}, transferredBytes: 0, slowCalls: [], indexEvents: [] };
   let indexState = 'unknown';
   const indexWaiters = new Set<() => void>();
   async function invoke<T = any>(command: string, args: Record<string, unknown> = {}): Promise<T> {
     const started = performance.now();
-    const entry = metrics.calls[command] ||= { count: 0, durationMs: 0 };
+    const entry = metrics.calls[command] ||= { count: 0, durationMs: 0, maxDurationMs: 0, slowCount: 0 };
     entry.count += 1;
     try {
       const result = await rawInvoke(command, args);
@@ -41,7 +43,15 @@ import { assertPortableName } from "./portable-names";
       }
       return result;
     } finally {
-      entry.durationMs += performance.now() - started;
+      const durationMs = performance.now() - started;
+      entry.durationMs += durationMs;
+      entry.maxDurationMs = Math.max(entry.maxDurationMs, durationMs);
+      if (durationMs >= 250) {
+        entry.slowCount += 1;
+        metrics.slowCalls.push({ command, durationMs, completedAt: Date.now() });
+        if (metrics.slowCalls.length > 100) metrics.slowCalls.shift();
+        console.warn(`Slow native command: ${command} took ${Math.round(durationMs)} ms`);
+      }
     }
   }
   performance.mark('recallstack:desktop-shim-ready');
@@ -496,6 +506,11 @@ import { assertPortableName } from "./portable-names";
         elapsedMs: performance.now() - metrics.startedAt,
         transferredBytes: metrics.transferredBytes,
         calls: structuredClone(metrics.calls),
+        slowCalls: structuredClone(metrics.slowCalls),
+        indexEvents: structuredClone(metrics.indexEvents),
+        watcher: window.__recallstackWatcherDiagnostics
+          ? structuredClone(window.__recallstackWatcherDiagnostics)
+          : null,
         measures: performance.getEntriesByType('measure').map(entry => ({ name: entry.name, durationMs: entry.duration })),
       };
     },
@@ -507,8 +522,15 @@ import { assertPortableName } from "./portable-names";
     window.__TAURI__.event.listen('workspace://changed', (event: { payload: unknown }) => {
       window.dispatchEvent(new CustomEvent('recallstack-native-changed', { detail: event.payload }));
     });
-    window.__TAURI__.event.listen('index://status', (event: { payload?: { state?: string } }) => {
+    window.__TAURI__.event.listen('index://status', (event: { payload?: { state?: string; indexed?: number; durationMs?: number } }) => {
       indexState = event.payload?.state || 'unknown';
+      metrics.indexEvents.push({
+        state: indexState,
+        indexed: event.payload?.indexed || 0,
+        durationMs: event.payload?.durationMs || 0,
+        occurredAt: Date.now(),
+      });
+      if (metrics.indexEvents.length > 100) metrics.indexEvents.shift();
       if (indexState !== 'indexing') {
         for (const resolve of indexWaiters) resolve();
         indexWaiters.clear();

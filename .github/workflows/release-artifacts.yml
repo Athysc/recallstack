@@ -32,6 +32,11 @@ jobs:
         # addressing that first.
         continue-on-error: true
         run: npm run test:release:performance
+        env:
+          # Exercise WebView2's real hidden-view suspension window, then
+          # restore after a 250-file watcher burst and enforce first-input
+          # responsiveness. Linux keeps the shorter foreground-only suite.
+          RECALLSTACK_WINDOWS_IDLE_E2E: "1"
       - name: Note release performance timing failure
         if: steps.perf.outcome == 'failure'
         shell: bash

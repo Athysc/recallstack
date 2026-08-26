@@ -185,7 +185,7 @@ fn scan_workspace_links(data: &Path) -> Result<WorkspaceLinkScan, String> {
     Ok((notes, assets, references))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_workspace(state: State<'_, Arc<AppState>>) -> Result<HealthReport, String> {
     logged("check_workspace", || {
         let root = state
@@ -287,7 +287,7 @@ mod tests {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_status(state: State<'_, Arc<AppState>>) -> Result<GitStatus, String> {
     logged("git_status", || {
         let root = state

@@ -5671,9 +5671,19 @@ type TaskLocation = {
 
   let _nativeRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   let _themeReloadTimer: ReturnType<typeof setTimeout> | undefined;
+  let _backlinksRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleBacklinksRefresh(delayMs = 250) {
+    clearTimeout(_backlinksRefreshTimer);
+    _backlinksRefreshTimer = setTimeout(() => {
+      void refreshBacklinks().then(() => {
+        previewOut.querySelector('.preview-backlinks')?.remove();
+        appendBacklinks();
+      });
+    }, delayMs);
+  }
   window.addEventListener('recallstack-workspace-changes', (event: any) => {
     const changes = Array.isArray(event.detail?.changes) ? event.detail.changes : [];
-    changes.forEach((change: any) => handleExternalEditorChange(change));
+    changes.forEach((change: any) => { void handleExternalEditorChange(change); });
     if (event.detail?.sequenceGap || event.detail?.overflowed) {
       clearTimeout(_nativeRefreshTimer);
       _nativeRefreshTimer = setTimeout(() => reloadActiveList().catch(e => toast(e.message, 'error')), 150);
@@ -5700,7 +5710,7 @@ type TaskLocation = {
       }, 100);
     }
     if (changes.some((change: any) => change.entity === 'markdown') && currentPath) {
-      setTimeout(() => refreshBacklinks().then(() => { previewOut.querySelector('.preview-backlinks')?.remove(); appendBacklinks(); }), 250);
+      scheduleBacklinksRefresh();
     }
   });
   window.addEventListener('recallstack-index-status', (event: any) => {
@@ -5711,7 +5721,7 @@ type TaskLocation = {
     }
     if (event.detail?.state === 'ready') {
       buildSearchIndex().catch(error => console.warn('Could not refresh note catalog', error));
-      refreshBacklinks().then(appendBacklinks);
+      scheduleBacklinksRefresh(0);
     }
   });
 

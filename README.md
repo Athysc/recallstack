@@ -10,10 +10,20 @@ The Tauri 2 desktop port of RecallStack. Markdown files under `Data/` remain can
 
 ## Development
 
+RecallStack standardizes development and CI on Node.js 24 with npm 11. With
+[mise](https://mise.jdx.dev/) or [nvm](https://github.com/nvm-sh/nvm), select the
+repository version before installing dependencies:
+
 ```bash
-npm install
+mise install                 # or: nvm install && nvm use
+npm ci
 npm run tauri:dev
 ```
+
+The checked-in `allowScripts` policy approves only the pinned esbuild install
+scripts required by Vite. EdgeDriver and GeckoDriver install scripts are
+explicitly denied because RecallStack's desktop E2E suite uses Tauri's embedded
+driver instead of either browser-specific driver.
 
 ## Portable Windows executable
 
@@ -76,6 +86,11 @@ npm run package:linux:appimage
 ```
 
 This writes an AppImage, a portable tarball, SHA-256 checksums, an artifact manifest, and a generated `PKGBUILD` to `release/`. Install with `makepkg` (the `PKGBUILD` pins the exact local tarball and its checksum, so keep both files together):
+
+On current Arch-derived systems, gdk-pixbuf 2.44 no longer installs its legacy
+loader directory. The AppImage build detects that layout and automatically uses
+a package-local compatibility shim for Tauri's linuxdeploy GTK plugin; it does
+not modify `/usr` or the downloaded plugin cache.
 
 ```bash
 cd release

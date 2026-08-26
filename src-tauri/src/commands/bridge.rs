@@ -144,7 +144,7 @@ fn native_entry(workspace: &Path, path: &Path) -> Result<NativeEntry, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn portable_read_text(name: String) -> Result<Option<String>, String> {
     logged("portable_read_text", || {
         portable_read_text_from(&std::env::current_exe().map_err(|e| e.to_string())?, &name)
@@ -167,7 +167,7 @@ fn portable_read_text_from(executable: &Path, name: &str) -> Result<Option<Strin
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_list(state: State<'_, Arc<AppState>>, path: String) -> Result<Vec<NativeEntry>, String> {
     logged("fs_list", || {
         let workspace = root(&state)?;
@@ -199,7 +199,7 @@ fn visible_entry(entry: &DirEntry) -> bool {
             .is_some_and(|name| !name.starts_with('.'))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_list_recursive(
     state: State<'_, Arc<AppState>>,
     path: String,
@@ -244,7 +244,7 @@ fn markdown_asset_references(text: &str, references: &mut BTreeSet<String>) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_referenced_assets(
     state: State<'_, Arc<AppState>>,
     path: String,
@@ -275,7 +275,7 @@ pub fn fs_referenced_assets(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_rename(
     state: State<'_, Arc<AppState>>,
     from: String,
@@ -315,7 +315,7 @@ fn rename_directory(source: &Path, destination: &Path) -> Result<(), String> {
     fs::rename(source, destination).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_stat(
     state: State<'_, Arc<AppState>>,
     path: String,
@@ -330,14 +330,14 @@ pub fn fs_stat(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_read(state: State<'_, Arc<AppState>>, path: String) -> Result<Vec<u8>, String> {
     logged("fs_read", || {
         fs::read(safe_path(&state, &path)?).map_err(|e| e.to_string())
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_read_text(state: State<'_, Arc<AppState>>, path: String) -> Result<String, String> {
     logged("fs_read_text", || {
         fs::read_to_string(safe_path(&state, &path)?).map_err(|e| e.to_string())
@@ -351,7 +351,7 @@ pub struct VersionedText {
     version: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_read_text_versioned(
     state: State<'_, Arc<AppState>>,
     path: String,
@@ -374,7 +374,7 @@ pub fn fs_read_text_versioned(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_write(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -396,7 +396,7 @@ pub fn fs_write(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_write_text(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -418,7 +418,7 @@ pub fn fs_write_text(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_write_text_versioned(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -450,7 +450,7 @@ pub fn fs_write_text_versioned(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_create_dir(state: State<'_, Arc<AppState>>, path: String) -> Result<(), String> {
     logged("fs_create_dir", || {
         validate_portable_target(&path)?;
@@ -460,7 +460,7 @@ pub fn fs_create_dir(state: State<'_, Arc<AppState>>, path: String) -> Result<()
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_remove(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -473,7 +473,7 @@ pub fn fs_remove(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_exists(state: State<'_, Arc<AppState>>, path: String) -> Result<bool, String> {
     logged("fs_exists", || Ok(safe_path(&state, &path)?.exists()))
 }
@@ -556,7 +556,7 @@ pub struct ExternalFileInfo {
     modified_at: u64,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn external_fs_stat(path: String) -> Result<ExternalFileInfo, String> {
     logged("external_fs_stat", || {
         let candidate = validate_external_file(&path)?;
@@ -579,7 +579,7 @@ pub fn external_fs_stat(path: String) -> Result<ExternalFileInfo, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn external_fs_read_text(path: String) -> Result<String, String> {
     logged("external_fs_read_text", || {
         let candidate = validate_external_file(&path)?;
@@ -592,7 +592,7 @@ pub fn external_fs_read_text(path: String) -> Result<String, String> {
 // Tauri webview's onDragDropEvent, which hands the frontend real absolute
 // paths but no in-memory bytes). Mirrors the workspace-scoped fs_read above,
 // just against validate_external_file's trust boundary instead of safe_path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn external_fs_read(path: String) -> Result<Vec<u8>, String> {
     logged("external_fs_read", || {
         let candidate = validate_external_file(&path)?;
@@ -600,7 +600,7 @@ pub fn external_fs_read(path: String) -> Result<Vec<u8>, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn external_fs_write_text(path: String, text: String) -> Result<(), String> {
     logged("external_fs_write_text", || {
         let candidate = validate_external_file(&path)?;
@@ -651,21 +651,21 @@ fn list_external_directory_recursive(directory: &Path) -> Result<Vec<NativeEntry
     Ok(entries)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn external_fs_list(path: String) -> Result<Vec<NativeEntry>, String> {
     logged("external_fs_list", || {
         list_external_directory(&validate_external_directory(&path)?)
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn external_fs_list_recursive(path: String) -> Result<Vec<NativeEntry>, String> {
     logged("external_fs_list_recursive", || {
         list_external_directory_recursive(&validate_external_directory(&path)?)
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn external_fs_remove(path: String) -> Result<(), String> {
     logged("external_fs_remove", || {
         let candidate = validate_external_file(&path)?;
@@ -673,7 +673,7 @@ pub fn external_fs_remove(path: String) -> Result<(), String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn close_app(app: AppHandle) {
     app.exit(0);
 }

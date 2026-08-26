@@ -6,3 +6,4 @@ performance-results/
 logs/
 tests/e2e/.workspace/
 tests/e2e/.visual-output/
+.recallstack-appimage-compat/

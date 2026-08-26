@@ -39,10 +39,10 @@ for (const match of entrySource.matchAll(/import\(["'](\.\/(?:desktop-bridge|rec
 }
 
 const initialBytes = [...visited].reduce((total, file) => total + statSync(file).size, 0);
-// Raised from 320_000 on 2026-08-12: the Open/Import external Markdown modal and
-// drag-and-drop work added ~900 lines to recallstack-runtime.ts, pushing measured
-// initial JS to 329_588 bytes. 340_000 keeps ~10 KB of headroom above that.
-const budgetBytes = 340_000;
+// Raised from 340_000 on 2026-08-26: idle/resume watcher diagnostics and burst
+// coalescing put the measured initial graph near 338 KB. 360_000 preserves a
+// meaningful regression margin instead of leaving only ~2 KB of headroom.
+const budgetBytes = 360_000;
 if (initialBytes > budgetBytes) {
   throw new Error(`Initial JavaScript is ${initialBytes} bytes; budget is ${budgetBytes} bytes`);
 }

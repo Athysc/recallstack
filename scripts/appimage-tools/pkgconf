@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_pkgconf="${RECALLSTACK_REAL_PKGCONF:?RECALLSTACK_REAL_PKGCONF is required}"
+
+if [[ "${RECALLSTACK_APPIMAGE_GDK_PIXBUF_COMPAT:-}" == "1" \
+  && "${2:-}" == "gdk-pixbuf-2.0" ]]; then
+  compat_dir=".recallstack-appimage-compat/gdk-pixbuf-2.0/2.10.0"
+  case "${1:-}" in
+    --variable=gdk_pixbuf_binarydir)
+      mkdir -p "$compat_dir/loaders"
+      : > "$compat_dir/loaders.cache"
+      printf '%s\n' "$compat_dir"
+      exit 0
+      ;;
+    --variable=gdk_pixbuf_cache_file)
+      printf '%s\n' "$compat_dir/loaders.cache"
+      exit 0
+      ;;
+    --variable=gdk_pixbuf_moduledir)
+      printf '%s\n' "$compat_dir/loaders"
+      exit 0
+      ;;
+  esac
+fi
+
+exec "$real_pkgconf" "$@"

@@ -842,6 +842,17 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
                         changes: sorted_changes(changes),
                     },
                 );
+                // The native watcher is the first component to know that the
+                // OS event stream overflowed. Recover here on a worker instead
+                // of waiting for a possibly-suspended WebView to notice and
+                // invoke a synchronous full-workspace scan on the UI thread.
+                if overflowed {
+                    schedule_reconcile(
+                        app_handle.clone(),
+                        Arc::clone(&watcher_state),
+                        root.clone(),
+                    );
+                }
             }
         }
         if watcher_state.is_current_watcher_generation(watcher_generation) {
@@ -852,7 +863,7 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn workspace_summary(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Option<WorkspaceSummary>, String> {
@@ -913,7 +924,7 @@ fn summary(path: &Path) -> WorkspaceSummary {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_workspace(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -929,54 +940,12 @@ pub fn set_workspace(
         save_recent(&app, &root)?;
         watch_workspace(&app, state.inner(), root.clone())?;
         let result = summary(&root);
-        let app_handle = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let started = Instant::now();
-            let _ = app_handle.emit(
-                "index://status",
-                IndexStatus {
-                    state: "indexing".into(),
-                    indexed: 0,
-                    duration_ms: 0,
-                    error: None,
-                },
-            );
-            match reconcile_index(&root) {
-                Ok(indexed) => {
-                    let _ = app_handle.emit(
-                        "index://status",
-                        IndexStatus {
-                            state: "ready".into(),
-                            indexed,
-                            duration_ms: started.elapsed().as_millis(),
-                            error: None,
-                        },
-                    );
-                }
-                Err(error) => {
-                    // Reported to the frontend via an event, not this
-                    // command's own Result (the command already returned
-                    // Ok(result) above by the time indexing finishes in the
-                    // background) — logged() above can't see this path, so
-                    // it's logged directly here.
-                    crate::error_log::log_command_error("set_workspace_reconcile", &error);
-                    let _ = app_handle.emit(
-                        "index://status",
-                        IndexStatus {
-                            state: "error".into(),
-                            indexed: 0,
-                            duration_ms: started.elapsed().as_millis(),
-                            error: Some(error),
-                        },
-                    );
-                }
-            }
-        });
+        schedule_reconcile(app.clone(), Arc::clone(state.inner()), root);
         Ok(result)
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn recent_workspaces(app: AppHandle) -> Result<Vec<WorkspaceSummary>, String> {
     logged("recent_workspaces", || {
         Ok(load_recents(&app)?
@@ -989,7 +958,7 @@ pub fn recent_workspaces(app: AppHandle) -> Result<Vec<WorkspaceSummary>, String
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_recent_workspace(app: AppHandle, path: String) -> Result<(), String> {
     logged("remove_recent_workspace", || {
         let recents_path = recents_path(&app)?;
@@ -1003,7 +972,7 @@ pub fn remove_recent_workspace(app: AppHandle, path: String) -> Result<(), Strin
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_entries(
     state: State<'_, Arc<AppState>>,
     path: Option<String>,
@@ -1104,7 +1073,7 @@ pub fn list_entries(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_note(state: State<'_, Arc<AppState>>, path: String) -> Result<Note, String> {
     logged("read_note", || {
         let root = active_workspace(&state)?;
@@ -1121,7 +1090,7 @@ pub fn read_note(state: State<'_, Arc<AppState>>, path: String) -> Result<Note, 
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_note(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -1144,7 +1113,7 @@ pub fn write_note(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_note(
     _app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -1175,7 +1144,7 @@ pub fn create_note(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_to_trash(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -1325,6 +1294,94 @@ fn reconcile_index(root: &Path) -> Result<usize, String> {
     reconcile_index_with(root, || false, |_, _, _| {})
 }
 
+struct ReconcileRunGuard {
+    state: Arc<AppState>,
+    workspace_id: String,
+}
+
+impl ReconcileRunGuard {
+    fn try_start(state: Arc<AppState>, root: &Path) -> Option<Self> {
+        let workspace_id = workspace_id(root);
+        let inserted = state
+            .index_reconcile_workspaces
+            .lock()
+            .insert(workspace_id.clone());
+        inserted.then_some(Self {
+            state,
+            workspace_id,
+        })
+    }
+}
+
+impl Drop for ReconcileRunGuard {
+    fn drop(&mut self) {
+        self.state
+            .index_reconcile_workspaces
+            .lock()
+            .remove(&self.workspace_id);
+    }
+}
+
+async fn reconcile_once(
+    app: AppHandle,
+    state: Arc<AppState>,
+    root: PathBuf,
+) -> Result<usize, String> {
+    let Some(_guard) = ReconcileRunGuard::try_start(state, &root) else {
+        // A startup, watcher-overflow, or frontend gap recovery is already
+        // scanning this same workspace. One scan is sufficient; callers
+        // observe its eventual index://status event instead of starting
+        // another. A different workspace can still reconcile concurrently.
+        return Ok(0);
+    };
+    let started = Instant::now();
+    let _ = app.emit(
+        "index://status",
+        IndexStatus {
+            state: "indexing".into(),
+            indexed: 0,
+            duration_ms: 0,
+            error: None,
+        },
+    );
+    let result = tauri::async_runtime::spawn_blocking(move || reconcile_index(&root))
+        .await
+        .map_err(|error| error.to_string())?;
+    match &result {
+        Ok(indexed) => {
+            let _ = app.emit(
+                "index://status",
+                IndexStatus {
+                    state: "ready".into(),
+                    indexed: *indexed,
+                    duration_ms: started.elapsed().as_millis(),
+                    error: None,
+                },
+            );
+        }
+        Err(error) => {
+            let _ = app.emit(
+                "index://status",
+                IndexStatus {
+                    state: "error".into(),
+                    indexed: 0,
+                    duration_ms: started.elapsed().as_millis(),
+                    error: Some(error.clone()),
+                },
+            );
+        }
+    }
+    result
+}
+
+fn schedule_reconcile(app: AppHandle, state: Arc<AppState>, root: PathBuf) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = reconcile_once(app, state, root).await {
+            crate::error_log::log_command_error("background_reconcile", &error);
+        }
+    });
+}
+
 fn rebuild_index_inner_with(
     root: &Path,
     cancelled: impl FnMut() -> bool,
@@ -1356,6 +1413,11 @@ pub async fn rebuild_index(
     logged_async("rebuild_index", async {
         let root = active_workspace(&state)?;
         let app_state = Arc::clone(state.inner());
+        let Some(_reconcile_guard) =
+            ReconcileRunGuard::try_start(Arc::clone(&app_state), &root)
+        else {
+            return Ok(0);
+        };
         app_state
             .index_cancel
             .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -1381,7 +1443,7 @@ pub async fn rebuild_index(
     .await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cancel_index(state: State<'_, Arc<AppState>>) {
     state
         .index_cancel
@@ -1389,13 +1451,18 @@ pub fn cancel_index(state: State<'_, Arc<AppState>>) {
 }
 
 #[tauri::command]
-pub fn reconcile_workspace(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
-    logged("reconcile_workspace", || {
-        reconcile_index(&active_workspace(&state)?)
+pub async fn reconcile_workspace(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<usize, String> {
+    logged_async("reconcile_workspace", async {
+        let root = active_workspace(&state)?;
+        reconcile_once(app, Arc::clone(state.inner()), root).await
     })
+    .await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn index_health(state: State<'_, Arc<AppState>>) -> Result<IndexHealth, String> {
     logged("index_health", || {
         let db = open_db(&active_workspace(&state)?)?;
@@ -1675,7 +1742,7 @@ fn search_knowledge_inner(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn search_knowledge(
     state: State<'_, Arc<AppState>>,
     query: String,
@@ -1694,7 +1761,7 @@ pub fn search_knowledge(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn search_notes(
     state: State<'_, Arc<AppState>>,
     query: String,
@@ -1731,7 +1798,7 @@ pub fn search_notes(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn indexed_note_catalog(
     state: State<'_, Arc<AppState>>,
     prefix: Option<String>,
@@ -1771,7 +1838,7 @@ pub fn indexed_note_catalog(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn backlinks(
     state: State<'_, Arc<AppState>>,
     path: String,
@@ -1800,7 +1867,7 @@ pub fn backlinks(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_saved_searches(state: State<'_, Arc<AppState>>) -> Result<Vec<SavedSearch>, String> {
     logged("list_saved_searches", || {
         let db = open_db(&active_workspace(&state)?)?;
@@ -1823,7 +1890,7 @@ pub fn list_saved_searches(state: State<'_, Arc<AppState>>) -> Result<Vec<SavedS
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_search(
     state: State<'_, Arc<AppState>>,
     name: String,
@@ -1853,7 +1920,7 @@ pub fn save_search(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_saved_search(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
     logged("delete_saved_search", || {
         Ok(open_db(&active_workspace(&state)?)?
@@ -1863,7 +1930,7 @@ pub fn delete_saved_search(state: State<'_, Arc<AppState>>, id: i64) -> Result<b
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn task_files(
     state: State<'_, Arc<AppState>>,
     prefix: Option<String>,
@@ -1914,7 +1981,7 @@ pub fn task_files(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reveal_path(state: State<'_, Arc<AppState>>, path: Option<String>) -> Result<(), String> {
     logged("reveal_path", || {
         let root = active_workspace(&state)?;
@@ -1930,7 +1997,7 @@ pub fn reveal_path(state: State<'_, Arc<AppState>>, path: Option<String>) -> Res
 // reveal_path() above, which already logs under its own name; wrapping here
 // too would just double-log the same single failure under two context
 // labels for one user action.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_workspace_folder(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     reveal_path(state, None)
 }
@@ -2042,6 +2109,23 @@ mod tests {
             workspace_id(first),
             workspace_id(Path::new("/tmp/recallstack-two"))
         );
+    }
+
+    #[test]
+    fn reconciliation_is_single_flight_per_workspace() {
+        let state = Arc::new(AppState::default());
+        let first_root = Path::new("/tmp/recallstack-one");
+        let second_root = Path::new("/tmp/recallstack-two");
+
+        let first = ReconcileRunGuard::try_start(Arc::clone(&state), first_root)
+            .expect("first reconciliation starts");
+        assert!(ReconcileRunGuard::try_start(Arc::clone(&state), first_root).is_none());
+        let second = ReconcileRunGuard::try_start(Arc::clone(&state), second_root)
+            .expect("another workspace can reconcile");
+
+        drop(first);
+        assert!(ReconcileRunGuard::try_start(Arc::clone(&state), first_root).is_some());
+        drop(second);
     }
 
     #[test]

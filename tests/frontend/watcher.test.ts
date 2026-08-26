@@ -5,6 +5,7 @@ import {
   invalidationScopes,
   normalizeWorkspaceBatch,
   WatcherSequenceGuard,
+  WorkspaceBatchAccumulator,
   type WorkspaceChangeBatch,
 } from "../../src/services/watcher.ts";
 
@@ -41,4 +42,37 @@ test("overflow invalidates every derived frontend scope", () => {
   const value = batch(1);
   value.overflowed = true;
   assert.equal(invalidationScopes(value).size, 7);
+});
+
+test("background batch accumulator collapses event bursts into one workspace delivery", () => {
+  const accumulator = new WorkspaceBatchAccumulator();
+  accumulator.add(batch(1, [
+    { kind: "modify", path: "Data/notes/a.md", entity: "markdown", internal: true },
+    { kind: "create", path: "Data/notes/transient.md", entity: "markdown", internal: false },
+  ]));
+  accumulator.add(batch(2, [
+    { kind: "modify", path: "Data/notes/a.md", entity: "markdown", internal: false },
+    { kind: "remove", path: "Data/notes/transient.md", entity: "markdown", internal: false },
+    { kind: "create", path: "Data/notes/b.md", entity: "markdown", internal: false },
+  ]), true);
+
+  const combined = accumulator.takeAll();
+  assert.equal(combined.length, 1);
+  assert.equal(combined[0].sequence, 2);
+  assert.equal(combined[0].sequenceGap, true);
+  assert.deepEqual(combined[0].changes.map(change => change.path), ["Data/notes/a.md", "Data/notes/b.md"]);
+  assert.equal(combined[0].changes[0].internal, false, "an external event must not be hidden by an internal one");
+  assert.equal(accumulator.size, 0);
+});
+
+test("background batch accumulator retains overflow recovery state", () => {
+  const accumulator = new WorkspaceBatchAccumulator();
+  const overflow = batch(8, [{ kind: "modify", path: "Data/notes/a.md", entity: "markdown", internal: false }]);
+  overflow.overflowed = true;
+  accumulator.add(overflow);
+  accumulator.add(batch(9, [{ kind: "modify", path: "Data/notes/b.md", entity: "markdown", internal: false }]));
+
+  const [combined] = accumulator.takeAll();
+  assert.equal(combined.overflowed, true);
+  assert.equal(combined.changes.length, 2);
 });

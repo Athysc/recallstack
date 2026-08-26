@@ -243,7 +243,7 @@ pub async fn backup_workspace(
     .await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cancel_backup(state: State<'_, Arc<AppState>>) {
     state.backup_cancel.store(true, Ordering::SeqCst);
 }
@@ -307,12 +307,12 @@ fn verify_backup_file(path: &Path) -> Result<BackupVerification, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn verify_backup(path: String) -> Result<BackupVerification, String> {
     logged("verify_backup", || verify_backup_file(Path::new(&path)))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_backup_dry_run(
     state: State<'_, Arc<AppState>>,
     path: String,

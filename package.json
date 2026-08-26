@@ -15,6 +15,7 @@
     "test:frontend": "node --test tests/frontend/*.test.ts",
     "test:performance-build": "node scripts/verify-performance-build.mjs",
     "test:release:performance": "node scripts/run-release-performance.mjs",
+    "test:windows-idle:performance": "node scripts/run-windows-idle-performance.mjs",
     "test:frontend:e2e": "node scripts/run-frontend-e2e.mjs",
     "verify:frontend": "npm run test:frontend && npm run build && npm run test:performance-build && (node scripts/run-frontend-e2e.mjs --if-available || echo 'Frontend desktop E2E failed; not blocking release verify while tracked separately in the frontend-e2e workflow.')",
     "check:versions": "node scripts/check-versions.mjs",
@@ -28,7 +29,7 @@
     "build:windows:portable": "tauri build --target x86_64-pc-windows-msvc --no-bundle -- --locked",
     "package:windows:portable": "node scripts/package-release.mjs windows-portable",
     "build:linux": "tauri build --no-bundle -- --locked",
-    "build:linux:appimage": "NO_STRIP=1 tauri build --bundles appimage --ci --no-sign -- --locked",
+    "build:linux:appimage": "node scripts/build-linux-appimage.mjs",
     "package:linux:tar": "node scripts/package-release.mjs linux-tar",
     "package:linux:appimage": "node scripts/package-release.mjs linux-appimage",
     "build:macos:app": "tauri build --target universal-apple-darwin --bundles app --ci --no-sign -- --locked",
@@ -61,5 +62,27 @@
     "@wdio/tauri-service": "^1.3.0",
     "typescript": "~5.7.3",
     "vite": "^6.1.0"
+  },
+  "engines": {
+    "node": "24.x",
+    "npm": "11.x"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "^24.0.0",
+      "onFail": "error"
+    },
+    "packageManager": {
+      "name": "npm",
+      "version": "^11.0.0",
+      "onFail": "error"
+    }
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "edgedriver": false,
+    "geckodriver": false
   }
 }

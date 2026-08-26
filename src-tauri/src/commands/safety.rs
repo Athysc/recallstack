@@ -245,7 +245,7 @@ pub fn trash_workspace_path(
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn trash_path(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -261,7 +261,7 @@ fn read_trash_record(entry: &Path) -> Result<TrashRecord, String> {
     .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_trash(state: State<'_, Arc<AppState>>) -> Result<Vec<TrashRecord>, String> {
     logged("list_trash", || {
         let directory = workspace(&state)?.join("Data").join(TRASH_DIRECTORY);
@@ -278,7 +278,7 @@ pub fn list_trash(state: State<'_, Arc<AppState>>) -> Result<Vec<TrashRecord>, S
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_trash(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -313,7 +313,7 @@ pub fn restore_trash(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn empty_trash(state: State<'_, Arc<AppState>>) -> Result<usize, String> {
     logged("empty_trash", || {
         let directory = workspace(&state)?.join("Data").join(TRASH_DIRECTORY);
@@ -435,7 +435,7 @@ pub fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_versions(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -459,7 +459,7 @@ pub fn list_versions(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_version(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -506,7 +506,7 @@ fn draft_path(app: &AppHandle, root: &Path, relative: &str) -> Result<PathBuf, S
         .join(format!("{hash:016x}.json")))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_draft(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -530,7 +530,7 @@ pub fn save_draft(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_draft(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -549,7 +549,7 @@ pub fn load_draft(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_draft(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,

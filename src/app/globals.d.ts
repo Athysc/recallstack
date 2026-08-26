@@ -64,6 +64,21 @@ interface Window {
   __TAURI__?: Record<string, any>;
   __TAURI_INTERNALS__?: Record<string, unknown>;
   __recallstackNative?: RecallStackNativeBridge;
+  __recallstackWatcherDiagnostics?: {
+    receivedBatches: number;
+    deliveredBatches: number;
+    receivedChanges: number;
+    deliveredChanges: number;
+    queuedWhileHidden: number;
+    sequenceGaps: number;
+    overflows: number;
+    reconciliations: number;
+    pendingWorkspaces: number;
+    lastFlushAt: number;
+    backgroundedAt: number;
+    lastBackgroundDurationMs: number;
+    maxEventDeliveryDelayMs: number;
+  };
   showDirectoryPicker(options?: { mode?: "read" | "readwrite" }): Promise<FileSystemDirectoryHandle>;
   // Standard Chromium File System Access API — used for the "Open / Import
   // Files" Browse button in browser (non-Tauri) mode. Not yet in TS's DOM lib.

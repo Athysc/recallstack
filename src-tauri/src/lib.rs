@@ -3,7 +3,7 @@ mod error_log;
 
 use commands::{backup, bridge, health, safety, workspace};
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -84,6 +84,7 @@ pub struct AppState {
     watcher_generation: Mutex<u64>,
     pub backup_cancel: AtomicBool,
     pub index_cancel: AtomicBool,
+    pub index_reconcile_workspaces: Mutex<HashSet<String>>,
 }
 
 impl Default for AppState {
@@ -97,6 +98,7 @@ impl Default for AppState {
             watcher_generation: Mutex::new(0),
             backup_cancel: AtomicBool::new(false),
             index_cancel: AtomicBool::new(false),
+            index_reconcile_workspaces: Mutex::new(HashSet::new()),
         }
     }
 }

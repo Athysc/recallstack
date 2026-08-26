@@ -9,7 +9,10 @@ export const config = {
   specs: [resolve(import.meta.dirname, "specs/release-performance.e2e.mjs")],
   services: [base.services[0]],
   reporters: ["spec"],
-  mochaOpts: { ui: "bdd", timeout: 180_000 },
+  mochaOpts: {
+    ui: "bdd",
+    timeout: process.env.RECALLSTACK_WINDOWS_IDLE_E2E === "1" ? 600_000 : 180_000,
+  },
   onPrepare() {
     base.onPrepare();
     for (let folder = 0; folder < 20; folder += 1) {
