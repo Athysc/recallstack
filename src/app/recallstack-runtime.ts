@@ -2663,14 +2663,23 @@ type TaskLocation = {
     return findActiveTab(tabs, activeTabId);
   }
 
+  // Today's journal file path, recomputed live from the current date. Only this
+  // path is ever the locked/pinned "daily journal" — an older journal opened
+  // for reference is an ordinary, closeable tab. protectedDailyJournalPath is
+  // just a "the journal has been opened this session" marker and can hold a
+  // stale date once the app has been left running past midnight, so protection
+  // must not key off its value.
+  function todaysDailyJournalPath(): string | null {
+    return journalLocationForDate(currentTasksRootParts(), localTodayDateString())?.path || null;
+  }
+
   function currentDailyJournalPath() {
-    if (protectedDailyJournalPath) return protectedDailyJournalPath;
-    const location = journalLocationForDate(currentTasksRootParts(), localTodayDateString());
-    return location?.path || null;
+    return todaysDailyJournalPath();
   }
 
   function isProtectedDailyJournalTab(tab: EditorTab | null | undefined) {
-    return !!tab && !!protectedDailyJournalPath && !tab.isOutputsFile && !tab.isExternalFile && tab.path === protectedDailyJournalPath;
+    return !!tab && !!protectedDailyJournalPath && !tab.isOutputsFile && !tab.isExternalFile
+      && tab.path === todaysDailyJournalPath();
   }
 
   // Manual drag-to-reorder only applies to ordinary pinned tabs. The protected
@@ -2682,7 +2691,7 @@ type TaskLocation = {
   }
 
   function enforceDailyJournalTabPosition() {
-    const dailyPath = protectedDailyJournalPath;
+    const dailyPath = protectedDailyJournalPath ? todaysDailyJournalPath() : null;
     if (!dailyPath) return;
     const index = tabs.findIndex(tab => !tab.isOutputsFile && !tab.isExternalFile && tab.path === dailyPath);
     if (index < 0) return;
