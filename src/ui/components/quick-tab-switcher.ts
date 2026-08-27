@@ -7,6 +7,11 @@ export interface QuickTabItem {
   path: string;
   kind: string;
   dirty: boolean;
+  /**
+   * When set, the row renders a trailing action button with this label. Clicking
+   * it invokes `QuickTabSwitcherOptions.rowAction` and keeps the switcher open.
+   */
+  actionLabel?: string;
 }
 
 export interface CodedQuickTabItem extends QuickTabItem {
@@ -20,11 +25,24 @@ export interface QuickTabSwitcherElements {
   typedCode: HTMLElement;
 }
 
+export interface QuickTabSwitcherRefresh {
+  items: QuickTabItem[];
+  activeId: number | null;
+}
+
 export interface QuickTabSwitcherOptions {
   items: QuickTabItem[];
   activeId: number | null;
+  /** `"large"` renders the 80vw × 60vh centered listing modal. */
+  size?: "default" | "large";
   activate(id: number, pinned?: boolean): Promise<boolean>;
-  closeItem(id: number): Promise<{ items: QuickTabItem[]; activeId: number | null } | null>;
+  closeItem(id: number): Promise<QuickTabSwitcherRefresh | null>;
+  /**
+   * Invoked when a row's trailing action button (see `QuickTabItem.actionLabel`)
+   * is clicked. Return the refreshed item set to re-render in place, or `null`
+   * to leave the list unchanged. The switcher stays open either way.
+   */
+  rowAction?(id: number): Promise<QuickTabSwitcherRefresh | null>;
 }
 
 /**
@@ -56,6 +74,7 @@ export class QuickTabSwitcherController {
   private previousFocus: HTMLElement | null = null;
   private activate: ((id: number, pinned?: boolean) => Promise<boolean>) | null = null;
   private closeItem: QuickTabSwitcherOptions["closeItem"] | null = null;
+  private rowAction: QuickTabSwitcherOptions["rowAction"] | null = null;
   private choosing = false;
 
   constructor(elements: QuickTabSwitcherElements) {
@@ -80,6 +99,8 @@ export class QuickTabSwitcherController {
     this.typed = "";
     this.activate = options.activate;
     this.closeItem = options.closeItem;
+    this.rowAction = options.rowAction ?? null;
+    this.elements.overlay.classList.toggle("quick-tab-switcher--large", options.size === "large");
     this.elements.overlay.classList.remove("hidden");
     this.render();
     requestAnimationFrame(() => this.elements.list.focus());
@@ -90,9 +111,11 @@ export class QuickTabSwitcherController {
     if (!this.isOpen() || this.choosing) return;
     const focus = this.previousFocus;
     this.elements.overlay.classList.add("hidden");
+    this.elements.overlay.classList.remove("quick-tab-switcher--large");
     this.items = [];
     this.activate = null;
     this.closeItem = null;
+    this.rowAction = null;
     this.previousFocus = null;
     this.typed = "";
     this.elements.typedCode.textContent = "";
@@ -124,6 +147,21 @@ export class QuickTabSwitcherController {
       kind.className = "quick-tab-kind";
       kind.textContent = `${item.dirty ? "●  " : ""}${item.kind}`;
       row.append(code, details, kind);
+      if (item.actionLabel && this.rowAction) {
+        const action = document.createElement("span");
+        action.className = "quick-tab-row-action";
+        action.setAttribute("role", "button");
+        action.setAttribute("tabindex", "-1");
+        action.textContent = item.actionLabel;
+        action.title = item.actionLabel;
+        action.addEventListener("mousedown", event => event.preventDefault());
+        action.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          void this.handleRowAction(index);
+        });
+        row.append(action);
+      }
       row.addEventListener("mouseenter", () => {
         this.selectedIndex = index;
         this.renderSelection();
@@ -220,6 +258,7 @@ export class QuickTabSwitcherController {
     this.choosing = true;
     const restoreFocus = this.previousFocus;
     this.elements.overlay.classList.add("hidden");
+    this.elements.overlay.classList.remove("quick-tab-switcher--large");
     try {
       const activated = await activate(item.id, pinned);
       if (!activated) restoreFocus?.focus();
@@ -227,10 +266,39 @@ export class QuickTabSwitcherController {
       this.items = [];
       this.activate = null;
       this.closeItem = null;
+      this.rowAction = null;
       this.previousFocus = null;
       this.typed = "";
       this.elements.typedCode.textContent = "";
       this.choosing = false;
+    }
+  }
+
+  /**
+   * Runs a row's trailing action (e.g. move a task to Working) and re-renders
+   * the list in place. The switcher stays open.
+   */
+  private async handleRowAction(index: number): Promise<void> {
+    const item = this.items[index];
+    const rowAction = this.rowAction;
+    if (!item || !rowAction || this.choosing) return;
+    this.choosing = true;
+    let emptied = false;
+    try {
+      const state = await rowAction(item.id);
+      if (!state) return;
+      if (!state.items.length) {
+        emptied = true;
+        return;
+      }
+      this.items = codeQuickTabs(state.items);
+      this.selectedIndex = Math.min(Math.max(this.selectedIndex, 0), this.items.length - 1);
+      this.typed = "";
+      this.render();
+      this.elements.list.focus();
+    } finally {
+      this.choosing = false;
+      if (emptied) this.close();
     }
   }
 
@@ -244,9 +312,11 @@ export class QuickTabSwitcherController {
       if (!state) return;
       if (!state.items.length) {
         this.elements.overlay.classList.add("hidden");
+        this.elements.overlay.classList.remove("quick-tab-switcher--large");
         this.items = [];
         this.activate = null;
         this.closeItem = null;
+        this.rowAction = null;
         this.previousFocus = null;
         this.typed = "";
         this.elements.typedCode.textContent = "";

@@ -164,7 +164,6 @@
     outline: none;
   }
   .settings-tile.btn-icon > svg,
-  .settings-tile.btn-icon.working-layout-toggle > svg,
   .settings-tile-icon svg {
     width: 32px;
     height: 32px;

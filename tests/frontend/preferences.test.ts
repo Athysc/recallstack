@@ -20,11 +20,10 @@ test("boolean preferences can default on while preserving an explicit off choice
   assert.equal(preferenceIsEnabled(null), false);
 });
 
-test("working pane layout and dimensions have stable persisted keys", () => {
-  assert.equal(PREFERENCE_KEYS.workingPaneVisible, "pkm-working-pane-visible");
-  assert.equal(PREFERENCE_KEYS.workingPaneLayout, "pkm-working-pane-layout");
-  assert.equal(PREFERENCE_KEYS.workingPaneBottomRatio, "pkm-working-pane-bottom-ratio");
-  assert.equal(PREFERENCE_KEYS.workingPaneWidths, "pkm-working-pane-widths");
+test("workspace and outputs folder paths have stable persisted keys", () => {
+  assert.equal(PREFERENCE_KEYS.workspaceRootPath, "recallstack-workspace-root-path");
+  assert.equal(PREFERENCE_KEYS.outputsFolderPath, "recallstack-outputs-folder-path");
+  assert.equal(PREFERENCE_KEYS.externalThemePath, "recallstack-external-theme-path");
 });
 
 test("editor and preview zoom has a stable global preference key", () => {

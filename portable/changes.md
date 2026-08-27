@@ -2,6 +2,73 @@
 
 ---
 
+## Version 0.1.4 — 2026-08-27 (unreleased)
+
+### Modal task browsing
+
+The Tasks list view is replaced by two centered modal windows — 80% of the
+application width, 60% of its height — that leave the editor and preview visible
+behind them:
+
+- **Task listing** (`Ctrl+T`, or the Task icon in Nav Row 1) — every workspace
+  task, with the quick coded-jump navigation of the Quick Task Selector and a
+  **→ Working** button on each row that moves the task into `tasks/working/`.
+- **Working Task listing** (`Ctrl+W`, or the new colored Working Tasks icon
+  beside the Task icon) — the same for `tasks/working/`, with a **← Task**
+  button on each row. Toggled rows drop off the list immediately; the modal
+  stays open until a task is chosen for viewing.
+
+### Working Tasks pane removed
+
+The resizable left/bottom **WORKING Tasks** pane, its layout toggle, its
+sort/completed controls, and the **Working Tasks Layout** settings tile are
+gone — the listing modals replace them. The related persisted preferences
+(`pkm-working-pane-*`, `pkm-working-show-completed`, `pkm-working-sort`) are no
+longer used.
+
+### Keyboard shortcut reference and remap
+
+- **`Ctrl+K`** now opens a **Keyboard Shortcuts** sheet listing every binding,
+  grouped by category.
+- The command palette moves to **`Ctrl+P`** (command-search `>` mode only; the
+  old `@` quick-open-notes shortcut is dropped — type `@` in the palette).
+- **`Ctrl+J`** opens the Daily Journal (was `Ctrl+L`).
+- **`Ctrl+L`** opens the new theme switcher (was Journal).
+- **`Ctrl+Q`** (and `Ctrl+Shift+W`) closes the current tab (was `Ctrl+W`).
+- **`Ctrl+I`** opens Open / Import Files.
+- **`Ctrl+/`** focuses workspace search; blockquote toggle in the editor moves
+  to **`Ctrl+'`**.
+- **`Ctrl+O`** is unbound.
+- Controls that have a shortcut now show it in their hover tooltip.
+
+### New-file picker
+
+**`Ctrl+N`** (and **+ New**) open a small picker: **New Note**, **New Task**,
+**New Working Task**, in that order. Arrow keys select; `Enter` creates; quick
+keys `n` / `t` / `w` jump and create.
+
+### Live theme switcher
+
+**`Ctrl+L`** opens a theme list that previews each theme across the whole app as
+you arrow through it. `Enter` applies and saves for the workspace; `Esc` reverts.
+
+### External theme file
+
+**Settings → External theme file** points RecallStack at a JSON file of extra
+themes, merged with the built-ins and remembered across restarts. One file may
+hold many themes; ids that collide with a built-in are skipped. **Use sample
+themes** loads the bundled **Lupine** and **Osaka Jade** themes (from Omarchy
+Quattro).
+
+### Escape and the default view
+
+`Esc` closes any open palette or modal and returns to the current file; with
+nothing open it saves and jumps to today's Daily Journal. When no note, task, or
+working task is open, RecallStack shows the Daily Journal instead of an empty
+file list.
+
+---
+
 ## Version 0.1.3 — 2026-08-12
 
 ### Workspace Tasks and Daily Journals

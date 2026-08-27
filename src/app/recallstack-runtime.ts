@@ -10,7 +10,7 @@ import {
   regularNoteFilename,
   taskDisplayTitle,
 } from "../features/tasks/filenames";
-import { parseThemeCatalog as parseThemeConfig } from "../features/themes/catalog";
+import { parseThemeCatalog as parseThemeConfig, parseExternalThemeCatalog, type ThemeCatalog, type ThemeDefinition } from "../features/themes/catalog";
 import {
   applyThemeVariables,
   FALLBACK_THEME_CATALOG,
@@ -18,7 +18,6 @@ import {
   installThemeOptions,
   themeRuntimeState,
 } from "../features/themes/runtime";
-import { clampDivider, resizePanePair } from "../features/tasks/pane-layout";
 import { calendarMonth, localIsoDate } from "../features/tasks/date-picker";
 import { DAILYLOGS_ROOT, TASKS_ROOT, isJournalPath, isWorkspaceTaskPath, isWorkspaceWorkingTaskPath, journalLocationForDate, journalTitleFromPath, latestJournalPathBefore } from "../features/tasks/paths";
 import { preserveExtraBlankLines } from "../services/markdown-spacing";
@@ -130,6 +129,7 @@ import { portableNameError } from "../services/portable-names";
 import { newMarkdownFileTitle, newMarkdownStoredFilename } from "../features/notes/new-file";
 import { NewFileModalController } from "../ui/components/new-file-modal";
 import { QuickTabSwitcherController, tabJumpCodes } from "../ui/components/quick-tab-switcher";
+import { KEY_BINDINGS, bindingsByCategory, comboFor } from "../features/commands/keymap";
 import {
   allFilesAreMarkdown,
   buildImportedFilePath,
@@ -143,7 +143,6 @@ import {
 } from "../features/editor/import-files";
 
 type ViewName = "welcome" | "list" | "editor" | "search" | "calendar" | "outputs";
-type WorkingSortMode = "alpha" | "mtime" | "priority";
 type BacklinkEntry = { sourcePath: string; sourceTitle: string; anchor?: string | null; kind: string };
 type NavigationOptions = {
   restoreView?: boolean;
@@ -263,24 +262,6 @@ type TaskLocation = {
 
   const assetBlobUrls = new Map<string, string>();
   let remoteMediaSessionAllowed = false;
-  let workingPaneVisible = localStorage.getItem(PREFERENCE_KEYS.workingPaneVisible) !== 'off';
-  let workingPaneLayout = localStorage.getItem(PREFERENCE_KEYS.workingPaneLayout) === 'bottom' ? 'bottom' : 'left';
-  let workingPaneBottomRatio = Number.parseFloat(localStorage.getItem(PREFERENCE_KEYS.workingPaneBottomRatio) || '0.4');
-  if (!Number.isFinite(workingPaneBottomRatio)) workingPaneBottomRatio = 0.4;
-  workingPaneBottomRatio = Math.min(0.9, Math.max(0.1, workingPaneBottomRatio));
-  let workingPaneWidths = (() => {
-    try {
-      const value = JSON.parse(localStorage.getItem(PREFERENCE_KEYS.workingPaneWidths) || 'null');
-      if (Array.isArray(value) && value.length === 3 && value.every(item => Number.isFinite(item) && item > 0)) return value;
-    } catch { /* use balanced defaults */ }
-    return [0.3, 0.35, 0.35];
-  })();
-  let workingShowCompleted = localStorage.getItem('pkm-working-show-completed') === 'on';
-  const WORKING_SORT_KEY = PREFERENCE_KEYS.workingSort;
-  const WORKING_SORT_MODES = new Set<WorkingSortMode>(['alpha', 'mtime', 'priority']);
-  let workingSortMode = (localStorage.getItem(WORKING_SORT_KEY) || 'alpha') as WorkingSortMode;
-  if (!WORKING_SORT_MODES.has(workingSortMode)) workingSortMode = 'alpha';
-  let workingTasksLoadId = 0;
   let workspaceSessionGeneration = 0;
 
   // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -300,6 +281,21 @@ type TaskLocation = {
   function $maybe(id: string): HTMLElement | null {
     return document.getElementById(id);
   }
+
+  // Keyboard-shortcut hint helpers — keep button tooltips in sync with keymap.ts.
+  function withShortcutHint(label: string, bindingId: string): string {
+    const combo = comboFor(bindingId);
+    return combo ? `${label} (${combo})` : label;
+  }
+  function applyShortcutHint(el: HTMLElement | null, bindingId: string, fallbackLabel?: string): void {
+    if (!el) return;
+    const combo = comboFor(bindingId);
+    if (!combo) return;
+    const base = (fallbackLabel ?? el.getAttribute('title') ?? '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+    el.setAttribute('title', base ? `${base} (${combo})` : combo);
+    el.setAttribute('aria-keyshortcuts', combo);
+  }
+
   const welcomeEl    = $id('welcome');
   const appEl        = $id('app');
   const appHeader    = $id<HTMLElement>('app-header');
@@ -382,17 +378,7 @@ type TaskLocation = {
   const taskKindIndicator = $id('task-kind-indicator');
   const taskEditorLayout = $id('task-editor-layout');
   const taskEditorTop = $id('task-editor-top');
-  const taskEditorResizer = $id('task-editor-resizer');
-  const workingTaskPane = $id('working-task-pane');
-  const workingTaskList = $id('working-task-list');
-  const btnToggleWorkingPane = $id('btn-toggle-working-pane');
   const btnPinCurrentFile = $id('btn-pin-current-file');
-  const btnWorkingLayout = $id('btn-working-layout');
-  const btnNewWorkingTask = $id('btn-new-working-task');
-  const btnToggleWorkingCompleted = $id('btn-toggle-working-completed');
-  const btnWorkingSortAlpha = $id('btn-working-sort-alpha');
-  const btnWorkingSortMtime = $id('btn-working-sort-mtime');
-  const btnWorkingSortPriority = $id('btn-working-sort-priority');
   const newFileModalEl = $id('modal-new-file');
   const newFileModal = new NewFileModalController({
     overlay: newFileModalEl,
@@ -1002,7 +988,6 @@ type TaskLocation = {
   function resetWorkspaceSessionState() {
     workspaceSessionGeneration++;
     listLoadGeneration++;
-    workingTasksLoadId++;
     nativeFileVersions.clear();
     removeExternalChangeBanner();
     for (const url of assetBlobUrls.values()) URL.revokeObjectURL(url);
@@ -1055,7 +1040,6 @@ type TaskLocation = {
     titleInput.value = '';
     mdEditor.openDocument('', '', 0);
     previewOut.replaceChildren();
-    workingTaskList.replaceChildren();
     taskDateBar.classList.add('hidden');
     taskCountBar.classList.add('hidden');
     taskCountBar.replaceChildren();
@@ -1172,6 +1156,7 @@ type TaskLocation = {
     changelogLoaded = false;
     const restoreView = options.restoreView ?? !changingWorkspace;
     await initNav({ restoreView });
+    await ensureJournalWhenEmpty();
     await buildSearchIndex();
     if (window.__recallstackNative?.active) renderSavedSearches().catch(error => console.warn('Could not load saved searches', error));
     performance.mark('recallstack:workspace-ui-ready');
@@ -1311,6 +1296,7 @@ type TaskLocation = {
     // Keep the Journal and Tasks icon shortcuts beside each other before folder tabs.
     navRow1.appendChild(mkReturnToTabBtn());
     navRow1.appendChild(mkNavAllTasksBtn());
+    navRow1.appendChild(mkNavWorkingTasksBtn());
     syncOutputsTopButton();
     navRow1.appendChild(mkNavSeparator());
     if (!folders.length) {
@@ -1348,11 +1334,9 @@ type TaskLocation = {
     }
 
     if (!restoreView || !await restoreLastView(folders)) {
-      if (allTasksEnabled) {
-        selectAllTasks();
-      } else if (folders.length) {
-        await selectL1(folders[0]);
-      }
+      // Land on a folder for nav context; ensureJournalWhenEmpty() then shows
+      // today's journal when nothing else is open.
+      if (folders.length) await selectL1(folders[0]);
     }
   }
 
@@ -1565,11 +1549,23 @@ type TaskLocation = {
     const btn = document.createElement('button');
     btn.id        = 'btn-all-tasks';
     btn.className = 'nav-all-tasks-btn nav-icon-task-btn';
-    btn.title = 'Tasks';
-    btn.setAttribute('aria-label', 'Tasks');
+    btn.title = withShortcutHint('Task listing', 'tasks.list');
+    btn.setAttribute('aria-label', 'Task listing');
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8h6M9 13h6M9 18h4"/><path d="m6.5 8 1 1 2-2" stroke="var(--green)"/><path d="m6.5 13 1 1 2-2" stroke="var(--yellow)"/></svg>`;
     btn.disabled  = isManagedSystemWorkspace();
-    btn.addEventListener('click', () => selectAllTasks());
+    btn.addEventListener('click', () => void openTaskListing().catch(e => toast('Could not load tasks: ' + (e?.message || e), 'error')));
+    return btn;
+  }
+
+  function mkNavWorkingTasksBtn() {
+    const btn = document.createElement('button');
+    btn.id        = 'btn-working-tasks';
+    btn.className = 'nav-working-tasks-btn nav-icon-task-btn';
+    btn.title = withShortcutHint('Working Task listing', 'tasks.working-list');
+    btn.setAttribute('aria-label', 'Working Task listing');
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v13H4z" fill="var(--surface1)"/><path d="M4 7h16v13H4z"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" stroke="var(--peach)"/><circle cx="12" cy="13" r="2.4" fill="var(--green)" stroke="none"/><path d="M4 12h5m6 0h5" stroke="var(--yellow)"/></svg>`;
+    btn.disabled  = isManagedSystemWorkspace();
+    btn.addEventListener('click', () => void openWorkingListing().catch(e => toast('Could not load working tasks: ' + (e?.message || e), 'error')));
     return btn;
   }
 
@@ -1584,8 +1580,9 @@ type TaskLocation = {
     const target = dailyPath ? findTabByPath(dailyPath) : null;
     btn.disabled = !notesHandle;
     btn.classList.toggle('active', !!target && target.id === activeTabId && !editorView.classList.contains('hidden'));
-    btn.title = 'Daily Journal';
-    btn.setAttribute('aria-label', btn.title);
+    btn.title = withShortcutHint('Daily Journal', 'navigation.today');
+    btn.setAttribute('aria-label', 'Daily Journal');
+    btn.setAttribute('aria-keyshortcuts', comboFor('navigation.today') || '');
   }
 
   async function returnToLastSelectedTab() {
@@ -1596,11 +1593,13 @@ type TaskLocation = {
     const btn = document.createElement('button');
     btn.id = 'btn-return-to-tab';
     btn.type = 'button';
-    btn.className = 'nav-return-tab-btn';
+    btn.className = 'nav-return-tab-btn nav-journal-btn--vivid';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M8 5V3.75A1.75 1.75 0 0 1 9.75 2h7.5A1.75 1.75 0 0 1 19 3.75V5"/>
-      <rect x="3" y="5" width="18" height="16" rx="2.25"/>
-      <path d="M8 13h8m-3-3 3 3-3 3"/>
+      <rect x="3" y="4" width="18" height="17" rx="2.25" fill="var(--surface1)"/>
+      <rect x="3" y="4" width="18" height="17" rx="2.25"/>
+      <path d="M3 9h18" stroke="var(--peach)"/>
+      <path d="M8 2.5v3M16 2.5v3" stroke="var(--red)"/>
+      <path d="m9 14 2 2 4-4" stroke="var(--green)"/>
     </svg>`;
     btn.addEventListener('click', () => void returnToLastSelectedTab());
     requestAnimationFrame(syncReturnToTabButton);
@@ -3102,6 +3101,7 @@ type TaskLocation = {
       }
     }
     renderTabStrip();
+    await ensureJournalWhenEmpty();
     return true;
   }
 
@@ -3138,13 +3138,17 @@ type TaskLocation = {
     await openFileInTab(entry.path);
   }
 
+  // `+ New` and Ctrl+N both open the kind picker (Note / Task / Working Task).
   async function newNote() {
-    if (!l1Active && !allTasksMode && !isJournalNote()) { toast('Select a folder first', 'error'); return; }
-    // Both new-task entry points save the current editor first, avoiding a later
-    // unsaved-changes prompt and preserving the user's current task.
+    openNewFileKindPicker();
+  }
+
+  async function createFileOfKind(kind: 'note' | 'task' | 'working') {
+    if (kind === 'working') { await createWorkingTask(); return; }
+    const createTask = kind === 'task';
+    if (!createTask && !l1Active && !allTasksMode && !isJournalNote()) { toast('Select a folder first', 'error'); return; }
+    // Save the current editor first, avoiding a later unsaved-changes prompt.
     if (!editorView.classList.contains('hidden') && (currentPath || isNew) && !await saveNote()) return;
-    const createTask = allTasksMode || isJournalNote();
-    const kind = createTask ? 'task' : 'note';
     const dir = createTask ? await getDirHandle(notesHandle!, [TASKS_ROOT], true) : await activeSaveDirHandle();
     const folderPath = createTask ? TASKS_ROOT : activeFolderPath();
     const defaultFilename = await uniqueDatedTitleInDir(dir, kind);
@@ -3161,7 +3165,7 @@ type TaskLocation = {
         updateSearchIndex(path, '');
         lsDraftClear(path);
         await openFile(filename, path);
-        toast(kind === 'task' ? 'New task created' : 'New note created');
+        toast(createTask ? 'New task created' : 'New note created');
         return null;
       },
     });
@@ -3343,7 +3347,6 @@ type TaskLocation = {
         btnMakeCopy.classList.remove('hidden');
         updateConvertToNoteBtn();
         applyJournalToolbarRestrictions();
-        if (taskFile) loadWorkingTasks();
         if (saveShouldNotify) toast('Saved ✓');
         if (isCurrentTaskFile()) refreshCalendarIfVisible();
         return true;
@@ -4009,194 +4012,25 @@ type TaskLocation = {
       syncStatusInputFromFilename();
       updateTaskKindIndicator();
       taskEditorLayout.classList.add('is-task-editor');
-      updateWorkingPaneVisibility();
-      loadWorkingTasks();
     } else if (isTasksAreaEditor()) {
-      // Journal notes are regular markdown under tasks: retain the Working pane,
-      // but do not expose task filename metadata controls.
+      // Journal notes are regular markdown under tasks: no task filename
+      // metadata controls, but the kind indicator still applies.
       taskDateBar.classList.add('hidden');
       taskEditorLayout.classList.add('is-task-editor');
       updateTaskKindIndicator();
       taskMetaSummary.classList.add('hidden');
-      updateWorkingPaneVisibility();
-      loadWorkingTasks();
     } else {
       taskDateBar.classList.add('hidden');
       taskEditorLayout.classList.remove('is-task-editor');
-      workingTaskPane.classList.add('hidden');
-      taskEditorResizer.classList.add('hidden');
       taskEditorTop.style.flex = '1';
       taskKindIndicator.classList.add('hidden');
       taskMetaSummary.classList.add('hidden');
-      applyWorkingPaneLayout(false);
-    }
-  }
-
-  function applyWorkingPaneLayout(resetWidths = false) {
-    const sideBySide = isTasksAreaEditor() && workingPaneVisible && workingPaneLayout === 'left';
-    splitPane.classList.toggle('three-pane', sideBySide);
-    taskEditorResizer.classList.toggle('side-resizer', sideBySide);
-    btnWorkingLayout.classList.toggle('active', workingPaneLayout === 'left');
-    btnWorkingLayout.title = workingPaneLayout === 'left'
-      ? 'Move Working Tasks back to the bottom pane'
-      : 'Move Working Tasks to a left pane';
-    btnWorkingLayout.setAttribute('aria-label', btnWorkingLayout.title);
-    btnWorkingLayout.setAttribute('aria-pressed', String(workingPaneLayout === 'left'));
-
-    if (sideBySide) {
-      if (workingTaskPane.parentElement !== splitPane) {
-        splitPane.insertBefore(workingTaskPane, editorPane);
-        splitPane.insertBefore(taskEditorResizer, editorPane);
-        resetWidths = true;
-      }
-      workingTaskPane.style.height = '';
-      taskEditorTop.style.flex = '1';
-      if (resetWidths) {
-        const available = Math.max(0, splitPane.clientWidth - taskEditorResizer.offsetWidth - resizerEl.offsetWidth);
-        const minimum = window.innerWidth * 0.2;
-        const workingMinimum = minimum / 2;
-        const ratioTotal = workingPaneWidths.reduce((total, value) => total + value, 0) || 1;
-        const workingWidth = Math.min(available - minimum * 2, Math.max(workingMinimum, available * workingPaneWidths[0] / ratioTotal));
-        const remaining = Math.max(minimum * 2, available - workingWidth);
-        const editorShare = workingPaneWidths[1] / (workingPaneWidths[1] + workingPaneWidths[2]);
-        const editorWidth = Math.min(remaining - minimum, Math.max(minimum, remaining * editorShare));
-        workingTaskPane.style.width = workingWidth + 'px';
-        editorPane.style.flex = 'none';
-        editorPane.style.width = editorWidth + 'px';
-        previewPane.style.flex = 'none';
-        previewPane.style.width = (remaining - editorWidth) + 'px';
-      }
-    } else {
-      if (workingTaskPane.parentElement !== taskEditorLayout) {
-        taskEditorLayout.append(taskEditorResizer, workingTaskPane);
-        resetWidths = true;
-      }
-      workingTaskPane.style.width = '';
-      workingTaskPane.style.height = `${workingPaneBottomRatio * 100}%`;
-      if (resetWidths) {
-        editorPane.style.flex = '1';
-        editorPane.style.width = '';
-        previewPane.style.flex = '1';
-        previewPane.style.width = '';
-      }
-    }
-  }
-
-  function persistWorkingPaneDimensions() {
-    if (splitPane.classList.contains('three-pane')) {
-      const widths = [workingTaskPane, editorPane, previewPane].map(element => element.getBoundingClientRect().width);
-      const total = widths.reduce((sum, width) => sum + width, 0);
-      if (total > 0) {
-        workingPaneWidths = widths.map(width => width / total);
-        localStorage.setItem(PREFERENCE_KEYS.workingPaneWidths, JSON.stringify(workingPaneWidths));
-      }
-      return;
-    }
-    const total = taskEditorLayout.getBoundingClientRect().height;
-    if (total > 0) {
-      workingPaneBottomRatio = workingTaskPane.getBoundingClientRect().height / total;
-      localStorage.setItem(PREFERENCE_KEYS.workingPaneBottomRatio, String(workingPaneBottomRatio));
-    }
-  }
-
-  function updateWorkingPaneVisibility() {
-    const visible = isTasksAreaEditor() && workingPaneVisible;
-    applyWorkingPaneLayout();
-    workingTaskPane.classList.toggle('hidden', !visible);
-    taskEditorResizer.classList.toggle('hidden', !visible);
-    // A previous resize leaves an inline fixed flex-basis on the editor. Clear it
-    // when the Working pane is visible, or let the editor fill the layout when hidden.
-    taskEditorTop.style.flex = visible ? '' : '1';
-    btnToggleWorkingPane.textContent = visible ? '▣' : '▤';
-    btnToggleWorkingPane.setAttribute('aria-pressed', String(visible));
-    btnToggleWorkingCompleted.classList.toggle('active', workingShowCompleted);
-    const sortButtons = {
-      alpha: btnWorkingSortAlpha,
-      mtime: btnWorkingSortMtime,
-      priority: btnWorkingSortPriority,
-    };
-    for (const [mode, button] of Object.entries(sortButtons)) {
-      const active = workingSortMode === mode;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-pressed', String(active));
     }
   }
 
   function localDateKey(date: any) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
-  function recentCompletionDates() {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const d = new Date(today); d.setDate(d.getDate() - 1);
-    const out = [localDateKey(today), localDateKey(d)];
-    // On Monday, retain the whole weekend rather than only Sunday.
-    if (today.getDay() === 1) {
-      d.setDate(d.getDate() - 1); out.push(localDateKey(d));
-      d.setDate(d.getDate() - 1); out.push(localDateKey(d));
-    }
-    return new Set(out);
-  }
   function currentTasksRootParts() {
     return [TASKS_ROOT];
-  }
-  async function loadWorkingTasks() {
-    if (!isTasksAreaEditor() || !workingPaneVisible) return;
-    const loadId = ++workingTasksLoadId;
-    workingTaskList.innerHTML = '';
-    const journal = document.createElement('div'); journal.className = 'working-task-item working-task-journal'; journal.textContent = '☀ Journal / Daily Notes'; journal.addEventListener('click', openTodayJournal); workingTaskList.appendChild(journal);
-    try {
-      const rootParts = currentTasksRootParts();
-      const tasksDir = await getDirHandle(notesHandle!, rootParts);
-      let workingDir; try { workingDir = await tasksDir.getDirectoryHandle('working'); } catch { return; }
-      const workingFiles = await Promise.all((await listMdFiles(workingDir)).map(enrichFileContent));
-      if (loadId !== workingTasksLoadId) return;
-      // Also repair any completed task that was left in Working by an earlier session.
-      for (const file of [...workingFiles]) {
-        if (!taskMetaFor(file.name, file.content).completedDate) continue;
-        const from = [...rootParts, 'working', file.name].join('/');
-        const to = await uniquePathInFolder(rootParts, file.name);
-        await writeMdFile(to, file.content); await removeMdFile(from);
-        removeFromSearchIndex(from); updateSearchIndex(to, file.content);
-        workingFiles.splice(workingFiles.indexOf(file), 1);
-      }
-      let completedFiles = [];
-      if (workingShowCompleted) {
-        const recent = recentCompletionDates();
-        const mainFiles = await Promise.all((await listMdFiles(tasksDir)).map(enrichFileContent));
-        completedFiles = mainFiles.filter(f => recent.has(taskMetaFor(f.name, f.content).completedDate || ''));
-      }
-      if (loadId !== workingTasksLoadId) return;
-      const sortEntries = (files: any) => [...files].sort((a, b) => {
-        if (workingSortMode === 'alpha') {
-          return taskDisplayTitle(a.name).localeCompare(taskDisplayTitle(b.name));
-        }
-        if (workingSortMode === 'priority') {
-          const pa = PRIORITY_ORDER[normalizeTaskPriority(taskMetaFor(a.name, a.content || '').priority)] ?? 1;
-          const pb = PRIORITY_ORDER[normalizeTaskPriority(taskMetaFor(b.name, b.content || '').priority)] ?? 1;
-          if (pa !== pb) return pa - pb;
-        }
-        return b.mtime - a.mtime;
-      });
-      const appendTask = (f: any, inWorking: any) => {
-        const meta = taskMetaFor(f.name, f.content);
-        const priority = normalizeTaskPriority(meta.priority);
-        const completed = !!meta.completedDate;
-        const item = document.createElement('div'); item.className = `working-task-item priority-${priority}${completed ? ' is-completed' : ''}`;
-        const name = document.createElement('span'); name.className = 'working-task-name'; name.textContent = taskDisplayTitle(f.name) + (completed ? ' ✓' : '');
-        if (completed && parseDateLocal(meta.completedDate)) {
-          const date = document.createElement('span'); date.className = 'working-task-completed-date';
-          const [year, month, day] = meta.completedDate!.split('-'); date.textContent = `${+month!}/${+day!}/${year}`;
-          item.append(name, date);
-        } else item.append(name);
-        const badge = document.createElement('span'); badge.className = 'working-task-priority'; badge.textContent = taskPriorityLabel(priority).replace(' Priority', '');
-        item.append(badge);
-        item.addEventListener('click', (event: MouseEvent) => openFile(f.name, `${rootParts.join('/')}/${inWorking ? 'working/' : ''}${f.name}`, { pinned: isPinnedClick(event) }));
-        workingTaskList.appendChild(item);
-      };
-      sortEntries(workingFiles).forEach(f => appendTask(f, true));
-      if (workingShowCompleted && completedFiles.length) {
-        const label = document.createElement('div'); label.className = 'working-task-section-label'; label.textContent = 'Completed'; workingTaskList.appendChild(label);
-        sortEntries(completedFiles).forEach(f => appendTask(f, false));
-      }
-    } catch (e: any) { console.warn('Could not load working tasks', e); }
   }
 
   async function createWorkingTask() {
@@ -4256,17 +4090,31 @@ type TaskLocation = {
     renderTabStrip();
   }
 
+  // When nothing but the (protected) daily journal is open, land on the journal
+  // instead of the file list — there is no "dynamic" file to show.
+  async function ensureJournalWhenEmpty() {
+    if (!notesHandle || isManagedSystemWorkspace()) return;
+    const hasDynamicTab = tabs.some(tab => !tab.pinned);
+    const hasOtherPinned = tabs.some(tab => tab.pinned && !isProtectedDailyJournalTab(tab));
+    if (hasDynamicTab || hasOtherPinned) return;
+    const showingFile = !editorView.classList.contains('hidden');
+    if (showingFile) return; // already on the journal (the only non-dynamic file)
+    try { await openTodayJournal(); }
+    catch (error) { console.warn('Could not open journal', error); }
+  }
+
   async function toggleWorkingTask() {
     if (!currentPath || !isCurrentTaskPath()) return;
     const wasWorking = currentPath!.split('/').includes('working');
     if (!await saveNote(true)) return;
     const parts = currentPath!.split('/'); const workingIndex = parts.indexOf('working'); const inWorking = workingIndex >= 0;
     const meta = taskMetaFor(parts.at(-1)!, mdEditor.value);
-    if (wasWorking && !inWorking && meta.completedDate) { toast('Completed tasks leave Working automatically'); loadWorkingTasks(); return; }
+    if (wasWorking && !inWorking && meta.completedDate) { toast('Completed tasks leave Working automatically'); return; }
     const destination = inWorking ? [...parts.slice(0, workingIndex), parts.at(-1)!] : [...parts.slice(0,-1), 'working', parts.at(-1)!];
     const destPath = await uniquePathInFolder(destination.slice(0,-1), destination.at(-1)!);
     await writeMdFile(destPath, mdEditor.value); await removeMdFile(currentPath); removeFromSearchIndex(currentPath); updateSearchIndex(destPath, mdEditor.value);
-    await openFile(destPath.split('/').at(-1)!, destPath); loadWorkingTasks();
+    await openFile(destPath.split('/').at(-1)!, destPath);
+    toast(inWorking ? 'Task returned to Tasks' : 'Task moved to Working');
   }
 
   async function toggleWorkingTaskFromList(file: any, location: any) {
@@ -4328,6 +4176,7 @@ type TaskLocation = {
         navRow1.appendChild(mkNavNewBtn(1));
         navRow1.appendChild(mkNavRenameBtn(1));
         if (allTasksEnabled) navRow1.appendChild(mkNavAllTasksBtn());
+        if (allTasksEnabled) navRow1.appendChild(mkNavWorkingTasksBtn());
         navRow1.appendChild(mkNavSeparator());
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
@@ -4442,6 +4291,7 @@ type TaskLocation = {
         navRow1.appendChild(mkNavNewBtn(1));
         navRow1.appendChild(mkNavRenameBtn(1));
         if (allTasksEnabled) navRow1.appendChild(mkNavAllTasksBtn());
+        if (allTasksEnabled) navRow1.appendChild(mkNavWorkingTasksBtn());
         navRow1.appendChild(mkNavSeparator());
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
@@ -5128,15 +4978,6 @@ type TaskLocation = {
     document.addEventListener('mousemove', (e: any) => {
       if (!dragging) return;
       const rect = splitPane.getBoundingClientRect();
-      if (splitPane.classList.contains('three-pane')) {
-        const editorRect = editorPane.getBoundingClientRect();
-        const divider = clampDivider(e.clientX, editorRect.left, rect.right, window.innerWidth * 0.2, resizerEl.offsetWidth);
-        editorPane.style.flex = 'none';
-        editorPane.style.width = (divider - editorRect.left) + 'px';
-        previewPane.style.flex = 'none';
-        previewPane.style.width = (rect.right - divider - resizerEl.offsetWidth) + 'px';
-        return;
-      }
       const pct  = Math.min(Math.max((e.clientX - rect.left) / rect.width * 100, 15), 85);
       editorPane.style.flex  = 'none';
       editorPane.style.width = pct + '%';
@@ -5146,7 +4987,6 @@ type TaskLocation = {
     document.addEventListener('mouseup', () => {
       if (!dragging) return;
       dragging = false;
-      persistWorkingPaneDimensions();
       resizerEl.classList.remove('dragging');
       document.body.style.cursor     = '';
       document.body.style.userSelect = '';
@@ -5851,27 +5691,26 @@ type TaskLocation = {
   [
     { id:'workspace.open', title:'Open or Switch Workspace', category:'Workspace', keywords:['folder'], run:() => $id('btn-open-workspace').click() },
     { id:'workspace.recent', title:'Open Recent Workspace', category:'Workspace', keywords:['switch pinned'], isVisible:(state: any) =>state.nativeDesktop, run:() => {} },
-    { id:'file.new', title:'Create Note', category:'File', keywords:['new'], shortcut:'Ctrl+N', isEnabled:needsWorkspace, disabledReason:()=>'Open a workspace first', run:newNote },
+    { id:'file.new', title:'Create Note, Task, or Working Task', category:'File', keywords:['new'], shortcut:'Ctrl+N', isEnabled:needsWorkspace, disabledReason:()=>'Open a workspace first', run:newNote },
     { id:'file.save', title:'Save Note', category:'File', shortcut:'Ctrl+S', isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:() => saveNote() },
     { id:'file.move', title:'Move or Rename Note', category:'File', isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:openMoveFileModal },
     { id:'file.archive', title:'Archive or Restore Note', category:'File', isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:() => btnArchive.classList.contains('restore') ? restoreNote() : archiveNote() },
     { id:'file.trash', title:'Move Note to Trash', category:'File', keywords:['delete'], isEnabled:needsEditor, disabledReason:()=>'Open a note first', run:deleteNote },
-    { id:'tabs.close', title:'Close Tab', category:'File', keywords:['tab'], shortcut:'Ctrl+W', isEnabled:()=>activeTabId != null, disabledReason:()=>'No tab open', run:closeActiveTab },
+    { id:'tabs.close', title:'Close Tab', category:'File', keywords:['tab'], shortcut:'Ctrl+Q', isEnabled:()=>activeTabId != null, disabledReason:()=>'No tab open', run:closeActiveTab },
     { id:'tabs.close-others', title:'Close Other Tabs', category:'File', keywords:['tab'], isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => closeOtherTabs() },
     { id:'tabs.reopen-closed', title:'Reopen Closed Tab', category:'File', keywords:['tab', 'undo'], isEnabled:()=>closedTabHistory.length > 0, disabledReason:()=>'No recently closed tabs', run:reopenClosedTab },
-    { id:'navigation.search', title:'Search Notes', category:'Navigation', keywords:['find'], shortcut:'Ctrl+Shift+F', isEnabled:needsWorkspace, run:() => searchInput.focus() },
-    { id:'navigation.today', title:'Open Today Journal', category:'Navigation', keywords:['journal daily'], shortcut:'Ctrl+L', isEnabled:needsWorkspace, run:openTodayJournal },
+    { id:'navigation.search', title:'Search Notes', category:'Navigation', keywords:['find'], shortcut:'Ctrl+/', isEnabled:needsWorkspace, run:() => searchInput.focus() },
+    { id:'navigation.today', title:'Open Today Journal', category:'Navigation', keywords:['journal daily'], shortcut:'Ctrl+J', isEnabled:needsWorkspace, run:openTodayJournal },
     { id:'navigation.next-tab', title:'Next Tab', category:'Navigation', keywords:['tab'], shortcut:'Ctrl+Tab', isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => switchToRelativeTab(1) },
     { id:'navigation.previous-tab', title:'Previous Tab', category:'Navigation', keywords:['tab'], shortcut:'Ctrl+Shift+Tab', isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => switchToRelativeTab(-1) },
     { id:'tasks.new-working', title:'Create Working Task', category:'Tasks', isEnabled:needsWorkspace, run:createWorkingTask },
-    { id:'tasks.quick-open', title:'Open Task', category:'Tasks', keywords:['tasks quick'], shortcut:'Ctrl+O', isEnabled:needsWorkspace, run:openQuickTaskSwitcher },
-    { id:'tasks.list', title:'Show Tasks List', category:'Tasks', keywords:['tasks all list'], shortcut:'Ctrl+T', isEnabled:needsWorkspace, run:selectAllTasks },
+    { id:'tasks.quick-open', title:'Open Task', category:'Tasks', keywords:['tasks quick'], isEnabled:needsWorkspace, run:openQuickTaskSwitcher },
+    { id:'tasks.list', title:'Show Task Listing', category:'Tasks', keywords:['tasks all list'], shortcut:'Ctrl+T', isEnabled:needsWorkspace, run:openTaskListing },
+    { id:'tasks.working-list', title:'Show Working Task Listing', category:'Tasks', keywords:['working tasks list'], shortcut:'Ctrl+W', isEnabled:needsWorkspace, run:openWorkingListing },
     { id:'view.presentation', title:'Toggle Presentation Mode', category:'View', shortcut:'F12', isEnabled:needsEditor, run:() => $id('btn-presentation').click() },
     { id:'view.zoom-in', title:'Zoom In', category:'View', shortcut:'Ctrl++', isEnabled:needsWorkspace, run:() => stepContentZoom(1) },
     { id:'view.zoom-out', title:'Zoom Out', category:'View', shortcut:'Ctrl+-', isEnabled:needsWorkspace, run:() => stepContentZoom(-1) },
     { id:'view.zoom-reset', title:'Reset Zoom', category:'View', shortcut:'Ctrl+0', isEnabled:needsWorkspace, run:() => setContentZoom(0) },
-    { id:'view.working-pane', title:'Show or Hide Working Tasks', category:'View', isEnabled:needsWorkspace, run:() => btnToggleWorkingPane.click() },
-    { id:'view.working-layout', title:'Switch Working Tasks Pane Layout', category:'View', isEnabled:needsWorkspace, run:() => btnWorkingLayout.click() },
     { id:'view.line-numbers', title:'Toggle Editor Line Numbers', category:'View', isEnabled:needsEditor, run:() => $id('btn-line-numbers').click() },
     { id:'editor.insert-link', title:'Insert Markdown Link', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('[link text](url)') },
     { id:'editor.insert-code', title:'Insert Code Block', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('```\n\n```') },
@@ -5992,6 +5831,14 @@ type TaskLocation = {
 
   btnNew.addEventListener('click', () => executeCommand('file.new'));
   btnSave.addEventListener('click', () => executeCommand('file.save'));
+
+  // Reflect keybindings in control tooltips (single source: keymap.ts).
+  applyShortcutHint(btnNew, 'file.new', 'New file');
+  applyShortcutHint(btnNewFromEditor, 'file.new', 'New file');
+  applyShortcutHint(btnSave, 'file.save', 'Save');
+  applyShortcutHint(btnOpenImport, 'tools.import', 'Open / Import Files');
+  applyShortcutHint($id('btn-presentation'), 'view.presentation', 'Toggle presentation mode');
+  applyShortcutHint($id('btn-search'), 'navigation.search', 'Search');
   btnStampDate.addEventListener('click', async () => {
     if (isWorkingTask()) return;
     const dateStr = localIsoDate(new Date());
@@ -6575,67 +6422,13 @@ type TaskLocation = {
     saveNote(true);
   });
   taskKindIndicator.addEventListener('click', () => toggleWorkingTask().catch(e => toast('Could not move task: ' + e.message, 'error')));
-  btnToggleWorkingPane.addEventListener('click', () => { workingPaneVisible = !workingPaneVisible; localStorage.setItem(PREFERENCE_KEYS.workingPaneVisible, workingPaneVisible ? 'on' : 'off'); updateWorkingPaneVisibility(); if (workingPaneVisible) loadWorkingTasks(); });
   btnPinCurrentFile.addEventListener('click', () => {
     const tab = activeTabRecord();
     if (!tab || tab.pinned) return;
     tab.pinned = true;
     renderTabStrip();
   });
-  btnWorkingLayout.addEventListener('click', () => {
-    workingPaneLayout = workingPaneLayout === 'left' ? 'bottom' : 'left';
-    localStorage.setItem(PREFERENCE_KEYS.workingPaneLayout, workingPaneLayout);
-    applyWorkingPaneLayout(true);
-    updateWorkingPaneVisibility();
-    if (workingPaneVisible) loadWorkingTasks();
-  });
-  window.addEventListener('resize', () => {
-    if (splitPane.classList.contains('three-pane')) applyWorkingPaneLayout(true);
-  });
-  btnToggleWorkingCompleted.addEventListener('click', () => { workingShowCompleted = !workingShowCompleted; localStorage.setItem('pkm-working-show-completed', workingShowCompleted ? 'on' : 'off'); updateWorkingPaneVisibility(); loadWorkingTasks(); });
-  const workingSortButtons: Array<[HTMLButtonElement, WorkingSortMode]> = [
-    [btnWorkingSortAlpha, 'alpha'],
-    [btnWorkingSortMtime, 'mtime'],
-    [btnWorkingSortPriority, 'priority'],
-  ];
-  workingSortButtons.forEach(([button, mode]) => button.addEventListener('click', () => {
-    workingSortMode = mode;
-    localStorage.setItem(WORKING_SORT_KEY, workingSortMode);
-    updateWorkingPaneVisibility();
-    loadWorkingTasks();
-  }));
-  btnNewWorkingTask.addEventListener('click', () => executeCommand('tasks.new-working'));
   btnViewJournal.addEventListener('click', () => openTodayJournal().catch(e => toast('Could not open journal: ' + e.message, 'error')));
-  let taskResizeStart: { mode: "side"; x: number; working: number; editor: number } | { mode: "bottom"; y: number; h: number } | null = null;
-  taskEditorResizer.addEventListener('pointerdown', (e: any) => {
-    const sideBySide = splitPane.classList.contains('three-pane');
-    taskResizeStart = sideBySide
-      ? { mode:'side', x:e.clientX, working:workingTaskPane.getBoundingClientRect().width, editor:editorPane.getBoundingClientRect().width }
-      : { mode:'bottom', y:e.clientY, h:workingTaskPane.getBoundingClientRect().height };
-    taskEditorResizer.classList.add('dragging');
-    taskEditorResizer.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-  taskEditorResizer.addEventListener('pointermove', (e: any) => {
-    if (!taskResizeStart) return;
-    if (taskResizeStart.mode === 'side') {
-      const widths = resizePanePair(taskResizeStart.working, taskResizeStart.editor, e.clientX - taskResizeStart.x, window.innerWidth * 0.1, window.innerWidth * 0.2);
-      workingTaskPane.style.width = widths.first + 'px';
-      editorPane.style.width = widths.second + 'px';
-      return;
-    }
-    const total = taskEditorLayout.getBoundingClientRect().height;
-    const next = Math.max(window.innerHeight*.1, Math.min(total-window.innerHeight*.1, taskResizeStart.h-(e.clientY-taskResizeStart.y)));
-    workingTaskPane.style.height = next+'px';
-    taskEditorTop.style.flex = '0 0 '+(total-next-taskEditorResizer.offsetHeight)+'px';
-  });
-  const finishTaskResize = () => {
-    if (taskResizeStart) persistWorkingPaneDimensions();
-    taskResizeStart = null;
-    taskEditorResizer.classList.remove('dragging');
-  };
-  taskEditorResizer.addEventListener('pointerup', finishTaskResize);
-  taskEditorResizer.addEventListener('pointercancel', finishTaskResize);
   // On blur: re-sync display (restores today hint if user dismissed without selecting,
   // or shows the committed date if they did select one).
   taskInputStart.addEventListener('blur',     () => syncDateInputsFromEditor());
@@ -7264,6 +7057,343 @@ type TaskLocation = {
     requestAnimationFrame(() => input.focus());
   }
 
+  // ── Task / Working Task listing modals (Ctrl+T / Ctrl+W) ────────────────────
+  const taskListingOverlay = document.createElement('div');
+  taskListingOverlay.id = 'modal-task-listing';
+  taskListingOverlay.className = 'quick-tab-switcher hidden quick-task-switcher';
+  taskListingOverlay.innerHTML = `<div class="quick-tab-switcher-dialog quick-task-switcher-dialog" role="dialog" aria-modal="true" aria-labelledby="task-listing-title"><div class="quick-tab-switcher-header"><div><div id="task-listing-title" class="quick-tab-switcher-title">Tasks</div><div class="quick-tab-switcher-subtitle">Open a task, or use → Working to move it. Ctrl+Enter pins.</div></div><div id="task-listing-typed-code" class="quick-tab-typed-code" aria-live="polite"></div></div><div id="task-listing-results" class="quick-tab-results" role="listbox" aria-label="Tasks" tabindex="0"></div><div class="quick-tab-switcher-footer"><span>↓ / J Down</span><span>↑ / K Up</span><span>Enter Open</span><span>Ctrl+Enter Pin</span><span>→ Working</span><span>Esc Close</span></div></div>`;
+  document.body.appendChild(taskListingOverlay);
+  const workingListingOverlay = document.createElement('div');
+  workingListingOverlay.id = 'modal-working-listing';
+  workingListingOverlay.className = 'quick-tab-switcher hidden quick-task-switcher';
+  workingListingOverlay.innerHTML = `<div class="quick-tab-switcher-dialog quick-task-switcher-dialog" role="dialog" aria-modal="true" aria-labelledby="working-listing-title"><div class="quick-tab-switcher-header"><div><div id="working-listing-title" class="quick-tab-switcher-title">Working Tasks</div><div class="quick-tab-switcher-subtitle">Open a working task, or use ← Task to return it. Ctrl+Enter pins.</div></div><div id="working-listing-typed-code" class="quick-tab-typed-code" aria-live="polite"></div></div><div id="working-listing-results" class="quick-tab-results" role="listbox" aria-label="Working tasks" tabindex="0"></div><div class="quick-tab-switcher-footer"><span>↓ / J Down</span><span>↑ / K Up</span><span>Enter Open</span><span>Ctrl+Enter Pin</span><span>← Task</span><span>Esc Close</span></div></div>`;
+  document.body.appendChild(workingListingOverlay);
+  const taskListingSwitcher = new QuickTabSwitcherController({
+    overlay: taskListingOverlay,
+    dialog: taskListingOverlay.firstElementChild as HTMLElement,
+    list: $id('task-listing-results'),
+    typedCode: $id('task-listing-typed-code'),
+  });
+  const workingListingSwitcher = new QuickTabSwitcherController({
+    overlay: workingListingOverlay,
+    dialog: workingListingOverlay.firstElementChild as HTMLElement,
+    list: $id('working-listing-results'),
+    typedCode: $id('working-listing-typed-code'),
+  });
+
+  let listingEntries: Array<{ id: number; file: any }> = [];
+
+  async function buildListingItems(inWorking: boolean) {
+    const tasksDir = await getDirHandle(notesHandle!, [TASKS_ROOT], true);
+    let dir: FileSystemDirectoryHandle = tasksDir;
+    if (inWorking) {
+      try { dir = await tasksDir.getDirectoryHandle('working'); }
+      catch { listingEntries = []; return []; }
+    }
+    const files = await Promise.all((await listMdFiles(dir)).map(enrichFileContent));
+    const entries = sortTaskEntries(files.map(file => ({
+      file,
+      path: `${TASKS_ROOT}/${inWorking ? 'working/' : ''}${file.name}`,
+      inWorking,
+    })));
+    listingEntries = entries.map((entry, index) => ({ id: index + 1, file: entry.file }));
+    return entries.map((entry, index) => ({
+      id: index + 1,
+      title: taskDisplayTitle(entry.file.name),
+      path: entry.path,
+      kind: inWorking ? 'Working Task' : 'Task',
+      dirty: Boolean(findTabByPath(entry.path)?.dirty),
+      actionLabel: inWorking ? '← Task' : '→ Working',
+    }));
+  }
+
+  function makeListingOptions(inWorking: boolean) {
+    return {
+      size: 'large' as const,
+      async activate(id: number, pinned = false) {
+        const entry = listingEntries.find(candidate => candidate.id === id);
+        if (!entry) return false;
+        const path = `${TASKS_ROOT}/${inWorking ? 'working/' : ''}${entry.file.name}`;
+        const opened = await openFile(entry.file.name, path, { pinned });
+        if (opened) mdEditor.focus();
+        return Boolean(opened);
+      },
+      async closeItem() { return null; },
+      async rowAction(id: number) {
+        const entry = listingEntries.find(candidate => candidate.id === id);
+        if (!entry) return null;
+        try {
+          await toggleWorkingTaskFromList(entry.file, { rootParts: [TASKS_ROOT], inWorking, reload: async () => {} });
+        } catch (error: any) {
+          toast('Could not move task: ' + (error?.message || error), 'error');
+          return null;
+        }
+        const items = await buildListingItems(inWorking);
+        return { items, activeId: null };
+      },
+    };
+  }
+
+  async function openTaskListing() {
+    if (!notesHandle) return false;
+    const items = await buildListingItems(false);
+    if (!items.length) { toast('No tasks found'); return false; }
+    return taskListingSwitcher.open({ items, activeId: null, ...makeListingOptions(false) });
+  }
+
+  async function openWorkingListing() {
+    if (!notesHandle) return false;
+    const items = await buildListingItems(true);
+    if (!items.length) { toast('No working tasks found'); return false; }
+    return workingListingSwitcher.open({ items, activeId: null, ...makeListingOptions(true) });
+  }
+
+  function toggleTaskListing() {
+    if (taskListingSwitcher.isOpen()) { taskListingSwitcher.close(); return; }
+    workingListingSwitcher.close();
+    if (!palette.classList.contains('hidden')) closeCommandPalette();
+    void openTaskListing().catch(e => toast('Could not load tasks: ' + (e?.message || e), 'error'));
+  }
+
+  function toggleWorkingListing() {
+    if (workingListingSwitcher.isOpen()) { workingListingSwitcher.close(); return; }
+    taskListingSwitcher.close();
+    if (!palette.classList.contains('hidden')) closeCommandPalette();
+    void openWorkingListing().catch(e => toast('Could not load working tasks: ' + (e?.message || e), 'error'));
+  }
+
+  // ── Keybinding help modal (Ctrl+K) ─────────────────────────────────────────
+  const keybindingsModal = document.createElement('div');
+  keybindingsModal.id = 'modal-keybindings';
+  keybindingsModal.className = 'hidden';
+  keybindingsModal.innerHTML = `<div class="md-ref-dialog keybind-dialog" role="dialog" aria-modal="true" aria-labelledby="keybind-title"><div class="md-ref-header"><span class="md-ref-title" id="keybind-title">⌨️ Keyboard Shortcuts</span><button class="md-ref-close" id="btn-keybind-close" title="Close" aria-label="Close keyboard shortcuts"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div><div class="md-ref-body keybind-body" id="keybind-body"></div></div>`;
+  document.body.appendChild(keybindingsModal);
+  {
+    const body = keybindingsModal.querySelector<HTMLElement>('#keybind-body')!;
+    for (const group of bindingsByCategory()) {
+      const section = document.createElement('section');
+      section.className = 'keybind-section';
+      const heading = document.createElement('h3');
+      heading.textContent = group.category;
+      section.appendChild(heading);
+      for (const binding of group.bindings) {
+        const row = document.createElement('div');
+        row.className = 'keybind-row';
+        row.innerHTML = `<div class="keybind-row-text"><span class="keybind-label">${esc(binding.label)}</span><span class="keybind-desc">${esc(binding.description)}</span></div><kbd>${esc(binding.combo)}</kbd>`;
+        section.appendChild(row);
+      }
+      body.appendChild(section);
+    }
+    keybindingsModal.querySelector('#btn-keybind-close')!.addEventListener('click', () => closeKeybindingsModal());
+    keybindingsModal.addEventListener('click', event => { if (event.target === keybindingsModal) closeKeybindingsModal(); });
+    keybindingsModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeKeybindingsModal(); }
+    });
+  }
+  let keybindPreviousFocus: HTMLElement | null = null;
+  function openKeybindingsModal() {
+    keybindPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    keybindingsModal.classList.remove('hidden');
+    requestAnimationFrame(() => keybindingsModal.querySelector<HTMLElement>('#btn-keybind-close')?.focus());
+  }
+  function closeKeybindingsModal() {
+    keybindingsModal.classList.add('hidden');
+    keybindPreviousFocus?.focus();
+    keybindPreviousFocus = null;
+  }
+  function toggleKeybindingsModal() {
+    if (keybindingsModal.classList.contains('hidden')) openKeybindingsModal();
+    else closeKeybindingsModal();
+  }
+
+  // ── Theme switcher modal (Ctrl+L, live preview) ────────────────────────────
+  const themeSwitcherModal = document.createElement('div');
+  themeSwitcherModal.id = 'modal-theme-switcher';
+  themeSwitcherModal.className = 'quick-tab-switcher hidden theme-switcher';
+  themeSwitcherModal.innerHTML = `<div class="quick-tab-switcher-dialog theme-switcher-dialog" role="dialog" aria-modal="true" aria-labelledby="theme-switcher-title"><div class="quick-tab-switcher-header"><div><div id="theme-switcher-title" class="quick-tab-switcher-title">Theme</div><div class="quick-tab-switcher-subtitle">↑ ↓ preview live · Enter apply · Esc cancel</div></div></div><div id="theme-switcher-results" class="quick-tab-results" role="listbox" aria-label="Themes" tabindex="0"></div></div>`;
+  document.body.appendChild(themeSwitcherModal);
+  const themeSwitcherResults = themeSwitcherModal.querySelector<HTMLElement>('#theme-switcher-results')!;
+  let themeSwitcherIds: string[] = [];
+  let themeSwitcherIndex = 0;
+  let themeSwitcherOpeningTheme = '';
+  let themeSwitcherPreviousFocus: HTMLElement | null = null;
+
+  function currentThemeId() {
+    return themeSelect.value && THEMES[themeSelect.value] ? themeSelect.value : defaultThemeId;
+  }
+
+  function renderThemeSwitcher() {
+    themeSwitcherResults.replaceChildren();
+    themeSwitcherIds.forEach((id, index) => {
+      const detail = themeDetails[id];
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'quick-tab-item';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', String(index === themeSwitcherIndex));
+      row.innerHTML = `<span class="quick-tab-details"><span class="quick-tab-title">${esc(detail?.name || id)}</span><small>${esc(detail?.group || '')}</small></span><span class="quick-tab-kind">${esc(detail?.mode || '')}</span>`;
+      row.addEventListener('mouseenter', () => { themeSwitcherIndex = index; previewThemeAtIndex(); });
+      row.addEventListener('click', () => commitThemeSwitcher());
+      themeSwitcherResults.appendChild(row);
+    });
+    updateThemeSwitcherSelection();
+  }
+  function updateThemeSwitcherSelection() {
+    themeSwitcherResults.querySelectorAll<HTMLElement>('[role="option"]').forEach((row, index) => {
+      row.setAttribute('aria-selected', String(index === themeSwitcherIndex));
+    });
+    themeSwitcherResults.children[themeSwitcherIndex]?.scrollIntoView({ block: 'nearest' });
+  }
+  function previewThemeAtIndex() {
+    updateThemeSwitcherSelection();
+    const id = themeSwitcherIds[themeSwitcherIndex];
+    if (id) applyTheme(id, false);
+  }
+  function openThemeSwitcher() {
+    themeSwitcherIds = Object.keys(themeDetails);
+    if (!themeSwitcherIds.length) { toast('No themes available'); return; }
+    themeSwitcherOpeningTheme = currentThemeId();
+    themeSwitcherPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    themeSwitcherIndex = Math.max(0, themeSwitcherIds.indexOf(themeSwitcherOpeningTheme));
+    themeSwitcherModal.classList.remove('hidden');
+    renderThemeSwitcher();
+    requestAnimationFrame(() => themeSwitcherResults.focus());
+  }
+  function closeThemeSwitcher(revert: boolean) {
+    if (themeSwitcherModal.classList.contains('hidden')) return;
+    if (revert) applyTheme(themeSwitcherOpeningTheme, false);
+    themeSwitcherModal.classList.add('hidden');
+    themeSwitcherPreviousFocus?.focus();
+    themeSwitcherPreviousFocus = null;
+  }
+  function commitThemeSwitcher() {
+    const id = themeSwitcherIds[themeSwitcherIndex];
+    if (id) { themeSelect.value = id; applyTheme(id, true); }
+    closeThemeSwitcher(false);
+  }
+  function toggleThemeSwitcher() {
+    if (themeSwitcherModal.classList.contains('hidden')) openThemeSwitcher();
+    else closeThemeSwitcher(true);
+  }
+  themeSwitcherModal.addEventListener('click', event => { if (event.target === themeSwitcherModal) closeThemeSwitcher(true); });
+  themeSwitcherResults.addEventListener('keydown', event => {
+    if (event.ctrlKey || event.metaKey || event.altKey) { event.preventDefault(); event.stopPropagation(); return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key.toLowerCase() === 'j' || event.key.toLowerCase() === 'k') {
+      event.preventDefault(); event.stopPropagation();
+      const delta = event.key === 'ArrowDown' || event.key.toLowerCase() === 'j' ? 1 : -1;
+      themeSwitcherIndex = (themeSwitcherIndex + delta + themeSwitcherIds.length) % themeSwitcherIds.length;
+      previewThemeAtIndex();
+      return;
+    }
+    if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); commitThemeSwitcher(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeThemeSwitcher(true); return; }
+  });
+
+  // ── New-file kind picker (Ctrl+N) ─────────────────────────────────────────
+  const NEW_FILE_KINDS: Array<{ kind: 'note' | 'task' | 'working'; label: string; code: string }> = [
+    { kind: 'note', label: 'New Note', code: 'N' },
+    { kind: 'task', label: 'New Task', code: 'T' },
+    { kind: 'working', label: 'New Working Task', code: 'W' },
+  ];
+  const newFileKindModal = document.createElement('div');
+  newFileKindModal.id = 'modal-new-file-kind';
+  newFileKindModal.className = 'quick-tab-switcher hidden new-file-kind';
+  newFileKindModal.innerHTML = `<div class="quick-tab-switcher-dialog new-file-kind-dialog" role="dialog" aria-modal="true" aria-labelledby="new-file-kind-title"><div class="quick-tab-switcher-header"><div><div id="new-file-kind-title" class="quick-tab-switcher-title">Create…</div><div class="quick-tab-switcher-subtitle">↑ ↓ select · Enter create · N / T / W jump</div></div></div><div id="new-file-kind-results" class="quick-tab-results" role="listbox" aria-label="New file kind" tabindex="0"></div></div>`;
+  document.body.appendChild(newFileKindModal);
+  const newFileKindResults = newFileKindModal.querySelector<HTMLElement>('#new-file-kind-results')!;
+  let newFileKindIndex = 0;
+  let newFileKindPreviousFocus: HTMLElement | null = null;
+
+  function renderNewFileKind() {
+    newFileKindResults.replaceChildren();
+    NEW_FILE_KINDS.forEach((entry, index) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'quick-tab-item';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', String(index === newFileKindIndex));
+      row.innerHTML = `<kbd class="quick-tab-code">${entry.code}</kbd><span class="quick-tab-details"><span class="quick-tab-title">${esc(entry.label)}</span></span>`;
+      row.addEventListener('mouseenter', () => { newFileKindIndex = index; updateNewFileKindSelection(); });
+      row.addEventListener('click', () => chooseNewFileKind(index));
+      newFileKindResults.appendChild(row);
+    });
+    updateNewFileKindSelection();
+  }
+  function updateNewFileKindSelection() {
+    newFileKindResults.querySelectorAll<HTMLElement>('[role="option"]').forEach((row, index) => {
+      row.setAttribute('aria-selected', String(index === newFileKindIndex));
+    });
+  }
+  function openNewFileKindPicker() {
+    if (!rootHandle) { toast('Open a workspace first', 'error'); return; }
+    newFileKindPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    newFileKindIndex = (allTasksMode || isJournalNote()) ? 1 : 0;
+    newFileKindModal.classList.remove('hidden');
+    renderNewFileKind();
+    requestAnimationFrame(() => newFileKindResults.focus());
+  }
+  function closeNewFileKindPicker() {
+    newFileKindModal.classList.add('hidden');
+    newFileKindPreviousFocus?.focus();
+    newFileKindPreviousFocus = null;
+  }
+  function chooseNewFileKind(index: number) {
+    const entry = NEW_FILE_KINDS[index];
+    if (!entry) return;
+    closeNewFileKindPicker();
+    void createFileOfKind(entry.kind).catch(e => toast('Could not create file: ' + (e?.message || e), 'error'));
+  }
+  newFileKindModal.addEventListener('click', event => { if (event.target === newFileKindModal) closeNewFileKindPicker(); });
+  newFileKindResults.addEventListener('keydown', event => {
+    if (event.ctrlKey || event.metaKey || event.altKey) { event.preventDefault(); event.stopPropagation(); return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault(); event.stopPropagation();
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      newFileKindIndex = (newFileKindIndex + delta + NEW_FILE_KINDS.length) % NEW_FILE_KINDS.length;
+      updateNewFileKindSelection();
+      return;
+    }
+    if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); chooseNewFileKind(newFileKindIndex); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeNewFileKindPicker(); return; }
+    const match = NEW_FILE_KINDS.findIndex(entry => entry.code.toLowerCase() === event.key.toLowerCase());
+    if (match >= 0) { event.preventDefault(); event.stopPropagation(); newFileKindIndex = match; updateNewFileKindSelection(); chooseNewFileKind(match); }
+  });
+
+  // ── Global Escape + overlay helpers ───────────────────────────────────────
+  function anyOverlayOpen() {
+    return !!document.querySelector(
+      '.modal-overlay:not(.hidden), .settings-overlay:not(.hidden), .command-palette:not(.hidden), ' +
+      '.quick-tab-switcher:not(.hidden), #modal-md-ref:not(.hidden), #modal-readme:not(.hidden), ' +
+      '#modal-changelog:not(.hidden), #modal-safety-tools:not(.hidden), #modal-keybindings:not(.hidden)',
+    );
+  }
+  function closeTopmostOverlay() {
+    if (taskListingSwitcher.isOpen()) return taskListingSwitcher.close();
+    if (workingListingSwitcher.isOpen()) return workingListingSwitcher.close();
+    if (quickTabSwitcher.isOpen()) return quickTabSwitcher.close();
+    if (quickTaskSwitcher.isOpen()) return quickTaskSwitcher.close();
+    if (!palette.classList.contains('hidden')) return closeCommandPalette();
+    if (!keybindingsModal.classList.contains('hidden')) return closeKeybindingsModal();
+    if (!themeSwitcherModal.classList.contains('hidden')) return closeThemeSwitcher(true);
+    if (!newFileKindModal.classList.contains('hidden')) return closeNewFileKindPicker();
+    const generic = document.querySelector<HTMLElement>(
+      '.modal-overlay:not(.hidden), .settings-overlay:not(.hidden), #modal-md-ref:not(.hidden), ' +
+      '#modal-readme:not(.hidden), #modal-changelog:not(.hidden), #modal-safety-tools:not(.hidden)',
+    );
+    if (generic) generic.classList.add('hidden');
+  }
+  async function handleGlobalEscape() {
+    if (!editorView.classList.contains('hidden')) {
+      try { await autoSaveIfDirty(true); } catch { /* fall through to journal */ }
+    }
+    try { await openTodayJournal(); }
+    catch (error: any) { toast('Could not open journal: ' + (error?.message || error), 'error'); }
+  }
+  let escapeOverlayWasOpen = false;
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') escapeOverlayWasOpen = anyOverlayOpen();
+  }, true);
+
   document.addEventListener('keydown', (e: any) => {
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === ' ' || e.code === 'Space')) {
       e.preventDefault();
@@ -7322,74 +7452,53 @@ type TaskLocation = {
         }
       }
     }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l') {
+    const mod = e.ctrlKey || e.metaKey;
+    const plain = !e.shiftKey && !e.altKey;
+    const key = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+
+    if (e.key === 'Escape') {
+      if (anyOverlayOpen()) { e.preventDefault(); closeTopmostOverlay(); return; }
+      if (escapeOverlayWasOpen) return; // an overlay's own handler already closed it
+      if (!searchView.classList.contains('hidden') && document.activeElement !== searchInput) {
+        e.preventDefault();
+        clearTimeout(_searchTimer);
+        lastSearchBuffer = null;
+        searchInput.value = '';
+        exitSearchView();
+        return;
+      }
       e.preventDefault();
-      executeCommand('navigation.today');
+      void handleGlobalEscape();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 't') {
-      e.preventDefault(); executeCommand('tasks.list'); return;
-    }
-    if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && e.key === 'F12') {
-      e.preventDefault(); executeCommand('view.presentation'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === '+' || e.key === '=')) {
-      e.preventDefault(); executeCommand('view.zoom-in'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === '-') {
-      e.preventDefault(); executeCommand('view.zoom-out'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === '0') {
-      e.preventDefault(); executeCommand('view.zoom-reset'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+
+    if (mod && plain && key === 'l') { e.preventDefault(); toggleThemeSwitcher(); return; }
+    if (mod && plain && key === 'k') { e.preventDefault(); toggleKeybindingsModal(); return; }
+    if (mod && plain && key === 'p') {
       e.preventDefault();
       if (palette.classList.contains('hidden')) openCommandPalette('>'); else closeCommandPalette();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-      e.preventDefault(); openCommandPalette('@'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
-      e.preventDefault(); void openSearchBufferOrPrompt(); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
-      e.preventDefault(); executeCommand('navigation.search'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
-      e.preventDefault(); executeCommand('file.new'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
-      e.preventDefault(); executeCommand('tasks.quick-open'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
+    if (mod && plain && key === 'j') { e.preventDefault(); executeCommand('navigation.today'); return; }
+    if (mod && plain && key === 't') { e.preventDefault(); toggleTaskListing(); return; }
+    if (mod && plain && key === 'w') { e.preventDefault(); toggleWorkingListing(); return; }
+    if (mod && e.shiftKey && !e.altKey && key === 'w') { e.preventDefault(); executeCommand('tabs.close'); return; }
+    if (mod && plain && key === 'q') { e.preventDefault(); executeCommand('tabs.close'); return; }
+    if (mod && plain && key === 'i') { e.preventDefault(); $id('btn-open-import').click(); return; }
+    if (mod && plain && key === 'n') { e.preventDefault(); executeCommand('file.new'); return; }
+    if (!mod && plain && e.key === 'F12') { e.preventDefault(); executeCommand('view.presentation'); return; }
+    if (mod && plain && (e.key === '+' || e.key === '=')) { e.preventDefault(); executeCommand('view.zoom-in'); return; }
+    if (mod && plain && e.key === '-') { e.preventDefault(); executeCommand('view.zoom-out'); return; }
+    if (mod && plain && e.key === '0') { e.preventDefault(); executeCommand('view.zoom-reset'); return; }
+    if (mod && plain && e.key === '/') { e.preventDefault(); executeCommand('navigation.search'); return; }
+    if (mod && plain && key === 'f') { e.preventDefault(); void openSearchBufferOrPrompt(); return; }
+    if (mod && e.shiftKey && !e.altKey && key === 'f') { e.preventDefault(); executeCommand('navigation.search'); return; }
+    if (mod && e.key === 'Tab') {
       e.preventDefault(); executeCommand(e.shiftKey ? 'navigation.previous-tab' : 'navigation.next-tab'); return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
-      e.preventDefault(); executeCommand('tabs.close'); return;
-    }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9') {
-      e.preventDefault(); jumpToTabIndex(Number(e.key)); return;
-    }
-    const editing   = !editorView.classList.contains('hidden');
-    const searching = !searchView.classList.contains('hidden');
-    if ((e.ctrlKey || e.metaKey) && e.key === 's' && editing) {
-      e.preventDefault(); executeCommand('file.save');
-    }
-    const anyModalOpen = !modalMdRef.classList.contains('hidden') ||
-                         !modalReadme.classList.contains('hidden') ||
-                         !modalChangelog.classList.contains('hidden') ||
-                         !modalSafetyTools.classList.contains('hidden') ||
-                         quickTabSwitcher.isOpen() ||
-                         quickTaskSwitcher.isOpen() ||
-                         !palette.classList.contains('hidden');
-    if (e.key === 'Escape' && editing && !anyModalOpen) cancelEdit();
-    if (e.key === 'Escape' && searching && document.activeElement !== searchInput) {
-      clearTimeout(_searchTimer);
-      lastSearchBuffer = null;
-      searchInput.value = '';
-      exitSearchView();
-    }
+    if (mod && plain && e.key >= '1' && e.key <= '9') { e.preventDefault(); jumpToTabIndex(Number(e.key)); return; }
+    const editing = !editorView.classList.contains('hidden');
+    if (mod && key === 's' && editing) { e.preventDefault(); executeCommand('file.save'); }
   });
 
   // ── Marked + highlight.js setup ───────────────────────────────────────────────
@@ -7457,12 +7566,30 @@ type TaskLocation = {
   let defaultThemeId = 'catppuccin';
   const appliedThemeVariables = new Set<string>();
 
-  function installThemeConfig(config: any) {
-    const state = themeRuntimeState(config);
+  const EXTERNAL_THEME_PATH_KEY = PREFERENCE_KEYS.externalThemePath;
+  const SAMPLE_EXTERNAL_THEMES = '__bundled-sample__';
+  let builtinThemeCatalog: ThemeCatalog = FALLBACK_THEME_CATALOG;
+  let externalThemeDefs: ThemeDefinition[] = [];
+
+  function rebuildThemeRuntime() {
+    const merged: ThemeCatalog = {
+      version: 1,
+      defaultTheme: builtinThemeCatalog.defaultTheme,
+      themes: [
+        ...builtinThemeCatalog.themes,
+        ...externalThemeDefs.filter(theme => !builtinThemeCatalog.themes.some(builtin => builtin.id === theme.id)),
+      ],
+    };
+    const state = themeRuntimeState(merged);
     THEMES = state.variables;
     themeDetails = state.details;
     defaultThemeId = state.defaultTheme;
-    installThemeOptions(themeSelect, config);
+    installThemeOptions(themeSelect, merged);
+  }
+
+  function installThemeConfig(config: ThemeCatalog) {
+    builtinThemeCatalog = config;
+    rebuildThemeRuntime();
   }
 
   async function bundledPortableText(name: any, maxBytes = 1024 * 1024) {
@@ -7488,7 +7615,7 @@ type TaskLocation = {
     return file.text();
   }
 
-  async function loadWorkspaceThemes() {
+  async function loadBuiltinThemes() {
     let text = null;
     let source = 'portable';
     try {
@@ -7531,6 +7658,55 @@ type TaskLocation = {
       return false;
     }
     return true;
+  }
+
+  // ── External theme file (user-selected JSON of extra themes) ────────────────
+  let externalThemeFileHandle: FileSystemFileHandle | null = null;
+
+  function externalThemeSource(): string {
+    return (localStorage.getItem(EXTERNAL_THEME_PATH_KEY) || '').trim();
+  }
+
+  async function readExternalThemeText(source: string): Promise<string | null> {
+    if (source === SAMPLE_EXTERNAL_THEMES) {
+      return bundledPortableText('external-themes.sample.json');
+    }
+    if (window.__recallstackNative?.active) {
+      if (!source) return null;
+      return window.__recallstackNative.externalReadText(source);
+    }
+    if (externalThemeFileHandle) {
+      const file = await externalThemeFileHandle.getFile();
+      return file.text();
+    }
+    return null;
+  }
+
+  async function loadExternalThemes(notifyOnError = false) {
+    const source = externalThemeSource();
+    if (!source) { externalThemeDefs = []; rebuildThemeRuntime(); return; }
+    try {
+      const text = await readExternalThemeText(source);
+      if (text === null) { externalThemeDefs = []; rebuildThemeRuntime(); return; }
+      const parsed = parseExternalThemeCatalog(text);
+      const collisions = parsed.filter(theme => builtinThemeCatalog.themes.some(builtin => builtin.id === theme.id));
+      externalThemeDefs = parsed.filter(theme => !collisions.some(c => c.id === theme.id));
+      rebuildThemeRuntime();
+      if (collisions.length) {
+        toast(`Skipped ${collisions.length} external theme${collisions.length === 1 ? '' : 's'} that reuse a built-in id`, 'error');
+      }
+    } catch (error: any) {
+      externalThemeDefs = [];
+      rebuildThemeRuntime();
+      if (notifyOnError) toast('External theme file: ' + (error?.message || error), 'error');
+      else console.warn('Could not load external theme file', error);
+    }
+  }
+
+  async function loadWorkspaceThemes() {
+    const ok = await loadBuiltinThemes();
+    await loadExternalThemes();
+    return ok;
   }
 
   function applyTheme(name: any, save = true) {
@@ -7595,11 +7771,67 @@ type TaskLocation = {
     chooseOutputsFolder().catch(e => toast('Could not open that folder: ' + (e?.message || e), 'error'));
   });
 
+  // ── External theme file ───────────────────────────────────────────────────
+  const externalThemePathInput = $id<HTMLInputElement>('settings-external-theme-path');
+  const btnBrowseExternalTheme = $id('btn-browse-external-theme');
+  const btnUseSampleThemes = $id('btn-use-sample-themes');
+  const btnClearExternalTheme = $id('btn-clear-external-theme');
+
+  function syncExternalThemeInput() {
+    const source = externalThemeSource();
+    externalThemePathInput.value = source === SAMPLE_EXTERNAL_THEMES
+      ? 'Bundled sample (Lupine, Osaka Jade)'
+      : (source || (externalThemeFileHandle?.name ?? ''));
+    btnClearExternalTheme.disabled = !source;
+  }
+
+  async function setExternalThemeSource(source: string) {
+    if (source) localStorage.setItem(EXTERNAL_THEME_PATH_KEY, source);
+    else localStorage.removeItem(EXTERNAL_THEME_PATH_KEY);
+    await loadExternalThemes(true);
+    applyTheme(themeSelect.value || defaultThemeId, false);
+    syncExternalThemeInput();
+  }
+
+  async function chooseExternalThemeFile() {
+    if (window.__recallstackNative?.active) {
+      const path = await window.__recallstackNative.chooseThemeFile();
+      if (!path) return;
+      await setExternalThemeSource(path);
+    } else {
+      const picker = (window as any).showOpenFilePicker as
+        | ((options?: any) => Promise<FileSystemFileHandle[]>)
+        | undefined;
+      if (typeof picker !== 'function') { toast('File picker unavailable in this browser', 'error'); return; }
+      try {
+        const [handle] = await picker({
+          types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+          multiple: false,
+        });
+        externalThemeFileHandle = handle;
+        await setExternalThemeSource(handle.name);
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') toast('Could not open that file: ' + (e?.message || e), 'error');
+      }
+    }
+  }
+
+  btnBrowseExternalTheme.addEventListener('click', () => {
+    chooseExternalThemeFile().catch(e => toast('Could not load theme file: ' + (e?.message || e), 'error'));
+  });
+  btnUseSampleThemes.addEventListener('click', () => {
+    setExternalThemeSource(SAMPLE_EXTERNAL_THEMES).catch(e => toast('Could not load sample themes: ' + (e?.message || e), 'error'));
+  });
+  btnClearExternalTheme.addEventListener('click', () => {
+    externalThemeFileHandle = null;
+    setExternalThemeSource('').catch(e => toast('Could not clear external themes: ' + (e?.message || e), 'error'));
+  });
+
   createModalController({
     overlay: modalSettings,
     closeButton: btnSettingsClose,
     trigger: btnSettings,
-    beforeOpen: () => { syncOutputsPathInput(); applyWorkingPaneLayout(false); },
+    beforeOpen: () => { syncOutputsPathInput(); syncExternalThemeInput(); },
   });
 
   // ── Nav row mode toggle buttons ───────────────────────────────────────────────
@@ -7614,6 +7846,7 @@ type TaskLocation = {
       navRow1.appendChild(mkNavNewBtn(1));
       navRow1.appendChild(mkNavRenameBtn(1));
       if (allTasksEnabled) navRow1.appendChild(mkNavAllTasksBtn());
+      if (allTasksEnabled) navRow1.appendChild(mkNavWorkingTasksBtn());
       navRow1.appendChild(mkNavSeparator());
       if (folders.length) {
         if (navRow1Mode === 'combo') {

@@ -435,6 +435,12 @@ import { assertPortableName } from "./portable-names";
       if (!value) return null;
       return typeof value === 'string' ? value : value.path || String(value);
     },
+    async chooseThemeFile() {
+      if (typeof window.__TAURI__?.dialog?.open !== 'function') return null;
+      const value = await window.__TAURI__.dialog.open({ title: 'Choose an external theme file', multiple: false, directory: false, filters: [{ name: 'JSON', extensions: ['json'] }] });
+      if (!value) return null;
+      return typeof value === 'string' ? value : value.path || String(value);
+    },
     cancelBackup() { return invoke('cancel_backup'); },
     verifyBackup(path) { return invoke('verify_backup', { path }); },
     restoreBackupDryRun(path) { return invoke('restore_backup_dry_run', { path }); },

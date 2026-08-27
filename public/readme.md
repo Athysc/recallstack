@@ -38,14 +38,20 @@ Click **Open Workspace** and select your root folder. The app remembers your las
 
 ### Essential Keyboard Launchers
 
-These two shortcuts are available throughout the main application:
+These shortcuts are available throughout the main application:
 
 | Shortcut | Opens |
 |---|---|
-| **Control + K** (`Ctrl+K`) | **Command Palette** — find and run application commands, search notes and tags, open help, or change themes |
-| **Control + Spacebar** (`Ctrl+Space`) | **Open Tabs selector** — view and switch between every currently open Note, Task, Working Task, Journal, or Output tab |
-| **Control + O** (`Ctrl+O`) | **Tasks quick-open selector** — open a task from the compact keyboard modal |
-| **Control + T** (`Ctrl+T`) | **Tasks list view** — opens the sectioned workspace `tasks/` listing, same as the Tasks icon |
+| **Ctrl + K** | **Keyboard Shortcuts** — the full keybinding reference sheet |
+| **Ctrl + P** | **Command Palette** — find and run application commands, search notes and tags, open help |
+| **Ctrl + L** | **Theme switcher** — arrow through themes with a live preview; Enter applies |
+| **Ctrl + Space** | **Open Tabs selector** — switch between every currently open Note, Task, Working Task, Journal, or Output tab |
+| **Ctrl + T** | **Task listing** — an 80% × 60% centered modal of every workspace task, with a **→ Working** toggle on each row |
+| **Ctrl + W** | **Working Task listing** — the same modal for `tasks/working/`, with a **← Task** toggle on each row |
+| **Ctrl + J** | **Daily Journal** — open or focus today's journal note |
+| **Ctrl + N** | **New file picker** — choose Note, Task, or Working Task (quick keys `n` / `t` / `w`) |
+
+The listing modals, Open Tabs selector, and theme switcher all share the same keys: **J / ↓** and **K / ↑** to move, **Enter** to open, **Esc** to close, and a displayed letter code to jump. In the Open Tabs selector **X** closes the selected tab.
 
 In the Open Tabs selector, use **J / ↓** to move down, **K / ↑** to move up, **Enter** to open the selection, **X** to close the selected tab, or type its displayed letter code to jump immediately. Press **Escape** to cancel without changing tabs.
 
@@ -265,8 +271,8 @@ Results are written to `performance-results/windows.json` or `performance-result
 | Outputs icon | Open the configured Outputs folder; the old top-level Outputs text button has been removed |
 | Calendar icon | Toggle calendar view |
 | Search box | Native full-text and structured search; hover for the supported filter list. Search results support `J/K`, arrow keys, `Enter`, `Escape`, and displayed one- or two-letter jump codes |
-| Display & Navigation icon | Opens layout/navigation preferences, including the 3×3 tile grid, Outputs folder path, and theme selector |
-| Theme list | Choose from the themes defined in `theme.json` beside the executable; shown in the Display & Navigation modal |
+| Display & Navigation icon | Opens layout/navigation preferences: the tile grid, theme selector, Outputs folder path, and the External theme file picker |
+| Theme list | Choose from the built-in themes plus any from an external theme file; also reachable with `Ctrl+L` as a live-preview switcher |
 | Folder nav mode icon | Toggle Nav Row 1 between **buttons** and **dropdown** display; persists per workspace |
 | Subfolder nav mode icon | Toggle Nav Row 2 between **buttons** and **dropdown** display; persists per workspace |
 | Word wrap icon | Toggle word wrap on/off in the editor; persists globally |
@@ -330,8 +336,9 @@ Shows folders inside `Data/[workspace]/`.
 |---|---|
 | **+** | Create a new top-level folder |
 | Pencil icon | Rename the currently selected folder; disabled when none is selected |
-| Daily Journal icon | Open or focus today’s pinned Daily Journal tab |
-| Tasks icon | View the sectioned workspace `tasks/` listing with Working Tasks, priority/status groups, completed tasks, QA/deployment sections, and backlog/deferred tasks |
+| Daily Journal icon *(colored)* | Open or focus today’s pinned Daily Journal tab (`Ctrl+J`) |
+| Task listing icon | Open the Task listing modal (`Ctrl+T`) |
+| Working Task listing icon *(colored)* | Open the Working Task listing modal (`Ctrl+W`) |
 | Folder buttons *(default)* | Select a folder; one button per folder |
 | Folder dropdown *(combo mode)* | Single dropdown spanning the full row; switch folders by selecting from it |
 
@@ -527,12 +534,13 @@ A keyboard-first launcher for commands, notes, tags, and quick help. It opens as
 
 | Shortcut | Behavior |
 |---|---|
-| `Ctrl+K` (`Cmd+K` on macOS) | Toggle the palette — opens pre-filled with `>` (command-search mode) if it's closed, closes it if it's already open |
-| `Ctrl+P` (`Cmd+P` on macOS) | Open the palette pre-filled with `@` (quick-open-notes mode); switches an already-open palette into notes mode |
+| `Ctrl+P` (`Cmd+P` on macOS) | Toggle the palette — opens pre-filled with `>` (command-search mode) if it's closed, closes it if it's already open |
+
+`Ctrl+K` is no longer a palette shortcut — it now opens the **Keyboard Shortcuts** reference sheet.
 
 ### Modes
 
-The first character typed into the palette input switches what it searches. Each `Ctrl+K` / `Ctrl+P` press resets to the mode its own shortcut opens — modes are not remembered between sessions.
+The first character typed into the palette input switches what it searches. Each `Ctrl+P` press resets to command-search mode — modes are not remembered between sessions.
 
 | Prefix | Mode | What it does |
 |---|---|---|
@@ -564,12 +572,12 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 
 | Command | Shortcut |
 |---|---|
-| Create Note | `Ctrl+N` |
+| Create Note, Task, or Working Task | `Ctrl+N` |
 | Save Note | `Ctrl+S` |
 | Move or Rename Note | — |
 | Archive or Restore Note | — |
 | Move Note to Trash | — |
-| Close Tab | `Ctrl+W` |
+| Close Tab | `Ctrl+Q` (also `Ctrl+Shift+W`) |
 | Close Other Tabs | — |
 | Reopen Closed Tab | — |
 
@@ -577,10 +585,11 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 
 | Command | Shortcut |
 |---|---|
-| Search Notes | `Ctrl+Shift+F`, `Ctrl+F` |
-| Open Today Journal | `Ctrl+L` |
-| Open Task quick selector | `Ctrl+O` |
-| Show Tasks List | `Ctrl+T` |
+| Search Notes | `Ctrl+/`, `Ctrl+Shift+F`, `Ctrl+F` |
+| Open Today Journal | `Ctrl+J` |
+| Open Task quick selector | — |
+| Show Task Listing | `Ctrl+T` |
+| Show Working Task Listing | `Ctrl+W` |
 | Toggle Presentation Mode | `F12` |
 | Zoom In / Out / Reset | `Ctrl++`, `Ctrl+-`, `Ctrl+0` |
 | Next Tab | `Ctrl+Tab` |
@@ -591,18 +600,17 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 | Command | Shortcut |
 |---|---|
 | Create Working Task | — |
-| Open Task quick selector | `Ctrl+O` |
-| Show Tasks List | `Ctrl+T` |
+| Open Task quick selector | — |
+| Show Task Listing | `Ctrl+T` |
+| Show Working Task Listing | `Ctrl+W` |
 
 #### View
 
 | Command | Shortcut |
 |---|---|
 | Toggle Presentation Mode | — |
-| Show or Hide Working Tasks | — |
-| Switch Working Tasks Pane Layout | — |
 | Toggle Editor Line Numbers | — |
-| Change Theme *(opens an argument list)* | — |
+| Change Theme *(opens an argument list)* | `Ctrl+L` |
 
 #### Editor
 
@@ -635,28 +643,95 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 
 ---
 
-## Keyboard Shortcuts
+## Task & Working Task Listings
+
+**Ctrl + T** opens the **Task listing** and **Ctrl + W** opens the **Working
+Task listing**. Both are centered modal windows sized to 80% of the application
+width and 60% of its height, so the editor and preview stay visible behind them.
+The two icon buttons at the start of Nav Row 1 (after the Daily Journal button)
+open the same modals.
+
+Each list works like the Quick Task Selector — arrow keys or **J / K** to move,
+a displayed one- or two-letter code to jump instantly, **Enter** to open (or
+**Ctrl + Enter** to open pinned). Every row also has a toggle button:
+
+- In the **Task listing**, **→ Working** moves that task into `tasks/working/`.
+- In the **Working Task listing**, **← Task** returns it to `tasks/`.
+
+The toggled item drops off the list immediately, but the modal stays open until
+you actually pick a task to view.
+
+## Theme Switcher
+
+**Ctrl + L** opens the theme switcher. Arrow up and down (or **J / K**) to move
+through every theme — built-in and external — and the whole app re-themes live
+as you move. **Enter** applies and remembers the theme for the workspace;
+**Esc** reverts to the theme you started on. The Theme list in **Settings**
+still works exactly as before.
+
+## External Theme File
+
+**Settings → External theme file** points RecallStack at a JSON file of extra
+themes that are merged with the built-ins. The choice persists across restarts.
+One file can define multiple themes; any theme whose `id` collides with a
+built-in one is skipped. **Use sample themes** loads the bundled **Lupine** and
+**Osaka Jade** themes (from Omarchy Quattro) without picking a file. The format
+matches the built-in `themes.json` catalog — a `themes` array (or a bare array),
+each entry with `id`, `name`, `group`, `mode` (`"light"` / `"dark"`), and a
+`variables` map of the required `--base` … `--pink` six-digit hex colors.
+
+## The Escape Key
+
+- With a palette or any modal open, `Esc` closes it and returns you to the
+  note or task you had selected.
+- With nothing open, `Esc` saves the current file and jumps to today's Daily
+  Journal.
+
+When no note, task, or working task is open, RecallStack shows the Daily Journal
+rather than an empty file list.
+
+## Key Mapping
+
+Press **Ctrl + K** at any time for this same reference inside the app. Letter
+keys are case-insensitive.
 
 ### Global
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+S` | Save current note |
-| `Ctrl+K` | Toggle the command palette (opens in command-search mode) |
-| `Ctrl+Space` | Open or close the quick Open Tabs selector |
-| `Ctrl+P` | Open the command palette in quick-open-notes mode |
-| `Ctrl+Shift+F` | Focus workspace search |
-| `Ctrl+F` | Reopen buffered search results, or show the quick search modal if no buffered search exists |
-| `Ctrl+O` | Open the quick Tasks selector |
-| `Ctrl+T` | Switch to the Tasks list view |
-| `Ctrl+L` | Open or focus today’s pinned Daily Journal tab |
-| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Step content zoom up, step it down, or reset to 100% |
-| `F12` | Toggle presentation mode |
-| `Ctrl+Tab` | Switch to the next tab |
-| `Ctrl+Shift+Tab` | Switch to the previous tab |
-| `Ctrl+W` | Close the current tab |
+| `Esc` | Close any open palette or modal and return to the current file. With nothing open, save and jump to today's Daily Journal. |
+| `Ctrl+K` | Open the keyboard-shortcut reference sheet |
+| `Ctrl+P` | Toggle the command palette (command-search `>` mode) |
+| `Ctrl+L` | Open the theme switcher (live preview; Enter applies) |
+| `Ctrl+I` | Open the Open / Import Files dialog |
+| `Ctrl+S` | Save the current note, task, or working task *(while editing)* |
+
+### Files & Tabs
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+N` | New file picker — Note / Task / Working Task (`n` / `t` / `w`) |
+| `Ctrl+Q` *(also `Ctrl+Shift+W`)* | Close the current tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+1` – `Ctrl+9` | Jump to the tab in that visual position (1 = leftmost) |
-| `Escape` | Close editor, modal, or clear search |
+| `Ctrl+Space` | Toggle the quick Open Tabs switcher |
+
+### Navigation
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+J` | Open or focus today's Daily Journal |
+| `Ctrl+T` | Toggle the Task listing modal |
+| `Ctrl+W` | Toggle the Working Task listing modal |
+| `Ctrl+/` *(also `Ctrl+Shift+F`)* | Focus the workspace search box |
+| `Ctrl+F` | Reopen buffered search results, or the quick search box |
+
+### Views
+
+| Shortcut | Action |
+|---|---|
+| `F12` | Toggle presentation mode |
+| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Step content zoom up / down / reset to 100% |
 
 ### In the Title / Filename Field
 
@@ -673,7 +748,8 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 | `Enter` on empty list item | Exit the list |
 | `Tab` | Indent selected lines (or insert 2 spaces at cursor) |
 | `Shift+Tab` | Outdent selected lines |
-| `Ctrl+/` | Toggle blockquote (`> `) on all selected lines |
+| `Ctrl+D` | Delete the current line |
+| `Ctrl+'` | Toggle blockquote (`> `) on all selected lines |
 | `Enter` *(nowrap mode)* | Scrolls the view back to the left margin |
 
 ### List Auto-Continuation
@@ -1056,12 +1132,9 @@ Priority, start date, due date, and completion date are encoded in the task file
 Use a Working Task for an active task you want to keep separate from the main Tasks list.
 
 - In a task editor, click the **TASK** indicator to move the task into `tasks/working/`. It becomes **WORKING**; click that indicator to return it to `tasks/`.
-- Working tasks are listed in the resizable **WORKING Tasks** pane while editing any task. The pane can show recently completed tasks and can be sorted alphabetically or by modification time.
-- Click the new-file icon in the **WORKING Tasks** pane to open the same filename prompt for a new empty Working Task.
-- Use the layout button immediately to the left of **Show or Hide Working Tasks** to switch the pane between its bottom position and a left-side, three-pane layout. RecallStack remembers the selected layout, whether the Working Tasks pane is visible, and its resized dimensions across shutdowns.
-- In the three-pane layout, drag either divider to resize **Working Tasks**, **Markdown**, or **Preview**. Each pane keeps a minimum width of 20% of the application window.
+- Press **Ctrl + W** (or the colored Working Tasks button in Nav Row 1) for the **Working Task listing** modal — every working task, with a **← Task** button on each row to return it to `tasks/`.
+- Create a Working Task from the **Ctrl + N** picker (choose *New Working Task*, or press `w`).
 - Completing a Working Task automatically returns it to the main Tasks list.
-- In the Tasks list, **Working Tasks** appears as the first section with a theme-aware peach accent. Select a task there to open it.
 - The Daily Journal control opens today’s journal entry at `dailylogs/YYYY/MM/`; a missing entry is created automatically and starts with the most recent journal content when available.
 - The Daily Journal is kept as the first pinned tab for the current date and cannot be moved or closed.
 - Journal filenames are derived from the daily-note date and are read-only in the editor. Journal Markdown content remains fully editable.

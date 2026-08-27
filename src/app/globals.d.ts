@@ -31,6 +31,7 @@ interface RecallStackNativeBridge {
   backup(destination?: string | null, includeCache?: boolean): Promise<Record<string, unknown>>;
   chooseBackupDestination(): Promise<string | null>;
   chooseBackupFile(): Promise<string | null>;
+  chooseThemeFile(): Promise<string | null>;
   cancelBackup(): Promise<void>;
   verifyBackup(path: string): Promise<Record<string, unknown>>;
   restoreBackupDryRun(path: string): Promise<Record<string, unknown>>;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { parseThemeCatalog } from "../../src/features/themes/catalog.ts";
+import { parseThemeCatalog, parseExternalThemeCatalog } from "../../src/features/themes/catalog.ts";
 import { colorContrastRatio, darkenHex, hexToRgba, mixHex, readableThemeAccent, themeRuntimeState } from "../../src/features/themes/runtime.ts";
 
 test("the shipped external theme catalog is valid", async () => {
@@ -46,4 +46,30 @@ test("theme runtime derives indexed state and color tints", async () => {
   assert.equal(state.variables[catalog.defaultTheme]["--blue"], catalog.themes.find(theme => theme.id === catalog.defaultTheme)?.variables["--blue"]);
   assert.equal(hexToRgba("#89b4fa", 0.2), "rgba(137,180,250,0.2)");
   assert.equal(darkenHex("#ffffff"), "rgb(140,140,140)");
+});
+
+test("the bundled external theme sample is a valid extra-theme file", async () => {
+  const source = await readFile(new URL("../../external-themes.sample.json", import.meta.url), "utf8");
+  const themes = parseExternalThemeCatalog(source);
+  assert.equal(themes.length, 2);
+  assert.deepEqual(themes.map((theme) => theme.id).sort(), ["lupine", "osaka-jade"]);
+  assert.ok(themes.some((theme) => theme.mode === "light"));
+  assert.ok(themes.some((theme) => theme.mode === "dark"));
+});
+
+test("parseExternalThemeCatalog accepts a bare array and needs no defaultTheme", async () => {
+  const source = await readFile(new URL("../../external-themes.sample.json", import.meta.url), "utf8");
+  const asArray = JSON.stringify(JSON.parse(source).themes);
+  const themes = parseExternalThemeCatalog(asArray);
+  assert.equal(themes.length, 2);
+});
+
+test("parseExternalThemeCatalog rejects malformed input", () => {
+  assert.throws(() => parseExternalThemeCatalog("not json"), /not valid JSON/);
+  assert.throws(() => parseExternalThemeCatalog("{}"), /themes array/);
+  assert.throws(() => parseExternalThemeCatalog("[]"), /between 1 and 100/);
+  assert.throws(
+    () => parseExternalThemeCatalog(JSON.stringify([{ id: "x", name: "X", group: "G", mode: "dark", variables: {} }])),
+    /missing required variable/,
+  );
 });

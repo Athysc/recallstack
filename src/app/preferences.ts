@@ -9,14 +9,9 @@ export const PREFERENCE_KEYS = Object.freeze({
   lineNumbers: "pkm-line-numbers",
   showSystemFolders: "pkm-show-system-folders",
   wordWrap: "pkm-word-wrap",
-  workingPaneVisible: "pkm-working-pane-visible",
-  workingPaneLayout: "pkm-working-pane-layout",
-  workingPaneBottomRatio: "pkm-working-pane-bottom-ratio",
-  workingPaneWidths: "pkm-working-pane-widths",
-  workingShowCompleted: "pkm-working-show-completed",
-  workingSort: "pkm-working-sort",
   workspaceRootPath: "recallstack-workspace-root-path",
   outputsFolderPath: "recallstack-outputs-folder-path",
+  externalThemePath: "recallstack-external-theme-path",
 });
 
 export type WorkspacePreference = "theme" | "nav1-mode" | "nav2-mode" | "all-tasks-mode" | "last-view";

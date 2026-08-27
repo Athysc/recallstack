@@ -15,8 +15,7 @@ html.app-booting body { visibility: hidden; }
   max-width: calc(100vw - 64px);
 }
 
-.pane-label,
-.working-task-header {
+.pane-label {
   box-sizing: border-box;
   height: 35px;
   min-height: 35px;
@@ -183,55 +182,6 @@ html.app-booting body { visibility: hidden; }
 .task-date-dialog-day.selected { background: var(--mauve); color: var(--crust); font-weight: 700; }
 .task-date-dialog-actions { justify-content: flex-end; margin-top: 11px; }
 
-.working-layout-toggle svg { width: 15px; height: 15px; pointer-events: none; }
-.working-layout-toggle.active { color: var(--mauve); background: var(--surface0); }
-.working-task-header .sort-btn svg { width: 16px; height: 16px; pointer-events: none; }
-.working-task-header .btn-working-new {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 24px;
-  padding: 0;
-}
-.working-task-header .btn-working-new svg { width: 16px; height: 16px; pointer-events: none; }
-.working-task-header {
-  height: auto;
-  min-height: 35px;
-  flex-wrap: wrap;
-  align-content: center;
-  row-gap: 4px;
-  overflow: visible;
-}
-.working-task-options {
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.working-task-header .btn-icon,
-.working-task-header .btn-working-new {
-  flex: 0 0 auto;
-}
-.working-task-header .btn-working-new { margin-left: 0; }
-
-.split-pane.three-pane .working-task-pane {
-  width: 30%;
-  height: auto;
-  min-width: 10vw;
-  min-height: 0;
-  flex: 0 0 auto;
-  border-right: 0;
-}
-.split-pane.three-pane #editor-pane,
-.split-pane.three-pane #preview-pane { min-width: 20vw; flex: 0 0 auto; }
-.split-pane.three-pane .task-editor-resizer {
-  width: 5px;
-  height: auto;
-  min-height: 0;
-  flex: 0 0 5px;
-  cursor: col-resize;
-}
-.split-pane.three-pane .task-editor-top { min-height: 0; height: 100%; flex: 1; }
 .command-palette {
   position: fixed;
   inset: 0;
@@ -388,3 +338,104 @@ html.app-booting body { visibility: hidden; }
 .preview-backlinks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--surface1); }
 .preview-backlinks h3 { flex-basis: 100%; margin: 0 0 4px !important; }
 .preview-backlinks button { border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 8px; background: var(--mantle); color: var(--blue); cursor: pointer; }
+
+/* ── Large listing modal (Task / Working Task listing) ─────────────────────── */
+.quick-tab-switcher--large { align-items: center; padding-top: 0; }
+.quick-tab-switcher--large .quick-tab-switcher-dialog {
+  width: 80vw;
+  height: 60vh;
+  max-height: 60vh;
+}
+.quick-tab-switcher--large .quick-tab-results { flex: 1; }
+.quick-tab-switcher--large .quick-tab-item { grid-template-columns: 38px minmax(0, 1fr) auto auto; }
+.quick-tab-row-action {
+  justify-self: end;
+  border: 1px solid color-mix(in srgb, var(--green) 55%, var(--surface1));
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: color-mix(in srgb, var(--green) 12%, var(--mantle));
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.quick-tab-row-action:hover { background: color-mix(in srgb, var(--green) 24%, var(--surface0)); }
+
+/* ── Keybinding cheat sheet (Ctrl+K) ──────────────────────────────────────── */
+#modal-keybindings {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: color-mix(in srgb, var(--crust) 66%, transparent);
+}
+#modal-keybindings.hidden { display: none; }
+.keybind-dialog {
+  width: min(80vw, 900px);
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--surface2);
+  border-radius: 13px;
+  background: var(--mantle);
+  box-shadow: 0 24px 80px color-mix(in srgb, var(--crust) 78%, transparent);
+}
+.keybind-body {
+  overflow-y: auto;
+  padding: 14px 18px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 6px 28px;
+  align-content: start;
+}
+.keybind-section { break-inside: avoid; margin-top: 10px; }
+.keybind-section h3 {
+  margin: 8px 0 6px;
+  color: var(--theme-accent-readable, var(--mauve));
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.keybind-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 5px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--surface1) 55%, transparent);
+}
+.keybind-row-text { display: grid; gap: 2px; min-width: 0; }
+.keybind-label { color: var(--text); font-size: 12.5px; font-weight: 600; }
+.keybind-desc { color: var(--subtext0); font-size: 10.5px; }
+.keybind-row kbd {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--mauve) 55%, var(--surface1));
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 3px 7px;
+  background: var(--surface0);
+  color: var(--theme-accent-readable, var(--text));
+  font: 700 11px/1 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  white-space: nowrap;
+}
+
+/* ── Theme switcher + new-file kind picker ────────────────────────────────── */
+.theme-switcher { align-items: center; padding-top: 0; }
+.theme-switcher-dialog { width: min(70vw, 560px); max-height: 70vh; }
+.theme-switcher-dialog .quick-tab-results { flex: 1; }
+.new-file-kind { align-items: center; padding-top: 0; }
+.new-file-kind-dialog { width: min(60vw, 420px); }
+
+/* ── Vivid Daily Journal + Working Tasks nav buttons ──────────────────────── */
+.nav-journal-btn--vivid {
+  background: color-mix(in srgb, var(--mauve) 14%, transparent);
+  border-radius: 7px;
+}
+.nav-journal-btn--vivid:hover { background: color-mix(in srgb, var(--mauve) 26%, transparent); }
+.nav-working-tasks-btn.nav-icon-task-btn:hover { background: color-mix(in srgb, var(--green) 22%, transparent); }
