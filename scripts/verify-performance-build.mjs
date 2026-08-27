@@ -39,10 +39,12 @@ for (const match of entrySource.matchAll(/import\(["'](\.\/(?:desktop-bridge|rec
 }
 
 const initialBytes = [...visited].reduce((total, file) => total + statSync(file).size, 0);
-// Raised from 340_000 on 2026-08-26: idle/resume watcher diagnostics and burst
-// coalescing put the measured initial graph near 338 KB. 360_000 preserves a
-// meaningful regression margin instead of leaving only ~2 KB of headroom.
-const budgetBytes = 360_000;
+// Raised from 340_000 on 2026-08-26 (idle/resume watcher work) and from 360_000
+// on 2026-08-27: the grouped listing modals (Notes / Tasks / Working Tasks with
+// sections, priority colors, per-listing sort, and archive/restore) plus the
+// central keymap put the measured initial graph near 362 KB raw (~77 KB gzip,
+// unchanged). 372_000 keeps a ~10 KB regression margin.
+const budgetBytes = 372_000;
 if (initialBytes > budgetBytes) {
   throw new Error(`Initial JavaScript is ${initialBytes} bytes; budget is ${budgetBytes} bytes`);
 }

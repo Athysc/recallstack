@@ -31,16 +31,18 @@ workspace-root/
 
 | UI Element | What it does |
 |---|---|
-| **Nav Row 1** (top folder buttons) | Switch between top-level folders in `Data/[workspace]/` |
-| **Nav Row 2** (subfolder buttons) | Switch between subfolders of the selected top-level folder |
+| **Nav Row 1** (top folder buttons) | Pick a top-level folder in `Data/[workspace]/` — opens its Notes listing modal |
+| **Nav Row 2** (subfolder buttons) | Pick a subfolder — opens its Notes listing modal |
 | **root** button | Shows notes saved directly in the folder (not in any subfolder) |
-| **Task listing icon / Ctrl+T** | Modal list of every task in `tasks/`, with a **→ Working** toggle per row |
-| **Working Task listing icon / Ctrl+W** | Same modal for `tasks/working/`, with a **← Task** toggle per row |
+| **Ctrl+L** | Notes listing modal for the current folder (sort + archived toggle) |
+| **Task listing icon / Ctrl+T** | Modal list of `tasks/`, grouped by status, color-coded by priority; **→ Working** / **Archive** per row |
+| **Working Task listing icon / Ctrl+W** | Same for `tasks/working/`, with a **← Task** toggle per row |
 | **Daily Journal icon / Ctrl+J** | Opens/creates today's entry in `dailylogs/` |
 | **Search box / Ctrl+/** | Full-text search across every note (3+ characters) |
 | **Ctrl+K** | Keyboard-shortcut reference sheet |
 | **Ctrl+P** | Command palette — run any command, or search notes (`@`) / tags (`#`) |
-| **Ctrl+L** | Theme switcher with live preview |
+| **Ctrl+Shift+T** | Theme switcher with live preview |
+| **Ctrl+Z / Ctrl+Shift+Z** | Undo / redo in the editor (up to 50 steps) |
 | **Ctrl+Space** | Switch between your currently open tabs |
 | **+ button / Ctrl+N** | Create a new Note, Task, or Working Task |
 | **Task icon (editor toolbar)** | Converts the current note into a task |

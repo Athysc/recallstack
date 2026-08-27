@@ -52,6 +52,15 @@ interface PendingWorkspaceBatch {
  * tasks were suspended while the window was hidden: the native watcher keeps
  * running, but the frontend should not replay every intermediate refresh.
  */
+/**
+ * Once a buffered workspace holds this many distinct changed paths (e.g. a sync
+ * client or build churning files while the window sat hidden for hours), stop
+ * retaining individual entries and collapse to a single "overflowed" batch — the
+ * frontend handles that with one full refresh instead of replaying thousands of
+ * paths on resume. Keeps memory and resume-time work bounded.
+ */
+export const MAX_BUFFERED_CHANGES = 2000;
+
 export class WorkspaceBatchAccumulator {
   private readonly pending = new Map<string, PendingWorkspaceBatch>();
 
@@ -73,7 +82,16 @@ export class WorkspaceBatchAccumulator {
       pending.overflowed ||= batch.overflowed;
       pending.sequenceGap ||= sequenceGap;
     }
+    if (pending.overflowed && pending.changes.size >= MAX_BUFFERED_CHANGES) {
+      // Already collapsed — don't keep growing the map.
+      pending.changes.clear();
+      return;
+    }
     for (const change of batch.changes) mergeChange(pending.changes, change);
+    if (pending.changes.size >= MAX_BUFFERED_CHANGES) {
+      pending.overflowed = true;
+      pending.changes.clear();
+    }
   }
 
   takeAll(): BufferedWorkspaceChangeBatch[] {
@@ -226,18 +244,35 @@ export function installWorkspaceWatcher(): void {
     diagnostics.pendingWorkspaces = accumulator.size;
     scheduleFlush();
   });
+  // Tell the native watcher to pause per-file indexing / event emission while
+  // the window is hidden, and to run one incremental catch-up when it returns.
+  // Nothing "builds up" to replay on resume.
+  let lastForegroundSignal: boolean | null = null;
+  const signalForeground = (foreground: boolean) => {
+    if (foreground === lastForegroundSignal) return;
+    lastForegroundSignal = foreground;
+    if (window.__TAURI_INTERNALS__) {
+      invoke("set_foreground", { foreground }).catch((error) =>
+        console.warn("set_foreground failed", error),
+      );
+    }
+  };
+  signalForeground(document.visibilityState !== "hidden");
+
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
       diagnostics.backgroundedAt = Date.now();
+      signalForeground(false);
     } else {
       if (diagnostics.backgroundedAt) {
         diagnostics.lastBackgroundDurationMs = Date.now() - diagnostics.backgroundedAt;
         diagnostics.backgroundedAt = 0;
       }
+      signalForeground(true);
       flush();
     }
   });
-  window.addEventListener("pageshow", flush);
+  window.addEventListener("pageshow", () => { signalForeground(document.visibilityState !== "hidden"); flush(); });
   window.addEventListener("focus", flush);
 }
 

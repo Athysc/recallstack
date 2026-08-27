@@ -765,6 +765,7 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
     let watcher_state = Arc::clone(state);
     let active_workspace_id = workspace_id(&root);
     let watcher_generation = state.start_watcher_generation();
+    state.reset_watcher_activity();
     *state.watcher_health.lock() = "running".to_string();
     std::thread::spawn(move || {
         while let Ok(first) = receiver.recv() {
@@ -772,6 +773,11 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
             while let Ok(event) = receiver.recv_timeout(Duration::from_millis(200)) {
                 events.push(event);
             }
+            // While the window is hidden, keep draining the OS event channel so
+            // it can't back up, but defer all indexing and emit nothing — just
+            // remember that a catch-up reconcile is due when the app returns
+            // (see set_foreground). This is the "pause while idle" path.
+            let foreground = watcher_state.is_watcher_foreground();
             let mut changes = HashMap::<String, WorkspaceChange>::new();
             let mut overflowed = false;
             for message in events {
@@ -809,8 +815,10 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
                             internal,
                         },
                     );
-                    let _ = update_index_path(&root, source);
-                    let _ = update_index_path(&root, destination);
+                    if foreground {
+                        let _ = update_index_path(&root, source);
+                        let _ = update_index_path(&root, destination);
+                    }
                     continue;
                 }
                 for path in event.paths {
@@ -825,10 +833,16 @@ fn watch_workspace(app: &AppHandle, state: &Arc<AppState>, root: PathBuf) -> Res
                         internal: watcher_state.is_recent_internal_write(&relative),
                     };
                     coalesce_change(&mut changes, change);
-                    if path.starts_with(data_path(&root)) {
+                    if foreground && path.starts_with(data_path(&root)) {
                         let _ = update_index_path(&root, &path);
                     }
                 }
+            }
+            if (!changes.is_empty() || overflowed) && !foreground {
+                // Backgrounded: don't emit or advance the sequence — just note
+                // that the frontend must reconcile on its next foreground.
+                watcher_state.mark_watcher_missed_changes();
+                continue;
             }
             if !changes.is_empty() || overflowed {
                 let sequence = watcher_state.next_watcher_sequence(&active_workspace_id);
@@ -1460,6 +1474,41 @@ pub async fn reconcile_workspace(
         reconcile_once(app, Arc::clone(state.inner()), root).await
     })
     .await
+}
+
+/// Called by the frontend when the window is hidden/minimized (`false`) or
+/// returns to view (`true`). While `false`, the watcher defers per-file
+/// indexing and emits no change events. The return to `true` fires one
+/// incremental catch-up reconcile and one "refresh everything" batch if
+/// anything changed in the meantime — nothing "builds up" to replay.
+#[tauri::command(async)]
+pub fn set_foreground(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    foreground: bool,
+) -> Result<(), String> {
+    logged("set_foreground", || {
+        let needs_catch_up = state.set_watcher_foreground(foreground);
+        if !needs_catch_up {
+            return Ok(());
+        }
+        let Ok(root) = active_workspace(&state) else {
+            return Ok(());
+        };
+        let sequence = state.next_watcher_sequence(&workspace_id(&root));
+        let _ = app.emit(
+            "workspace://changed",
+            WorkspaceChangeBatch {
+                workspace_id: workspace_id(&root),
+                sequence,
+                occurred_at: Utc::now().timestamp_millis(),
+                overflowed: true,
+                changes: Vec::new(),
+            },
+        );
+        schedule_reconcile(app.clone(), Arc::clone(state.inner()), root);
+        Ok(())
+    })
 }
 
 #[tauri::command(async)]
@@ -2143,6 +2192,26 @@ mod tests {
         let second = state.start_watcher_generation();
         assert!(!state.is_current_watcher_generation(first));
         assert!(state.is_current_watcher_generation(second));
+    }
+
+    #[test]
+    fn foreground_transition_reports_catch_up_only_when_changes_were_missed() {
+        let state = AppState::default();
+        assert!(state.is_watcher_foreground());
+
+        // Backgrounded with nothing changing: no catch-up needed on return.
+        assert!(!state.set_watcher_foreground(false));
+        assert!(!state.is_watcher_foreground());
+        assert!(!state.set_watcher_foreground(true));
+
+        // Backgrounded, then the watcher saw changes: return triggers catch-up once.
+        state.set_watcher_foreground(false);
+        state.mark_watcher_missed_changes();
+        assert!(state.set_watcher_foreground(true));
+        assert!(!state.set_watcher_foreground(true)); // flag consumed
+
+        // Staying foreground never asks for a catch-up.
+        assert!(!state.set_watcher_foreground(true));
     }
 
     #[test]

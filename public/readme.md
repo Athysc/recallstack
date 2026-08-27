@@ -44,10 +44,11 @@ These shortcuts are available throughout the main application:
 |---|---|
 | **Ctrl + K** | **Keyboard Shortcuts** — the full keybinding reference sheet |
 | **Ctrl + P** | **Command Palette** — find and run application commands, search notes and tags, open help |
-| **Ctrl + L** | **Theme switcher** — arrow through themes with a live preview; Enter applies |
+| **Ctrl + Shift + T** | **Theme switcher** — arrow through themes with a live preview; Enter applies |
 | **Ctrl + Space** | **Open Tabs selector** — switch between every currently open Note, Task, Working Task, Journal, or Output tab |
-| **Ctrl + T** | **Task listing** — an 80% × 60% centered modal of every workspace task, with a **→ Working** toggle on each row |
-| **Ctrl + W** | **Working Task listing** — the same modal for `tasks/working/`, with a **← Task** toggle on each row |
+| **Ctrl + L** | **Notes listing** — the current folder's notes in a listing modal (with an *Archive* toggle); folder clicks open it too |
+| **Ctrl + T** | **Task listing** — every workspace task, grouped by status and color-coded by priority, with **→ Working** / **Archive** per row |
+| **Ctrl + W** | **Working Task listing** — `tasks/working/`, color-coded, with a **← Task** toggle per row |
 | **Ctrl + J** | **Daily Journal** — open or focus today's journal note |
 | **Ctrl + N** | **New file picker** — choose Note, Task, or Working Task (quick keys `n` / `t` / `w`) |
 
@@ -272,7 +273,7 @@ Results are written to `performance-results/windows.json` or `performance-result
 | Calendar icon | Toggle calendar view |
 | Search box | Native full-text and structured search; hover for the supported filter list. Search results support `J/K`, arrow keys, `Enter`, `Escape`, and displayed one- or two-letter jump codes |
 | Display & Navigation icon | Opens layout/navigation preferences: the tile grid, theme selector, Outputs folder path, and the External theme file picker |
-| Theme list | Choose from the built-in themes plus any from an external theme file; also reachable with `Ctrl+L` as a live-preview switcher |
+| Theme list | Choose from the built-in themes plus any from an external theme file; also reachable with `Ctrl+Shift+T` as a live-preview switcher |
 | Folder nav mode icon | Toggle Nav Row 1 between **buttons** and **dropdown** display; persists per workspace |
 | Subfolder nav mode icon | Toggle Nav Row 2 between **buttons** and **dropdown** display; persists per workspace |
 | Word wrap icon | Toggle word wrap on/off in the editor; persists globally |
@@ -339,6 +340,7 @@ Shows folders inside `Data/[workspace]/`.
 | Daily Journal icon *(colored)* | Open or focus today’s pinned Daily Journal tab (`Ctrl+J`) |
 | Task listing icon | Open the Task listing modal (`Ctrl+T`) |
 | Working Task listing icon *(colored)* | Open the Working Task listing modal (`Ctrl+W`) |
+| Folder / subfolder buttons | Select the folder and open its Notes listing modal (`Ctrl+L` reopens it) |
 | Folder buttons *(default)* | Select a folder; one button per folder |
 | Folder dropdown *(combo mode)* | Single dropdown spanning the full row; switch folders by selecting from it |
 
@@ -610,7 +612,9 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 |---|---|
 | Toggle Presentation Mode | — |
 | Toggle Editor Line Numbers | — |
-| Change Theme *(opens an argument list)* | `Ctrl+L` |
+| Change Theme *(opens an argument list)* | — |
+| Open Theme Switcher | `Ctrl+Shift+T` |
+| Show Notes Listing | `Ctrl+L` |
 
 #### Editor
 
@@ -643,31 +647,57 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 
 ---
 
-## Task & Working Task Listings
+## Listing Modals (Notes / Tasks / Working Tasks)
 
-**Ctrl + T** opens the **Task listing** and **Ctrl + W** opens the **Working
-Task listing**. Both are centered modal windows sized to 80% of the application
-width and 60% of its height, so the editor and preview stay visible behind them.
-The two icon buttons at the start of Nav Row 1 (after the Daily Journal button)
-open the same modals.
+Note, task, and working-task browsing all happen in a centered listing modal
+sized to 80% × 60% of the window, so the editor and preview stay visible behind
+it:
 
-Each list works like the Quick Task Selector — arrow keys or **J / K** to move,
-a displayed one- or two-letter code to jump instantly, **Enter** to open (or
-**Ctrl + Enter** to open pinned). Every row also has a toggle button:
+- **Ctrl + T** — **Task listing** for the workspace `tasks/` folder.
+- **Ctrl + W** — **Working Task listing** for `tasks/working/`.
+- **Ctrl + L** — **Notes listing** for the currently selected folder. Clicking a
+  folder or subfolder in the nav bar opens it automatically (Inbox and Outputs
+  still use the inline list).
 
-- In the **Task listing**, **→ Working** moves that task into `tasks/working/`.
-- In the **Working Task listing**, **← Task** returns it to `tasks/`.
+Every list uses the coded-jump navigation: arrow keys or **J / K** to move, a
+displayed one- or two-letter code to jump instantly, **Enter** to open, **Ctrl +
+Enter** to open pinned, **Esc** to close.
 
-The toggled item drops off the list immediately, but the modal stays open until
-you actually pick a task to view.
+**Header controls**
+
+- **Sort** button — toggles between **A–Z** and **Modified**. Each list
+  remembers its own choice across restarts.
+- **Show archived** button (Task and Notes listings) — switches the list to the
+  `archived/` folder for that scope. Toggle it off to return to the live list.
+
+**Grouping & color**
+
+- The **Task listing** is split into sections — **Tasks**, **Completed**, **In
+  QA Review**, **Marked for Deployment**, **Deployed**, **Backlog / Deferred** —
+  and every task row is color-coded by priority (High / Normal / Low / Blocked /
+  On hold). The Working Task listing is one flat, color-coded list.
+
+**Row actions** (the trailing button on each row)
+
+- **Task listing → Tasks section**: **→ Working** moves the task into
+  `tasks/working/`.
+- **Task listing → any status section**: **Archive** moves the task into
+  `tasks/archived/`.
+- **Working Task listing**: **← Task** returns the task to `tasks/`.
+- **Notes listing**: **Archive** moves the note into that folder's `archived/`.
+- **When showing archived**: every row's button is **Restore**, moving the file
+  back out of `archived/`.
+
+The affected row drops off the list immediately; the modal stays open until you
+pick a file to view.
 
 ## Theme Switcher
 
-**Ctrl + L** opens the theme switcher. Arrow up and down (or **J / K**) to move
-through every theme — built-in and external — and the whole app re-themes live
-as you move. **Enter** applies and remembers the theme for the workspace;
-**Esc** reverts to the theme you started on. The Theme list in **Settings**
-still works exactly as before.
+**Ctrl + Shift + T** opens the theme switcher. Arrow up and down (or **J / K**)
+to move through every theme — built-in and external — and the whole app
+re-themes live as you move. **Enter** applies and remembers the theme for the
+workspace; **Esc** reverts to the theme you started on. The Theme list in
+**Settings** still works exactly as before.
 
 ## External Theme File
 
@@ -702,7 +732,7 @@ keys are case-insensitive.
 | `Esc` | Close any open palette or modal and return to the current file. With nothing open, save and jump to today's Daily Journal. |
 | `Ctrl+K` | Open the keyboard-shortcut reference sheet |
 | `Ctrl+P` | Toggle the command palette (command-search `>` mode) |
-| `Ctrl+L` | Open the theme switcher (live preview; Enter applies) |
+| `Ctrl+Shift+T` | Open the theme switcher (live preview; Enter applies) |
 | `Ctrl+I` | Open the Open / Import Files dialog |
 | `Ctrl+S` | Save the current note, task, or working task *(while editing)* |
 
@@ -721,6 +751,7 @@ keys are case-insensitive.
 | Shortcut | Action |
 |---|---|
 | `Ctrl+J` | Open or focus today's Daily Journal |
+| `Ctrl+L` | Toggle the Notes listing modal for the current folder |
 | `Ctrl+T` | Toggle the Task listing modal |
 | `Ctrl+W` | Toggle the Working Task listing modal |
 | `Ctrl+/` *(also `Ctrl+Shift+F`)* | Focus the workspace search box |
@@ -744,6 +775,7 @@ keys are case-insensitive.
 
 | Shortcut | Action |
 |---|---|
+| `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo — up to 50 steps, including list, indent, delete-line and blockquote edits |
 | `Enter` in a list | Continue list on next line with matching prefix |
 | `Enter` on empty list item | Exit the list |
 | `Tab` | Indent selected lines (or insert 2 spaces at cursor) |
@@ -1143,7 +1175,7 @@ Working Tasks remain editable and savable, but cannot be stamped, converted, cop
 
 ### All Tasks View
 
-Click the **Tasks** icon in Nav Row 1, or press **Ctrl+T**, to see tasks from the workspace-level `tasks/` folder. The list is sectioned with Working Tasks first, then priority/status groups and special sections such as Completed, QA Review, Deployment, Deployed, and Backlog / Deferred. Use the **grouping toggle** to switch between grouping normal tasks by status/priority and grouping them as a single Tasks section. Click **+ New** or press **Ctrl+N** from this view to create a normal task markdown file in `tasks/`. Press **Ctrl+O** for the compact quick task selector; use arrows or **J/K**, type the displayed one- or two-letter code, press **Enter** to open as a normal tab, or **Ctrl+Enter** to pin the task tab.
+Click the **Task listing** icon in Nav Row 1, or press **Ctrl+T**, to see tasks from the workspace-level `tasks/` folder in the listing modal. It is sectioned as **Tasks**, **Completed**, **In QA Review**, **Marked for Deployment**, **Deployed**, and **Backlog / Deferred**, with each row color-coded by priority. Use arrows or **J/K**, type the displayed one- or two-letter code, press **Enter** to open (or **Ctrl+Enter** to pin). The header **Sort** button toggles A–Z / Modified, and **Show archived** switches to `tasks/archived/`. Each row's trailing button is **→ Working** (Tasks section), **Archive** (status sections), or **Restore** (when showing archived). Press **Ctrl+N** to create a new task.
 
 ---
 

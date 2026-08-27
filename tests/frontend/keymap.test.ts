@@ -33,7 +33,8 @@ test("no two bindings claim the same key combo", () => {
 test("the remapped shortcuts resolve to their new combos", () => {
   assert.equal(comboFor("command.palette"), "Ctrl+P");
   assert.equal(comboFor("global.keybindings"), "Ctrl+K");
-  assert.equal(comboFor("view.theme"), "Ctrl+L");
+  assert.equal(comboFor("view.theme"), "Ctrl+Shift+T");
+  assert.equal(comboFor("notes.list"), "Ctrl+L");
   assert.equal(comboFor("navigation.today"), "Ctrl+J");
   assert.equal(comboFor("tasks.list"), "Ctrl+T");
   assert.equal(comboFor("tasks.working-list"), "Ctrl+W");

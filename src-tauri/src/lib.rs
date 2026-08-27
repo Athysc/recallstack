@@ -85,6 +85,13 @@ pub struct AppState {
     pub backup_cancel: AtomicBool,
     pub index_cancel: AtomicBool,
     pub index_reconcile_workspaces: Mutex<HashSet<String>>,
+    /// False while the window is hidden/minimized: the watcher then defers
+    /// per-file indexing and stops emitting change events, and only records
+    /// that a catch-up is due. See `set_foreground`.
+    pub watcher_foreground: AtomicBool,
+    /// Set when the watcher saw changes while backgrounded; cleared by the
+    /// foreground transition that schedules the catch-up reconcile.
+    pub watcher_missed_changes: AtomicBool,
 }
 
 impl Default for AppState {
@@ -99,6 +106,8 @@ impl Default for AppState {
             backup_cancel: AtomicBool::new(false),
             index_cancel: AtomicBool::new(false),
             index_reconcile_workspaces: Mutex::new(HashSet::new()),
+            watcher_foreground: AtomicBool::new(true),
+            watcher_missed_changes: AtomicBool::new(false),
         }
     }
 }
@@ -160,6 +169,38 @@ impl AppState {
 
     pub fn is_current_watcher_generation(&self, generation: u64) -> bool {
         *self.watcher_generation.lock() == generation
+    }
+
+    pub fn is_watcher_foreground(&self) -> bool {
+        self.watcher_foreground
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Records that the watcher observed changes while backgrounded.
+    pub fn mark_watcher_missed_changes(&self) {
+        self.watcher_missed_changes
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Sets the foreground flag. Returns `true` when this is a background→
+    /// foreground transition that had missed changes, i.e. a catch-up is due.
+    pub fn set_watcher_foreground(&self, foreground: bool) -> bool {
+        let was_foreground = self
+            .watcher_foreground
+            .swap(foreground, std::sync::atomic::Ordering::SeqCst);
+        if foreground && !was_foreground {
+            return self
+                .watcher_missed_changes
+                .swap(false, std::sync::atomic::Ordering::SeqCst);
+        }
+        false
+    }
+
+    pub fn reset_watcher_activity(&self) {
+        self.watcher_foreground
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.watcher_missed_changes
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -248,6 +289,7 @@ pub fn run() {
             workspace::create_note,
             workspace::move_to_trash,
             workspace::reconcile_workspace,
+            workspace::set_foreground,
             workspace::index_health,
             workspace::rebuild_index,
             workspace::cancel_index,

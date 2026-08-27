@@ -12,6 +12,9 @@ export const PREFERENCE_KEYS = Object.freeze({
   workspaceRootPath: "recallstack-workspace-root-path",
   outputsFolderPath: "recallstack-outputs-folder-path",
   externalThemePath: "recallstack-external-theme-path",
+  taskListingSort: "pkm-task-listing-sort",
+  workingListingSort: "pkm-working-listing-sort",
+  notesListingSort: "pkm-notes-listing-sort",
 });
 
 export type WorkspacePreference = "theme" | "nav1-mode" | "nav2-mode" | "all-tasks-mode" | "last-view";

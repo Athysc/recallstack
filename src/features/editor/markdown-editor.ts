@@ -136,7 +136,7 @@ export class MarkdownEditorAdapter {
       state: EditorState.create({
         doc: source.textContent || "",
         extensions: [
-          highlightSpecialChars(), history(), drawSelection(), dropCursor(), rectangularSelection(), crosshairCursor(),
+          highlightSpecialChars(), history({ minDepth: 50 }), drawSelection(), dropCursor(), rectangularSelection(), crosshairCursor(),
           highlightActiveLine(), bracketMatching(), foldGutter(), highlightSelectionMatches(),
           syntaxHighlighting(markdownHighlightStyle, { fallback: true }),
           keymap.of([{ key: "Shift-Tab", run: indentLess }, ...historyKeymap, ...foldKeymap, ...completionKeymap, ...defaultKeymap.filter(binding => binding.key !== "Enter" && binding.key !== "Tab" && binding.key !== "Shift-Tab")]),
@@ -175,6 +175,25 @@ export class MarkdownEditorAdapter {
         effects: this.#language.reconfigure(useMarkdownExtensions(text.length, this.#largeFileThreshold) ? markdown() : []),
       });
     } finally { this.#programmatic = false; }
+  }
+
+  /**
+   * Apply a full-document replacement as a single, undoable user edit — for the
+   * structural editor commands (list continuation, indent, delete-line,
+   * blockquote, insert). Unlike `setText`/`value`, this stays in CodeMirror's
+   * undo history and still fires the `input` event so preview/draft/dirty
+   * tracking update.
+   */
+  applyUserEdit(text: string, selectionStart: number, selectionEnd: number): void {
+    const length = text.length;
+    const [anchor, head] = clampEditorSelection(selectionStart, selectionEnd, length);
+    this.view.dispatch({
+      changes: { from: 0, to: this.view.state.doc.length, insert: text },
+      selection: EditorSelection.range(anchor, head),
+      annotations: Transaction.addToHistory.of(true),
+      effects: this.#language.reconfigure(useMarkdownExtensions(length, this.#largeFileThreshold) ? markdown() : []),
+      scrollIntoView: true,
+    });
   }
 
   openDocument(key: string, text: string, fallbackCursor = 0): void {

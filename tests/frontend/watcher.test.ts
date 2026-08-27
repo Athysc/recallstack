@@ -6,6 +6,7 @@ import {
   normalizeWorkspaceBatch,
   WatcherSequenceGuard,
   WorkspaceBatchAccumulator,
+  MAX_BUFFERED_CHANGES,
   type WorkspaceChangeBatch,
 } from "../../src/services/watcher.ts";
 
@@ -75,4 +76,16 @@ test("background batch accumulator retains overflow recovery state", () => {
   const [combined] = accumulator.takeAll();
   assert.equal(combined.overflowed, true);
   assert.equal(combined.changes.length, 2);
+});
+
+test("accumulator collapses to overflow once too many distinct paths are buffered", () => {
+  const accumulator = new WorkspaceBatchAccumulator();
+  for (let i = 0; i < MAX_BUFFERED_CHANGES + 50; i++) {
+    accumulator.add(batch(i + 1, [
+      { kind: "modify", path: `Data/notes/file-${i}.md`, entity: "markdown", internal: false },
+    ]));
+  }
+  const [combined] = accumulator.takeAll();
+  assert.equal(combined.overflowed, true);
+  assert.ok(combined.changes.length < MAX_BUFFERED_CHANGES, "individual entries are dropped after collapse");
 });

@@ -4,19 +4,28 @@
 
 ## Version 0.1.4 — 2026-08-27 (unreleased)
 
-### Modal task browsing
+### Modal listing windows (Notes / Tasks / Working Tasks)
 
-The Tasks list view is replaced by two centered modal windows — 80% of the
-application width, 60% of its height — that leave the editor and preview visible
-behind them:
+Note, task, and working-task browsing all move into a centered listing modal —
+80% of the window width, 60% of its height — leaving the editor and preview
+visible behind it. Coded-jump navigation throughout (`J`/`K` or arrows, letter
+codes, `Enter` open, `Ctrl+Enter` pin, `Esc` close).
 
-- **Task listing** (`Ctrl+T`, or the Task icon in Nav Row 1) — every workspace
-  task, with the quick coded-jump navigation of the Quick Task Selector and a
-  **→ Working** button on each row that moves the task into `tasks/working/`.
-- **Working Task listing** (`Ctrl+W`, or the new colored Working Tasks icon
-  beside the Task icon) — the same for `tasks/working/`, with a **← Task**
-  button on each row. Toggled rows drop off the list immediately; the modal
-  stays open until a task is chosen for viewing.
+- **Task listing** (`Ctrl+T`, or the Task icon in Nav Row 1) — the workspace
+  `tasks/` folder, split into **Tasks / Completed / In QA Review / Marked for
+  Deployment / Deployed / Backlog & Deferred** sections, each row color-coded by
+  priority. Row button is **→ Working** in the Tasks section and **Archive** in
+  the status sections.
+- **Working Task listing** (`Ctrl+W`, or the colored Working Tasks icon) —
+  `tasks/working/`, color-coded, with a **← Task** button per row.
+- **Notes listing** (`Ctrl+L`) — the currently selected folder's notes. Clicking
+  a folder or subfolder in the nav bar opens it automatically; Inbox and Outputs
+  keep the inline list. Row button is **Archive**.
+- Every listing has a **Sort** header button (A–Z ↔ Modified, remembered per
+  listing) and — for Tasks and Notes — a **Show archived** toggle that switches
+  the list to the `archived/` folder, where each row's button becomes
+  **Restore**. Acted-on rows drop off immediately; the modal stays open until a
+  file is chosen.
 
 ### Working Tasks pane removed
 
@@ -33,11 +42,15 @@ longer used.
 - The command palette moves to **`Ctrl+P`** (command-search `>` mode only; the
   old `@` quick-open-notes shortcut is dropped — type `@` in the palette).
 - **`Ctrl+J`** opens the Daily Journal (was `Ctrl+L`).
-- **`Ctrl+L`** opens the new theme switcher (was Journal).
+- **`Ctrl+L`** opens the Notes listing modal for the current folder.
+- **`Ctrl+Shift+T`** opens the theme switcher.
 - **`Ctrl+Q`** (and `Ctrl+Shift+W`) closes the current tab (was `Ctrl+W`).
 - **`Ctrl+I`** opens Open / Import Files.
 - **`Ctrl+/`** focuses workspace search; blockquote toggle in the editor moves
   to **`Ctrl+'`**.
+- **`Ctrl+Z` / `Ctrl+Shift+Z`** undo / redo now cover the structural editor
+  commands (list continuation, indent/outdent, delete-line, blockquote, insert)
+  — up to 50 steps — which previously bypassed the undo history entirely.
 - **`Ctrl+O`** is unbound.
 - Controls that have a shortcut now show it in their hover tooltip.
 
@@ -49,8 +62,9 @@ keys `n` / `t` / `w` jump and create.
 
 ### Live theme switcher
 
-**`Ctrl+L`** opens a theme list that previews each theme across the whole app as
-you arrow through it. `Enter` applies and saves for the workspace; `Esc` reverts.
+**`Ctrl+Shift+T`** opens a theme list that previews each theme across the whole
+app as you arrow through it. `Enter` applies and saves for the workspace; `Esc`
+reverts.
 
 ### External theme file
 

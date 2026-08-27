@@ -40,11 +40,7 @@ import {
 } from "../features/editor/tabs";
 import { renderAppView } from "../features/editor/view-controller";
 import {
-  TASK_HEADER,
-  hasStandardTaskHeader,
-  makeTaskContent,
   parseDateLocal,
-  parseTaskDates,
   removeLegacyTaskHeader,
   taskMetaFor,
 } from "../features/tasks/metadata";
@@ -129,6 +125,7 @@ import { portableNameError } from "../services/portable-names";
 import { newMarkdownFileTitle, newMarkdownStoredFilename } from "../features/notes/new-file";
 import { NewFileModalController } from "../ui/components/new-file-modal";
 import { QuickTabSwitcherController, tabJumpCodes } from "../ui/components/quick-tab-switcher";
+import { ListingModalController, type ListingSection, type ListingSort } from "../ui/components/listing-modal";
 import { KEY_BINDINGS, bindingsByCategory, comboFor } from "../features/commands/keymap";
 import {
   allFilesAreMarkdown,
@@ -757,8 +754,8 @@ type TaskLocation = {
     const start = mdEditor.selectionStart;
     const end   = mdEditor.selectionEnd;
     const val   = mdEditor.value;
-    mdEditor.value = val.slice(0, start) + text + val.slice(end);
-    mdEditor.selectionStart = mdEditor.selectionEnd = start + text.length;
+    const caret = start + text.length;
+    mdEditor.applyUserEdit(val.slice(0, start) + text + val.slice(end), caret, caret);
     renderPreview();
   }
 
@@ -997,6 +994,10 @@ type TaskLocation = {
     clearTimeout(_searchTimer);
     clearTimeout(_localDraftTimer);
     clearTimeout(_nativeDraftTimer);
+    clearTimeout(_nativeRefreshTimer);
+    clearTimeout(_themeReloadTimer);
+    clearTimeout(_backlinksRefreshTimer);
+    clearTimeout(_catalogRefreshTimer);
 
     currentWorkspace = null;
     activeWorkspace = null;
@@ -1344,6 +1345,11 @@ type TaskLocation = {
     if (!await checkUnsavedNewNote()) return;
     if (!await autoSaveIfDirty(true)) return;
     await initNav({ restoreView: false, preferredL1: l1Name, preferredL2: l2Name, preferRoot });
+    // A folder click opens that folder's notes as a modal (Inbox / Tasks stay
+    // inline). Init / restore call initNav directly and never land here.
+    if (l1Active && !outputsMode && !folderUsesInlineList(activeFolderHeading(), l1Active.name)) {
+      void openNotesListing().catch(e => toast('Could not load notes: ' + (e?.message || e), 'error'));
+    }
   }
 
   async function selectL1(folder: NamedDirectory, options: NavigationOptions = {}) {
@@ -1391,6 +1397,14 @@ type TaskLocation = {
     else await selectRootFolder();
   }
 
+  // Regular content folders now browse their notes in the Notes listing modal
+  // (opened by refreshFolderNavigation / Ctrl+L), so selecting one only updates
+  // nav state. Inbox (non-markdown) and a subfolder literally named `tasks`
+  // keep the inline file-list grid.
+  function folderUsesInlineList(...names: Array<string | null | undefined>) {
+    return names.some(name => name === 'inbox' || name === 'tasks');
+  }
+
   async function selectL2(folder: any) {
     if (!await checkUnsavedNewNote()) return;
     l2Active    = folder;
@@ -1402,7 +1416,7 @@ type TaskLocation = {
     if (ob) ob.classList.remove('active');
     const r2 = $maybe('btn-rename-folder-2');
     if (r2) r2.disabled = isManagedSystemWorkspace() || folder.name === 'tasks';
-    await loadFiles(folder.handle, folder.name);
+    if (folderUsesInlineList(folder.name, l1Active?.name)) await loadFiles(folder.handle, folder.name);
     saveLastView('list', null);
   }
 
@@ -1418,7 +1432,7 @@ type TaskLocation = {
     if (ob) ob.classList.remove('active');
     const r2 = $maybe('btn-rename-folder-2');
     if (r2) r2.disabled = true;
-    await loadFiles(l1Active!.handle, 'root');
+    if (folderUsesInlineList(l1Active!.name)) await loadFiles(l1Active!.handle, 'root');
     saveLastView('list', null);
   }
 
@@ -1567,10 +1581,6 @@ type TaskLocation = {
     btn.disabled  = isManagedSystemWorkspace();
     btn.addEventListener('click', () => void openWorkingListing().catch(e => toast('Could not load working tasks: ' + (e?.message || e), 'error')));
     return btn;
-  }
-
-  function lastSelectedTab() {
-    return activeTabRecord() || tabs.at(-1)! || null;
   }
 
   function syncReturnToTabButton() {
@@ -2200,10 +2210,6 @@ type TaskLocation = {
   }
 
   // ── Task date helpers ─────────────────────────────────────────────────────────
-
-  function ensureTaskHeaderInEditor() {
-    if (!hasStandardTaskHeader(mdEditor.value)) mdEditor.value = TASK_HEADER + mdEditor.value;
-  }
 
   function buildTaskCard(f: any, onClickFn: (event: MouseEvent) => void, folderName = '', taskLocation: TaskLocation | null = null) {
     const { priority, startDate, completedDate, dueDate } = taskMetaFor(f.name, f.content || '');
@@ -4432,6 +4438,9 @@ type TaskLocation = {
       const restoreArchiveMode = archiveMode;
       returnToAllTasks = false;
       selectAllTasks(restoreArchiveMode);
+    } else if (l1Active && !folderUsesInlineList(activeFolderHeading(), l1Active.name)) {
+      // Content folder: cancelling a note reopens that folder's notes modal.
+      void openNotesListing().catch(e => toast('Could not load notes: ' + (e?.message || e), 'error'));
     } else {
       showView('list');
       if (l1Active) {
@@ -4932,7 +4941,8 @@ type TaskLocation = {
 
   // Toggle the idx-th checkbox in the editor source and re-render
   function toggleCheckbox(idx: any, checked: any) {
-    mdEditor.value = toggleMarkdownCheckbox(mdEditor.value, idx, checked);
+    const start = mdEditor.selectionStart;
+    mdEditor.applyUserEdit(toggleMarkdownCheckbox(mdEditor.value, idx, checked), start, mdEditor.selectionEnd);
     renderPreview();
   }
 
@@ -5332,12 +5342,6 @@ type TaskLocation = {
     return remoteMediaSessionAllowed || localStorage.getItem('pkm-load-remote-media') === 'on';
   }
 
-  function datetimeSuffix() {
-    const d = new Date();
-    const p = (n: any) => String(n).padStart(2, '0');
-    return `- ${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}`;
-  }
-
   // ── Events ────────────────────────────────────────────────────────────────────
 
   $id('btn-open-workspace').addEventListener('click', async () => {
@@ -5349,10 +5353,20 @@ type TaskLocation = {
   });
 
   async function reloadActiveList() {
+    // The open listing modal, if any, owns the refresh — rebuild it in place
+    // while keeping its current sort / archived toggle state.
+    const openListing = taskListing.isOpen() ? taskListing : workingListing.isOpen() ? workingListing : notesListing.isOpen() ? notesListing : null;
+    if (openListing && activeListingRebuild) {
+      try { openListing.refresh(await activeListingRebuild()); } catch { /* best effort */ }
+      return;
+    }
     switch (listReloadMode({ allTasksMode, outputsMode, outputsActiveFolder, l1Active, l2Active })) {
       case "all-tasks": await loadAllTasks(); break;
       case "outputs": await loadOutputsFiles(outputsActiveFolder); break;
-      case "folder": await loadFiles(activeDirHandle(), activeFolderHeading()); break;
+      case "folder":
+        if (l1Active && !folderUsesInlineList(activeFolderHeading(), l1Active.name)) break; // notes modal owns it
+        await loadFiles(activeDirHandle(), activeFolderHeading());
+        break;
       case "none": break;
     }
   }
@@ -5444,11 +5458,11 @@ type TaskLocation = {
     banner.append(message, compare, reload, keep);
   }
 
-  async function handleExternalEditorChange(change: any) {
+  async function handleExternalEditorChange(change: any, precomputedNativePath?: string) {
     if (!currentPath || change.internal || change.entity !== 'markdown') return;
-    const currentNativePath = normalizeAppPath(DB_WS_PREFIX + currentPath);
+    const currentNativePath = precomputedNativePath ?? normalizeAppPath(DB_WS_PREFIX + currentPath);
     const changedPath = normalizeAppPath(change.path);
-    const priorPath = normalizeAppPath(change.previousPath || '');
+    const priorPath = change.previousPath ? normalizeAppPath(change.previousPath) : '';
     if (changedPath !== currentNativePath && priorPath !== currentNativePath) return;
 
     if (change.kind === 'remove') {
@@ -5512,6 +5526,7 @@ type TaskLocation = {
   let _nativeRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   let _themeReloadTimer: ReturnType<typeof setTimeout> | undefined;
   let _backlinksRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let _catalogRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   function scheduleBacklinksRefresh(delayMs = 250) {
     clearTimeout(_backlinksRefreshTimer);
     _backlinksRefreshTimer = setTimeout(() => {
@@ -5521,37 +5536,66 @@ type TaskLocation = {
       });
     }, delayMs);
   }
+  function scheduleActiveListRefresh(delayMs: number, editorMustBeHidden = false) {
+    clearTimeout(_nativeRefreshTimer);
+    _nativeRefreshTimer = setTimeout(() => {
+      if (editorMustBeHidden && !editorView.classList.contains('hidden')) return;
+      reloadActiveList().catch(e => toast(e.message, 'error'));
+    }, delayMs);
+  }
+  function scheduleCatalogRefresh(delayMs = 400) {
+    clearTimeout(_catalogRefreshTimer);
+    _catalogRefreshTimer = setTimeout(() => {
+      buildSearchIndex().catch(error => console.warn('Could not refresh note catalog', error));
+    }, delayMs);
+  }
+
+  // Above this many distinct changed paths in one (already-coalesced) batch,
+  // stop inspecting individual entries — a single full list refresh is both
+  // cheaper and more correct than replaying hundreds of them. This is the path
+  // that used to stall the UI when returning after a long idle with a large
+  // backlog of background file writes.
+  const BULK_CHANGE_THRESHOLD = 400;
+
   window.addEventListener('recallstack-workspace-changes', (event: any) => {
-    const changes = Array.isArray(event.detail?.changes) ? event.detail.changes : [];
-    changes.forEach((change: any) => { void handleExternalEditorChange(change); });
-    if (event.detail?.sequenceGap || event.detail?.overflowed) {
-      clearTimeout(_nativeRefreshTimer);
-      _nativeRefreshTimer = setTimeout(() => reloadActiveList().catch(e => toast(e.message, 'error')), 150);
+    const changes: any[] = Array.isArray(event.detail?.changes) ? event.detail.changes : [];
+    const overflowed = event.detail?.overflowed === true;
+    const bulk = overflowed || changes.length > BULK_CHANGE_THRESHOLD;
+
+    // One pass: derive every flag we need instead of re-scanning the array.
+    let themeChanged = false;
+    let affectsActiveList = false;
+    let hasMarkdown = false;
+    const currentNativePath = currentPath ? normalizeAppPath(DB_WS_PREFIX + currentPath) : null;
+    for (const change of changes) {
+      if (change.entity === 'markdown') hasMarkdown = true;
+      if (!change.internal && change.path === 'Apps/themes.json') themeChanged = true;
+      if (!bulk) {
+        if (currentNativePath) void handleExternalEditorChange(change, currentNativePath);
+        if (!affectsActiveList && !change.internal && changeAffectsActiveList(change)) affectsActiveList = true;
+      }
     }
-    if (changes.some((change: any) => !change.internal && change.path === 'Apps/themes.json')) {
+
+    if (bulk || event.detail?.sequenceGap) {
+      scheduleActiveListRefresh(150);
+      scheduleCatalogRefresh(150);
+    } else if (affectsActiveList) {
+      scheduleActiveListRefresh(100, true);
+    }
+
+    if (themeChanged) {
       clearTimeout(_themeReloadTimer);
       _themeReloadTimer = setTimeout(async () => {
         const loaded = await loadWorkspaceThemes();
-        const savedTheme = activeWorkspace
-          ? localStorage.getItem('pkm-theme-' + activeWorkspace)
-          : null;
+        const savedTheme = activeWorkspace ? localStorage.getItem('pkm-theme-' + activeWorkspace) : null;
         const theme = savedTheme && THEMES[savedTheme] ? savedTheme : defaultThemeId;
         themeSelect.value = theme;
         applyTheme(theme, false);
         if (loaded) toast('Themes reloaded');
       }, 250);
     }
-    if (!event.detail?.overflowed && changes.some((change: any) => !change.internal && changeAffectsActiveList(change))) {
-      clearTimeout(_nativeRefreshTimer);
-      _nativeRefreshTimer = setTimeout(() => {
-        if (editorView.classList.contains('hidden')) {
-          reloadActiveList().catch(e => toast(e.message, 'error'));
-        }
-      }, 100);
-    }
-    if (changes.some((change: any) => change.entity === 'markdown') && currentPath) {
-      scheduleBacklinksRefresh();
-    }
+
+    if (hasMarkdown && currentPath) scheduleBacklinksRefresh();
   });
   window.addEventListener('recallstack-index-status', (event: any) => {
     if (event.detail?.state === 'ready' && searchInput.value.trim().length >= 3) {
@@ -5560,7 +5604,8 @@ type TaskLocation = {
       toast('Search index failed: ' + (event.detail.message || 'unknown error'), 'error');
     }
     if (event.detail?.state === 'ready') {
-      buildSearchIndex().catch(error => console.warn('Could not refresh note catalog', error));
+      // Debounced: a catch-up after idle can emit "ready" several times in a row.
+      scheduleCatalogRefresh();
       scheduleBacklinksRefresh(0);
     }
   });
@@ -5707,6 +5752,8 @@ type TaskLocation = {
     { id:'tasks.quick-open', title:'Open Task', category:'Tasks', keywords:['tasks quick'], isEnabled:needsWorkspace, run:openQuickTaskSwitcher },
     { id:'tasks.list', title:'Show Task Listing', category:'Tasks', keywords:['tasks all list'], shortcut:'Ctrl+T', isEnabled:needsWorkspace, run:openTaskListing },
     { id:'tasks.working-list', title:'Show Working Task Listing', category:'Tasks', keywords:['working tasks list'], shortcut:'Ctrl+W', isEnabled:needsWorkspace, run:openWorkingListing },
+    { id:'navigation.notes-list', title:'Show Notes Listing', category:'Navigation', keywords:['notes folder list'], shortcut:'Ctrl+L', isEnabled:needsWorkspace, run:openNotesListing },
+    { id:'view.theme-switcher', title:'Open Theme Switcher', category:'View', keywords:['appearance color preview'], shortcut:'Ctrl+Shift+T', isEnabled:needsWorkspace, run:openThemeSwitcher },
     { id:'view.presentation', title:'Toggle Presentation Mode', category:'View', shortcut:'F12', isEnabled:needsEditor, run:() => $id('btn-presentation').click() },
     { id:'view.zoom-in', title:'Zoom In', category:'View', shortcut:'Ctrl++', isEnabled:needsWorkspace, run:() => stepContentZoom(1) },
     { id:'view.zoom-out', title:'Zoom Out', category:'View', shortcut:'Ctrl+-', isEnabled:needsWorkspace, run:() => stepContentZoom(-1) },
@@ -6038,17 +6085,16 @@ type TaskLocation = {
 
       if (nextPrefix !== null) {
         e.preventDefault();
+        e.stopPropagation();
         if (content === '') {
           // Empty list item — exit the list by removing the prefix
-          mdEditor.value = val.slice(0, lineStart) + indent + val.slice(start);
           const pos = lineStart + indent.length;
-          mdEditor.selectionStart = mdEditor.selectionEnd = pos;
+          mdEditor.applyUserEdit(val.slice(0, lineStart) + indent + val.slice(start), pos, pos);
         } else {
           // Insert newline + next prefix
           const insert = '\n' + nextPrefix;
-          mdEditor.value = val.slice(0, start) + insert + val.slice(mdEditor.selectionEnd);
           const pos = start + insert.length;
-          mdEditor.selectionStart = mdEditor.selectionEnd = pos;
+          mdEditor.applyUserEdit(val.slice(0, start) + insert + val.slice(mdEditor.selectionEnd), pos, pos);
         }
         renderPreview();
         return;
@@ -6058,6 +6104,7 @@ type TaskLocation = {
     // ── Ctrl+D — delete the entire current line in the markdown editor ─────────
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'd') {
       e.preventDefault();
+      e.stopPropagation();
       const val = mdEditor.value;
       const start = mdEditor.selectionStart;
       const end = mdEditor.selectionEnd;
@@ -6065,18 +6112,16 @@ type TaskLocation = {
       const lineEndRaw = val.indexOf('\n', end);
       const lineEnd = lineEndRaw === -1 ? val.length : lineEndRaw + 1;
       const newValue = val.slice(0, lineStart) + val.slice(lineEnd);
-      mdEditor.value = newValue;
       const pos = Math.min(lineStart, newValue.length);
-      mdEditor.selectionStart = mdEditor.selectionEnd = pos;
+      mdEditor.applyUserEdit(newValue, pos, pos);
       renderPreview();
-      lsDraftSave();
-      updateActiveTabDirtyState();
       return;
     }
 
-    // ── Ctrl+/ — toggle blockquote on selected lines ─────────────────────────
-    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+    // ── Ctrl+' — toggle blockquote on selected lines ────────────────────────
+    if ((e.ctrlKey || e.metaKey) && e.key === "'") {
       e.preventDefault();
+      e.stopPropagation();
       const val   = mdEditor.value;
       const start = mdEditor.selectionStart;
       const end   = mdEditor.selectionEnd;
@@ -6089,15 +6134,14 @@ type TaskLocation = {
         ? lines.map(l => l === '>' ? '' : l.startsWith('> ') ? l.slice(2) : l)
         : lines.map(l => '> ' + l);
       const newBlock  = newLines.join('\n');
-      mdEditor.value  = val.slice(0, lineStart) + newBlock + val.slice(blockEnd);
-      mdEditor.selectionStart = lineStart;
-      mdEditor.selectionEnd   = lineStart + newBlock.length;
+      mdEditor.applyUserEdit(val.slice(0, lineStart) + newBlock + val.slice(blockEnd), lineStart, lineStart + newBlock.length);
       renderPreview();
       return;
     }
 
     if (e.key !== 'Tab') return;
     e.preventDefault();
+    e.stopPropagation();
     const TAB   = '  '; // 2 spaces
     const val   = mdEditor.value;
     const start = mdEditor.selectionStart;
@@ -6110,14 +6154,12 @@ type TaskLocation = {
       const lineEndIdx = lineEndRaw === -1 ? val.length : lineEndRaw;
       const line       = val.slice(lineStart, lineEndIdx);
       if (/^\s*([-*+](\s*\[[ xX]\])?\s|\[[ xX]\]\s|\d+\.\s)/.test(line)) {
-        mdEditor.value = val.slice(0, lineStart) + TAB + line + val.slice(lineEndIdx);
-        mdEditor.selectionStart = mdEditor.selectionEnd = start + 2;
+        mdEditor.applyUserEdit(val.slice(0, lineStart) + TAB + line + val.slice(lineEndIdx), start + 2, start + 2);
         renderPreview();
         return;
       }
       // Plain cursor: insert 2 spaces at cursor position
-      mdEditor.value = val.slice(0, start) + TAB + val.slice(end);
-      mdEditor.selectionStart = mdEditor.selectionEnd = start + 2;
+      mdEditor.applyUserEdit(val.slice(0, start) + TAB + val.slice(end), start + 2, start + 2);
       renderPreview();
       return;
     }
@@ -6131,7 +6173,7 @@ type TaskLocation = {
       ? lines.map(l => l.startsWith(TAB) ? l.slice(2) : l.startsWith(' ') ? l.slice(1) : l)
       : lines.map(l => TAB + l);
     const newBlock  = newLines.join('\n');
-    mdEditor.value  = val.slice(0, lineStart) + newBlock + val.slice(blockEnd);
+    const newText   = val.slice(0, lineStart) + newBlock + val.slice(blockEnd);
 
     if (e.shiftKey) {
       // Place a single caret at the start of content (past bullet/todo marker)
@@ -6144,10 +6186,9 @@ type TaskLocation = {
       const targetLine = newLines[origLineIndex] ?? newLines[newLines.length - 1] ?? '';
       const m = targetLine.match(/^\s*([-*+](\s*\[[ xX]\])?\s|\[[ xX]\]\s|\d+\.\s)/);
       const offset = m ? m[0].length : (targetLine.match(/^\s*/)?.[0].length || 0);
-      mdEditor.selectionStart = mdEditor.selectionEnd = absLineStart + offset;
+      mdEditor.applyUserEdit(newText, absLineStart + offset, absLineStart + offset);
     } else {
-      mdEditor.selectionStart = lineStart;
-      mdEditor.selectionEnd   = lineStart + newBlock.length;
+      mdEditor.applyUserEdit(newText, lineStart, lineStart + newBlock.length);
     }
     renderPreview();
   });
@@ -7057,109 +7098,274 @@ type TaskLocation = {
     requestAnimationFrame(() => input.focus());
   }
 
-  // ── Task / Working Task listing modals (Ctrl+T / Ctrl+W) ────────────────────
-  const taskListingOverlay = document.createElement('div');
-  taskListingOverlay.id = 'modal-task-listing';
-  taskListingOverlay.className = 'quick-tab-switcher hidden quick-task-switcher';
-  taskListingOverlay.innerHTML = `<div class="quick-tab-switcher-dialog quick-task-switcher-dialog" role="dialog" aria-modal="true" aria-labelledby="task-listing-title"><div class="quick-tab-switcher-header"><div><div id="task-listing-title" class="quick-tab-switcher-title">Tasks</div><div class="quick-tab-switcher-subtitle">Open a task, or use → Working to move it. Ctrl+Enter pins.</div></div><div id="task-listing-typed-code" class="quick-tab-typed-code" aria-live="polite"></div></div><div id="task-listing-results" class="quick-tab-results" role="listbox" aria-label="Tasks" tabindex="0"></div><div class="quick-tab-switcher-footer"><span>↓ / J Down</span><span>↑ / K Up</span><span>Enter Open</span><span>Ctrl+Enter Pin</span><span>→ Working</span><span>Esc Close</span></div></div>`;
-  document.body.appendChild(taskListingOverlay);
-  const workingListingOverlay = document.createElement('div');
-  workingListingOverlay.id = 'modal-working-listing';
-  workingListingOverlay.className = 'quick-tab-switcher hidden quick-task-switcher';
-  workingListingOverlay.innerHTML = `<div class="quick-tab-switcher-dialog quick-task-switcher-dialog" role="dialog" aria-modal="true" aria-labelledby="working-listing-title"><div class="quick-tab-switcher-header"><div><div id="working-listing-title" class="quick-tab-switcher-title">Working Tasks</div><div class="quick-tab-switcher-subtitle">Open a working task, or use ← Task to return it. Ctrl+Enter pins.</div></div><div id="working-listing-typed-code" class="quick-tab-typed-code" aria-live="polite"></div></div><div id="working-listing-results" class="quick-tab-results" role="listbox" aria-label="Working tasks" tabindex="0"></div><div class="quick-tab-switcher-footer"><span>↓ / J Down</span><span>↑ / K Up</span><span>Enter Open</span><span>Ctrl+Enter Pin</span><span>← Task</span><span>Esc Close</span></div></div>`;
-  document.body.appendChild(workingListingOverlay);
-  const taskListingSwitcher = new QuickTabSwitcherController({
-    overlay: taskListingOverlay,
-    dialog: taskListingOverlay.firstElementChild as HTMLElement,
-    list: $id('task-listing-results'),
-    typedCode: $id('task-listing-typed-code'),
-  });
-  const workingListingSwitcher = new QuickTabSwitcherController({
-    overlay: workingListingOverlay,
-    dialog: workingListingOverlay.firstElementChild as HTMLElement,
-    list: $id('working-listing-results'),
-    typedCode: $id('working-listing-typed-code'),
-  });
+  // ── Grouped listing modals (Task / Working Task / Notes) ────────────────────
+  const ARCHIVE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4"/><path d="M5 8v12h14V8M10 12h4"/></svg>';
 
-  let listingEntries: Array<{ id: number; file: any }> = [];
-
-  async function buildListingItems(inWorking: boolean) {
-    const tasksDir = await getDirHandle(notesHandle!, [TASKS_ROOT], true);
-    let dir: FileSystemDirectoryHandle = tasksDir;
-    if (inWorking) {
-      try { dir = await tasksDir.getDirectoryHandle('working'); }
-      catch { listingEntries = []; return []; }
-    }
-    const files = await Promise.all((await listMdFiles(dir)).map(enrichFileContent));
-    const entries = sortTaskEntries(files.map(file => ({
-      file,
-      path: `${TASKS_ROOT}/${inWorking ? 'working/' : ''}${file.name}`,
-      inWorking,
-    })));
-    listingEntries = entries.map((entry, index) => ({ id: index + 1, file: entry.file }));
-    return entries.map((entry, index) => ({
-      id: index + 1,
-      title: taskDisplayTitle(entry.file.name),
-      path: entry.path,
-      kind: inWorking ? 'Working Task' : 'Task',
-      dirty: Boolean(findTabByPath(entry.path)?.dirty),
-      actionLabel: inWorking ? '← Task' : '→ Working',
-    }));
+  function mkListingModal(id: string, title: string) {
+    const overlay = document.createElement('div');
+    overlay.id = id;
+    overlay.className = 'listing-modal hidden';
+    overlay.innerHTML = `<div class="listing-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="${id}-title">`
+      + `<div class="listing-modal-header">`
+      + `<span id="${id}-title" class="listing-modal-title">${esc(title)}</span>`
+      + `<span id="${id}-typed" class="listing-modal-typed" aria-live="polite"></span>`
+      + `<button type="button" id="${id}-sort" class="listing-sort-btn" title="Toggle sort order"><span>Sort</span></button>`
+      + `<button type="button" id="${id}-archived" class="listing-archived-btn hidden" title="Show archived files">${ARCHIVE_SVG}<span>Show archived</span></button>`
+      + `</div>`
+      + `<div id="${id}-results" class="listing-modal-results" role="listbox" aria-label="${esc(title)}" tabindex="0"></div>`
+      + `<div class="listing-modal-footer"><span>↓/J ↑/K move</span><span>Enter open</span><span>Ctrl+Enter pin</span><span>letter code jump</span><span>Esc close</span></div>`
+      + `</div>`;
+    document.body.appendChild(overlay);
+    return new ListingModalController({
+      overlay,
+      dialog: overlay.firstElementChild as HTMLElement,
+      titleEl: $id(`${id}-title`),
+      sortBtn: $id<HTMLButtonElement>(`${id}-sort`),
+      archivedBtn: $id<HTMLButtonElement>(`${id}-archived`),
+      results: $id(`${id}-results`),
+      typed: $id(`${id}-typed`),
+    });
   }
 
-  function makeListingOptions(inWorking: boolean) {
+  const taskListing = mkListingModal('modal-task-listing', 'Tasks');
+  const workingListing = mkListingModal('modal-working-listing', 'Working Tasks');
+  const notesListing = mkListingModal('modal-notes-listing', 'Notes');
+
+  // Row id → what the row points at, so activate / archive / restore know what
+  // to do. One shared map: only one listing modal is open at a time.
+  interface ListingRowMeta {
+    file: { name: string; mtime: number; handle: any };
+    folderParts: string[];   // folder the file currently lives in
+    archived: boolean;       // file is in an archived/ subfolder
+    inWorking: boolean;      // task under tasks/working/
+    hasStatus: boolean;      // task carries a status tag (→ Archive) vs plain (→ Working)
+  }
+  let listingRowMeta = new Map<number, ListingRowMeta>();
+  let listingRowSeq = 0;
+
+  const TASK_SECTION_ORDER: Array<['deployment' | 'qaReview' | 'deployed' | 'completed' | 'backlog' | 'rest', string, boolean]> = [
+    ['rest', 'Tasks', false],
+    ['completed', 'Completed', true],
+    ['qaReview', 'In QA Review', true],
+    ['deployment', 'Marked for Deployment', true],
+    ['deployed', 'Deployed', true],
+    ['backlog', 'Backlog / Deferred', true],
+  ];
+
+  function sortListingFiles(files: any[], sort: ListingSort, byPriority: boolean, displayName: (name: string) => string) {
+    return [...files].sort((a, b) => {
+      if (byPriority) {
+        const pa = PRIORITY_ORDER[normalizeTaskPriority(taskMetaFor(a.name, '').priority)] ?? 1;
+        const pb = PRIORITY_ORDER[normalizeTaskPriority(taskMetaFor(b.name, '').priority)] ?? 1;
+        if (pa !== pb) return pa - pb;
+      }
+      if (sort === 'alpha') return displayName(a.name).localeCompare(displayName(b.name));
+      return b.mtime - a.mtime;
+    });
+  }
+
+  function taskRow(file: any, folderParts: string[], opts: { archived: boolean; inWorking: boolean; hasStatus: boolean }) {
+    const id = ++listingRowSeq;
+    listingRowMeta.set(id, { file, folderParts, ...opts });
+    const actionLabel = opts.archived ? 'Restore' : opts.inWorking ? '← Task' : opts.hasStatus ? 'Archive' : '→ Working';
+    const actionKind = opts.archived ? 'restore' : opts.inWorking ? 'task' : opts.hasStatus ? 'archive' : 'working';
     return {
-      size: 'large' as const,
-      async activate(id: number, pinned = false) {
-        const entry = listingEntries.find(candidate => candidate.id === id);
-        if (!entry) return false;
-        const path = `${TASKS_ROOT}/${inWorking ? 'working/' : ''}${entry.file.name}`;
-        const opened = await openFile(entry.file.name, path, { pinned });
-        if (opened) mdEditor.focus();
-        return Boolean(opened);
-      },
-      async closeItem() { return null; },
-      async rowAction(id: number) {
-        const entry = listingEntries.find(candidate => candidate.id === id);
-        if (!entry) return null;
-        try {
-          await toggleWorkingTaskFromList(entry.file, { rootParts: [TASKS_ROOT], inWorking, reload: async () => {} });
-        } catch (error: any) {
-          toast('Could not move task: ' + (error?.message || error), 'error');
-          return null;
-        }
-        const items = await buildListingItems(inWorking);
-        return { items, activeId: null };
-      },
+      id,
+      title: taskDisplayTitle(file.name),
+      priorityClass: `priority-${normalizeTaskPriority(taskMetaFor(file.name, '').priority)}`,
+      actionLabel,
+      actionKind: actionKind as 'working' | 'task' | 'archive' | 'restore',
     };
   }
 
+  async function buildTaskSections(archived: boolean, sort: ListingSort): Promise<ListingSection[]> {
+    const tasksDir = await getDirHandle(notesHandle!, [TASKS_ROOT], true);
+    const folderParts = archived ? [TASKS_ROOT, 'archived'] : [TASKS_ROOT];
+    let dir: FileSystemDirectoryHandle = tasksDir;
+    if (archived) {
+      try { dir = await tasksDir.getDirectoryHandle('archived'); } catch { return []; }
+    }
+    const files = await listMdFiles(dir);
+    listingRowMeta = new Map(); listingRowSeq = 0;
+    const buckets = partitionTasksBySuffix(files, (f: any) => f.name, () => '');
+    return TASK_SECTION_ORDER
+      .map(([key, title, hasStatus]) => ({
+        title,
+        rows: sortListingFiles(buckets[key], sort, true, taskDisplayTitle)
+          .map((file: any) => taskRow(file, folderParts, { archived, inWorking: false, hasStatus })),
+      }))
+      .filter(section => section.rows.length);
+  }
+
+  async function buildWorkingSections(sort: ListingSort): Promise<ListingSection[]> {
+    const tasksDir = await getDirHandle(notesHandle!, [TASKS_ROOT], true);
+    let dir: FileSystemDirectoryHandle;
+    try { dir = await tasksDir.getDirectoryHandle('working'); } catch { return []; }
+    const files = await listMdFiles(dir);
+    listingRowMeta = new Map(); listingRowSeq = 0;
+    return [{
+      title: null,
+      rows: sortListingFiles(files, sort, true, taskDisplayTitle)
+        .map((file: any) => taskRow(file, [TASKS_ROOT, 'working'], { archived: false, inWorking: true, hasStatus: false })),
+    }];
+  }
+
+  async function buildNotesSections(dirHandle: any, baseParts: string[], archived: boolean, sort: ListingSort): Promise<ListingSection[]> {
+    let dir = dirHandle;
+    const folderParts = archived ? [...baseParts, 'archived'] : baseParts;
+    if (archived) {
+      try { dir = await dirHandle.getDirectoryHandle('archived'); } catch { return []; }
+    }
+    const files = await listMdFiles(dir);
+    listingRowMeta = new Map(); listingRowSeq = 0;
+    const noteName = (name: string) => name.replace(/\.md$/i, '');
+    return [{
+      title: null,
+      rows: sortListingFiles(files, sort, false, noteName).map((file: any) => {
+        const id = ++listingRowSeq;
+        listingRowMeta.set(id, { file, folderParts, archived, inWorking: false, hasStatus: false });
+        return {
+          id,
+          title: noteName(file.name),
+          actionLabel: archived ? 'Restore' : 'Archive',
+          actionKind: (archived ? 'restore' : 'archive') as 'archive' | 'restore',
+        };
+      }),
+    }];
+  }
+
+  async function activateListingRow(id: number, pinned: boolean) {
+    const meta = listingRowMeta.get(id);
+    if (!meta) return false;
+    const path = [...meta.folderParts, meta.file.name].join('/');
+    const opened = await openFile(meta.file.name, path, { pinned });
+    if (opened) mdEditor.focus();
+    return Boolean(opened);
+  }
+
+  async function moveListingFileToArchive(meta: ListingRowMeta) {
+    const content = rewriteAssetLinks((await enrichFileContent(meta.file)).content || '', '](assets/', '](../assets/');
+    const from = [...meta.folderParts, meta.file.name].join('/');
+    const to = await uniquePathInFolder([...meta.folderParts, 'archived'], meta.file.name);
+    await writeMdFile(to, content);
+    await removeMdFile(from);
+    removeFromSearchIndex(from); updateSearchIndex(to, content);
+    toast('Archived ✓');
+  }
+
+  async function restoreListingFileFromArchive(meta: ListingRowMeta) {
+    const content = rewriteAssetLinks((await enrichFileContent(meta.file)).content || '', '](../assets/', '](assets/');
+    const from = [...meta.folderParts, meta.file.name].join('/');
+    const to = await uniquePathInFolder(meta.folderParts.slice(0, -1), meta.file.name);
+    await writeMdFile(to, content);
+    await removeMdFile(from);
+    removeFromSearchIndex(from); updateSearchIndex(to, content);
+    toast('Restored ✓');
+  }
+
+  function listingRowAction(rebuild: () => Promise<ListingSection[]>) {
+    return async (id: number): Promise<ListingSection[] | null> => {
+      const meta = listingRowMeta.get(id);
+      if (!meta) return null;
+      try {
+        if (meta.archived) {
+          await restoreListingFileFromArchive(meta);
+        } else if (meta.inWorking || (!meta.hasStatus && meta.folderParts.at(-1) === TASKS_ROOT)) {
+          const enriched = await enrichFileContent(meta.file);
+          // toggleWorkingTaskFromList appends `working/` itself, so rootParts is
+          // always the base tasks folder regardless of the row's current spot.
+          await toggleWorkingTaskFromList(enriched, { rootParts: [TASKS_ROOT], inWorking: meta.inWorking, reload: async () => {} });
+        } else {
+          await moveListingFileToArchive(meta);
+        }
+      } catch (error: any) {
+        toast('Could not move file: ' + (error?.message || error), 'error');
+        return null;
+      }
+      return rebuild();
+    };
+  }
+
+  const TASK_LISTING_SORT_KEY = PREFERENCE_KEYS.taskListingSort;
+  const WORKING_LISTING_SORT_KEY = PREFERENCE_KEYS.workingListingSort;
+  const NOTES_LISTING_SORT_KEY = PREFERENCE_KEYS.notesListingSort;
+  function readListingSort(key: string): ListingSort {
+    return localStorage.getItem(key) === 'alpha' ? 'alpha' : 'mtime';
+  }
+  let activeListingRebuild: (() => Promise<ListingSection[]>) | null = null;
+
   async function openTaskListing() {
     if (!notesHandle) return false;
-    const items = await buildListingItems(false);
-    if (!items.length) { toast('No tasks found'); return false; }
-    return taskListingSwitcher.open({ items, activeId: null, ...makeListingOptions(false) });
+    let archived = false;
+    let sort = readListingSort(TASK_LISTING_SORT_KEY);
+    const rebuild = () => buildTaskSections(archived, sort);
+    activeListingRebuild = rebuild;
+    const sections = await rebuild();
+    if (!sections.length && !archived) { toast('No tasks found'); return false; }
+    return taskListing.open({
+      title: 'Tasks', sections, sort, archived,
+      onActivate: activateListingRow,
+      onSortChange: async next => { sort = next; localStorage.setItem(TASK_LISTING_SORT_KEY, next); return rebuild(); },
+      onArchivedToggle: async next => { archived = next; return rebuild(); },
+      onRowAction: listingRowAction(rebuild),
+    });
   }
 
   async function openWorkingListing() {
     if (!notesHandle) return false;
-    const items = await buildListingItems(true);
-    if (!items.length) { toast('No working tasks found'); return false; }
-    return workingListingSwitcher.open({ items, activeId: null, ...makeListingOptions(true) });
+    let sort = readListingSort(WORKING_LISTING_SORT_KEY);
+    const rebuild = () => buildWorkingSections(sort);
+    activeListingRebuild = rebuild;
+    const sections = await rebuild();
+    if (!sections.some(s => s.rows.length)) { toast('No working tasks found'); return false; }
+    return workingListing.open({
+      title: 'Working Tasks', sections, sort,
+      onActivate: activateListingRow,
+      onSortChange: async next => { sort = next; localStorage.setItem(WORKING_LISTING_SORT_KEY, next); return rebuild(); },
+      onRowAction: listingRowAction(rebuild),
+    });
   }
 
+  async function openNotesListing() {
+    if (!notesHandle || !l1Active) { toast('Select a folder first', 'error'); return false; }
+    const heading = activeFolderHeading();
+    if (folderUsesInlineList(heading, l1Active.name)) return false; // these stay inline
+    const dirHandle = activeDirHandle();
+    const baseParts = l2Active ? [l1Active.name, l2Active.name] : [l1Active.name];
+    let archived = false;
+    let sort = readListingSort(NOTES_LISTING_SORT_KEY);
+    const rebuild = () => buildNotesSections(dirHandle, baseParts, archived, sort);
+    activeListingRebuild = rebuild;
+    const sections = await rebuild();
+    return notesListing.open({
+      title: `Notes · ${heading}`, sections, sort, archived,
+      onActivate: activateListingRow,
+      onSortChange: async next => { sort = next; localStorage.setItem(NOTES_LISTING_SORT_KEY, next); return rebuild(); },
+      onArchivedToggle: async next => { archived = next; return rebuild(); },
+      onRowAction: listingRowAction(rebuild),
+    });
+  }
+
+  const anyListingOpen = () => taskListing.isOpen() || workingListing.isOpen() || notesListing.isOpen();
+  function closeAllListings() { taskListing.close(); workingListing.close(); notesListing.close(); activeListingRebuild = null; }
+
   function toggleTaskListing() {
-    if (taskListingSwitcher.isOpen()) { taskListingSwitcher.close(); return; }
-    workingListingSwitcher.close();
+    if (taskListing.isOpen()) { taskListing.close(); return; }
+    closeAllListings();
     if (!palette.classList.contains('hidden')) closeCommandPalette();
     void openTaskListing().catch(e => toast('Could not load tasks: ' + (e?.message || e), 'error'));
   }
-
   function toggleWorkingListing() {
-    if (workingListingSwitcher.isOpen()) { workingListingSwitcher.close(); return; }
-    taskListingSwitcher.close();
+    if (workingListing.isOpen()) { workingListing.close(); return; }
+    closeAllListings();
     if (!palette.classList.contains('hidden')) closeCommandPalette();
     void openWorkingListing().catch(e => toast('Could not load working tasks: ' + (e?.message || e), 'error'));
+  }
+  function toggleNotesListing() {
+    if (notesListing.isOpen()) { notesListing.close(); return; }
+    closeAllListings();
+    if (!palette.classList.contains('hidden')) closeCommandPalette();
+    void openNotesListing().catch(e => toast('Could not load notes: ' + (e?.message || e), 'error'));
   }
 
   // ── Keybinding help modal (Ctrl+K) ─────────────────────────────────────────
@@ -7346,9 +7552,10 @@ type TaskLocation = {
   newFileKindModal.addEventListener('click', event => { if (event.target === newFileKindModal) closeNewFileKindPicker(); });
   newFileKindResults.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey) { event.preventDefault(); event.stopPropagation(); return; }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    const navKey = event.key.toLowerCase();
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || navKey === 'j' || navKey === 'k') {
       event.preventDefault(); event.stopPropagation();
-      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      const delta = event.key === 'ArrowDown' || navKey === 'j' ? 1 : -1;
       newFileKindIndex = (newFileKindIndex + delta + NEW_FILE_KINDS.length) % NEW_FILE_KINDS.length;
       updateNewFileKindSelection();
       return;
@@ -7361,15 +7568,14 @@ type TaskLocation = {
 
   // ── Global Escape + overlay helpers ───────────────────────────────────────
   function anyOverlayOpen() {
-    return !!document.querySelector(
+    return anyListingOpen() || !!document.querySelector(
       '.modal-overlay:not(.hidden), .settings-overlay:not(.hidden), .command-palette:not(.hidden), ' +
-      '.quick-tab-switcher:not(.hidden), #modal-md-ref:not(.hidden), #modal-readme:not(.hidden), ' +
+      '.quick-tab-switcher:not(.hidden), .listing-modal:not(.hidden), #modal-md-ref:not(.hidden), #modal-readme:not(.hidden), ' +
       '#modal-changelog:not(.hidden), #modal-safety-tools:not(.hidden), #modal-keybindings:not(.hidden)',
     );
   }
   function closeTopmostOverlay() {
-    if (taskListingSwitcher.isOpen()) return taskListingSwitcher.close();
-    if (workingListingSwitcher.isOpen()) return workingListingSwitcher.close();
+    if (anyListingOpen()) return closeAllListings();
     if (quickTabSwitcher.isOpen()) return quickTabSwitcher.close();
     if (quickTaskSwitcher.isOpen()) return quickTaskSwitcher.close();
     if (!palette.classList.contains('hidden')) return closeCommandPalette();
@@ -7472,7 +7678,8 @@ type TaskLocation = {
       return;
     }
 
-    if (mod && plain && key === 'l') { e.preventDefault(); toggleThemeSwitcher(); return; }
+    if (mod && plain && key === 'l') { e.preventDefault(); toggleNotesListing(); return; }
+    if (mod && e.shiftKey && !e.altKey && key === 't') { e.preventDefault(); toggleThemeSwitcher(); return; }
     if (mod && plain && key === 'k') { e.preventDefault(); toggleKeybindingsModal(); return; }
     if (mod && plain && key === 'p') {
       e.preventDefault();

@@ -57,10 +57,17 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   },
   {
     id: "view.theme",
-    combo: "Ctrl+L",
+    combo: "Ctrl+Shift+T",
     label: "Theme switcher",
     description: "Browse themes with a live preview; Enter applies.",
     category: "Global",
+  },
+  {
+    id: "notes.list",
+    combo: "Ctrl+L",
+    label: "Notes listing",
+    description: "Browse the current folder's notes in a listing modal.",
+    category: "Navigation",
   },
   {
     id: "tools.import",
@@ -191,6 +198,14 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   },
 
   // ── Editor ─────────────────────────────────────────────────────────────
+  {
+    id: "editor.undo",
+    combo: "Ctrl+Z / Ctrl+Shift+Z",
+    label: "Undo / redo",
+    description: "Undo or redo editor changes (up to 50 steps), including list, indent, and blockquote edits.",
+    category: "Editor",
+    editorOnly: true,
+  },
   {
     id: "editor.delete-line",
     combo: "Ctrl+D",

@@ -133,6 +133,10 @@
     grid-column: 1;
     grid-row: 2;
   }
+  .settings-external-theme-panel {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
   .settings-tile.btn-icon {
     box-sizing: border-box;
     min-width: 0;

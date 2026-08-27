@@ -90,6 +90,17 @@ export class LazyMarkdownEditorAdapter {
     adapter.openDocument(key, text, fallbackCursor);
   }
 
+  applyUserEdit(text: string, selectionStart: number, selectionEnd: number): void {
+    if (this.#adapter) {
+      this.#adapter.applyUserEdit(text, selectionStart, selectionEnd);
+      return;
+    }
+    this.#value = text;
+    this.#source.textContent = text;
+    this.#selectionStart = Math.max(0, Math.min(selectionStart, text.length));
+    this.#selectionEnd = Math.max(0, Math.min(selectionEnd, text.length));
+  }
+
   rememberDocumentState(): void { this.#adapter?.rememberDocumentState(); }
   setSelectionRange(anchor: number, head: number): void {
     if (this.#adapter) this.#adapter.setSelectionRange(anchor, head);
