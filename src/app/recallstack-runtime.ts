@@ -1345,9 +1345,12 @@ type TaskLocation = {
     if (!await checkUnsavedNewNote()) return;
     if (!await autoSaveIfDirty(true)) return;
     await initNav({ restoreView: false, preferredL1: l1Name, preferredL2: l2Name, preferRoot });
-    // A folder click opens that folder's notes as a modal (Inbox / Tasks stay
-    // inline). Init / restore call initNav directly and never land here.
-    if (l1Active && !outputsMode && !folderUsesInlineList(activeFolderHeading(), l1Active.name)) {
+    // Explicitly clicking a subfolder (or the root button) opens that folder's
+    // notes as a modal; Inbox / Tasks stay inline. Selecting only a top-level
+    // folder updates nav state but does not pop the modal — the user has to pick
+    // a subfolder for that. Init / restore call initNav directly and never land here.
+    const explicitSubfolder = l2Name !== null || preferRoot;
+    if (explicitSubfolder && l1Active && !outputsMode && !folderUsesInlineList(activeFolderHeading(), l1Active.name)) {
       void openNotesListing().catch(e => toast('Could not load notes: ' + (e?.message || e), 'error'));
     }
   }
@@ -3396,10 +3399,9 @@ type TaskLocation = {
       isOutputsFile       = false;
       currentOutputsFh    = null;
       currentOutputsDirFh = null;
-      returnToOutputs     = true;
       toast('Moved to Trash');
       removeTabRecord(activeTabId);
-      cancelEdit();
+      await returnToDailyJournalAfterRemoval();
       return;
     }
 
@@ -3418,7 +3420,7 @@ type TaskLocation = {
     runBestEffort([() => removeFromSearchIndex(currentPath!), refreshCalendarIfVisible]);
     toast('Moved to Trash');
     removeTabRecord(activeTabId);
-    cancelEdit();
+    await returnToDailyJournalAfterRemoval();
   }
 
   async function archiveNote() {
@@ -3461,12 +3463,9 @@ type TaskLocation = {
       refreshCalendarIfVisible,
     ]);
     toast('Archived ✓');
-    if (isTaskNamespacePath(archivedRelPath)) {
-      archiveMode = false;
-      returnToAllTasks = true;
-    }
+    if (isTaskNamespacePath(archivedRelPath)) archiveMode = false;
     removeTabRecord(activeTabId);
-    cancelEdit();
+    await returnToDailyJournalAfterRemoval();
   }
 
   async function restoreNote() {
@@ -4107,6 +4106,30 @@ type TaskLocation = {
     if (showingFile) return; // already on the journal (the only non-dynamic file)
     try { await openTodayJournal(); }
     catch (error) { console.warn('Could not open journal', error); }
+  }
+
+  // The editor's open file was just deleted / archived out from under it. Land
+  // on today's daily journal — the always-open pinned tab — instead of dropping
+  // back to a file list or the notes modal. Falls back to cancelEdit()'s routing
+  // when there is no journal to show (managed system workspace / no workspace).
+  async function returnToDailyJournalAfterRemoval() {
+    returnToOutputs           = false;
+    returnToAllTasks          = false;
+    outputsMode               = false;
+    outputsActiveFolder       = null;
+    isOutputsFile             = false;
+    currentOutputsFh          = null;
+    currentOutputsDirFh       = null;
+    isExternalFile            = false;
+    currentExternalPath       = null;
+    currentExternalFileHandle = null;
+    if (!notesHandle || isManagedSystemWorkspace()) { cancelEdit(); return; }
+    try {
+      await openTodayJournal();
+    } catch (error) {
+      console.warn('Could not open journal after removal', error);
+      cancelEdit();
+    }
   }
 
   async function toggleWorkingTask() {
