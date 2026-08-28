@@ -1171,8 +1171,10 @@ type TaskLocation = {
     changelogLoaded = false;
     const restoreView = options.restoreView ?? !changingWorkspace;
     await initNav({ restoreView });
-    await ensureJournalWhenEmpty();
+    // Build the note catalog first: a new day's daily journal is seeded from the
+    // most recent prior journal, and that lookup reads the catalog.
     await buildSearchIndex();
+    await ensureJournalWhenEmpty();
     if (window.__recallstackNative?.active) renderSavedSearches().catch(error => console.warn('Could not load saved searches', error));
     performance.mark('recallstack:workspace-ui-ready');
     if (performance.getEntriesByName('recallstack:workspace-native-ready').length) {
@@ -4112,6 +4114,12 @@ type TaskLocation = {
     const { filename, path } = location;
     let content = '';
     try { content = await readMdFile(path); } catch {
+      // Brand-new day: clone the most recent prior journal. The lookup reads the
+      // note catalog, so make sure it is populated even if we somehow got here
+      // before the first buildSearchIndex().
+      if (!searchIndex.length) {
+        try { await buildSearchIndex(); } catch {}
+      }
       const priorPath = latestJournalPathBefore(searchIndex.map(entry => entry.notesRelPath), rootParts, localDateKey(selected));
       if (priorPath) {
         try { content = await readMdFile(priorPath); } catch {}
