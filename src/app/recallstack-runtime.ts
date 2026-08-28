@@ -3383,7 +3383,6 @@ type TaskLocation = {
   }
 
   async function deleteNote() {
-    if (isWorkingTask()) return;
     if (!currentPath) return;
     // External/temporary files aren't owned by the workspace — there's no
     // RecallStack Trash to move them to, and deleting the user's original
@@ -3941,8 +3940,13 @@ type TaskLocation = {
       ? 'Journal filenames are fixed by their daily-note date'
       : '';
     if (!journal && !isWorkingTask()) return;
-    [btnStampDate, btnConvertToTask, btnConvertToNote, btnMakeCopy, btnMove, btnArchive, btnDelete]
-      .forEach(btn => btn.classList.add('hidden'));
+    const restricted = [btnStampDate, btnConvertToTask, btnConvertToNote, btnMakeCopy, btnMove, btnArchive, btnDelete];
+    for (const btn of restricted) {
+      // A working task can still be trashed straight from the editor; only a
+      // journal keeps its delete button hidden.
+      if (btn === btnDelete && !journal) continue;
+      btn.classList.add('hidden');
+    }
   }
   function isCurrentTaskPath(path = currentPath) {
     return isWorkspaceTaskPath(path);
@@ -7140,18 +7144,24 @@ type TaskLocation = {
     overlay.innerHTML = `<div class="listing-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="${id}-title">`
       + `<div class="listing-modal-header">`
       + `<span id="${id}-title" class="listing-modal-title">${esc(title)}</span>`
+      + `<div class="listing-search">`
+      + `<input type="text" id="${id}-filter" class="listing-search-input" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Filter (2+ characters)…" aria-label="Filter ${esc(title)}"/>`
+      + `<button type="button" id="${id}-filter-clear" class="listing-search-clear hidden" title="Clear filter" aria-label="Clear filter">&times;</button>`
+      + `</div>`
       + `<span id="${id}-typed" class="listing-modal-typed" aria-live="polite"></span>`
       + `<button type="button" id="${id}-sort" class="listing-sort-btn" title="Toggle sort order"><span>Sort</span></button>`
       + `<button type="button" id="${id}-archived" class="listing-archived-btn hidden" title="Show archived files">${ARCHIVE_SVG}<span>Show archived</span></button>`
       + `</div>`
       + `<div id="${id}-results" class="listing-modal-results" role="listbox" aria-label="${esc(title)}" tabindex="0"></div>`
-      + `<div class="listing-modal-footer"><span>↓/J ↑/K move</span><span>Enter open</span><span>Ctrl+Enter pin</span><span>letter code jump</span><span>Esc close</span></div>`
+      + `<div class="listing-modal-footer"><span>Type to filter</span><span>↓/J ↑/K move</span><span>Enter open</span><span>Ctrl+Enter pin</span><span>letter code jump</span><span>Esc close</span></div>`
       + `</div>`;
     document.body.appendChild(overlay);
     return new ListingModalController({
       overlay,
       dialog: overlay.firstElementChild as HTMLElement,
       titleEl: $id(`${id}-title`),
+      filterInput: $id<HTMLInputElement>(`${id}-filter`),
+      filterClearBtn: $id<HTMLButtonElement>(`${id}-filter-clear`),
       sortBtn: $id<HTMLButtonElement>(`${id}-sort`),
       archivedBtn: $id<HTMLButtonElement>(`${id}-archived`),
       results: $id(`${id}-results`),

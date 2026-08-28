@@ -1,6 +1,16 @@
 import { tabJumpCodes } from "./quick-tab-switcher.ts";
+import { fuzzyScore } from "../../features/commands/ranking.ts";
 
 export type ListingSort = "alpha" | "mtime";
+
+/** Characters typed before the fuzzy filter engages. */
+const MIN_FILTER_LENGTH = 2;
+
+/** A row survives the filter when the query fuzzy-matches its title or subtitle. */
+function rowMatchesFilter(query: string, row: ListingRow): boolean {
+  return fuzzyScore(query, row.title) !== null
+    || (row.subtitle !== undefined && fuzzyScore(query, row.subtitle) !== null);
+}
 
 export interface ListingRow {
   id: number;
@@ -24,6 +34,8 @@ export interface ListingModalElements {
   overlay: HTMLElement;
   dialog: HTMLElement;
   titleEl: HTMLElement;
+  filterInput: HTMLInputElement;
+  filterClearBtn: HTMLButtonElement;
   sortBtn: HTMLButtonElement;
   archivedBtn: HTMLButtonElement;
   results: HTMLElement;
@@ -61,6 +73,8 @@ export class ListingModalController {
   private flat: FlatRow[] = [];
   private selected = 0;
   private typed = "";
+  /** Fuzzy filter text from the header search box (raw, may be under MIN_FILTER_LENGTH). */
+  private query = "";
   private sort: ListingSort = "mtime";
   private archived = false;
   private previousFocus: HTMLElement | null = null;
@@ -74,6 +88,9 @@ export class ListingModalController {
     els.overlay.addEventListener("keydown", event => this.handleKeydown(event));
     els.sortBtn.addEventListener("click", () => void this.toggleSort());
     els.archivedBtn.addEventListener("click", () => void this.toggleArchived());
+    els.filterInput.addEventListener("input", () => this.setFilter(els.filterInput.value));
+    els.filterInput.addEventListener("keydown", event => this.handleFilterKeydown(event));
+    els.filterClearBtn.addEventListener("click", () => this.clearFilter(true));
   }
 
   isOpen(): boolean {
@@ -89,6 +106,7 @@ export class ListingModalController {
     this.archived = options.archived ?? false;
     this.selected = 0;
     this.typed = "";
+    this.resetFilter();
     this.els.titleEl.textContent = options.title;
     this.els.archivedBtn.classList.toggle("hidden", !options.onArchivedToggle);
     this.els.overlay.classList.remove("hidden");
@@ -115,11 +133,13 @@ export class ListingModalController {
     this.previousFocus = null;
     this.typed = "";
     this.els.typed.textContent = "";
+    this.resetFilter();
     if (restoreFocus) focus?.focus();
   }
 
   private render(): void {
-    this.flat = assignRowCodes(this.sections);
+    const sections = this.filteredSections();
+    this.flat = assignRowCodes(sections);
     this.selected = Math.min(Math.max(this.selected, 0), Math.max(0, this.flat.length - 1));
     this.els.sortBtn.dataset.sort = this.sort;
     this.els.sortBtn.lastElementChild!.textContent = SORT_LABEL[this.sort];
@@ -128,7 +148,7 @@ export class ListingModalController {
 
     this.els.results.replaceChildren();
     let flatIndex = 0;
-    for (const section of this.sections) {
+    for (const section of sections) {
       if (!section.rows.length) continue;
       if (section.title) {
         const heading = document.createElement("div");
@@ -183,7 +203,77 @@ export class ListingModalController {
         this.els.results.appendChild(el);
       }
     }
+    if (!this.flat.length && this.activeQuery()) {
+      const empty = document.createElement("div");
+      empty.className = "listing-empty";
+      empty.textContent = `No matches for “${this.activeQuery()}”`;
+      this.els.results.appendChild(empty);
+    }
     this.renderSelection();
+  }
+
+  /** The trimmed query once it is long enough to filter, else `""`. */
+  private activeQuery(): string {
+    const query = this.query.trim();
+    return query.length >= MIN_FILTER_LENGTH ? query : "";
+  }
+
+  /** All sections, or the fuzzy-filtered subset once the query is long enough.
+   *  Sort / archived toggles rebuild `this.sections`, so the filter re-applies
+   *  on top of whichever set (current or archived) is loaded. */
+  private filteredSections(): ListingSection[] {
+    const query = this.activeQuery();
+    if (!query) return this.sections;
+    const filtered: ListingSection[] = [];
+    for (const section of this.sections) {
+      const rows = section.rows.filter(row => rowMatchesFilter(query, row));
+      if (rows.length) filtered.push({ title: section.title, rows });
+    }
+    return filtered;
+  }
+
+  private setFilter(value: string): void {
+    if (value === this.query) return;
+    this.query = value;
+    this.els.filterClearBtn.classList.toggle("hidden", value.length === 0);
+    this.selected = 0;
+    this.typed = "";
+    if (this.isOpen()) this.render();
+  }
+
+  private clearFilter(focusInput: boolean): void {
+    this.els.filterInput.value = "";
+    this.setFilter("");
+    if (focusInput) this.els.filterInput.focus();
+  }
+
+  private resetFilter(): void {
+    this.query = "";
+    this.els.filterInput.value = "";
+    this.els.filterClearBtn.classList.add("hidden");
+  }
+
+  private handleFilterKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape") {
+      if (!this.query) return; // empty box — let the overlay handler close the modal
+      event.preventDefault();
+      event.stopPropagation();
+      this.clearFilter(true);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.flat.length) void this.choose(0, event.ctrlKey || event.metaKey);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.selected = 0;
+      this.els.results.focus();
+      this.renderSelection();
+    }
   }
 
   private renderSelection(): void {
