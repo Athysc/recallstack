@@ -1,7 +1,7 @@
 // Typed application composition controller for cross-feature DOM and workspace state.
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
-import { PREFERENCE_KEYS, preferenceIsEnabled } from "./preferences";
+import { PREFERENCE_KEYS } from "./preferences";
 import {
   buildTaskFilename,
   nextDuplicateFilename,
@@ -176,8 +176,6 @@ type TaskLocation = {
   const SVG_NEW_FOLDER  = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>`;
   const SVG_EDIT        = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
   const SVG_MOVE        = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/><path d="M5 5v14"/></svg>`;
-  const SVG_TASK_STATUS = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h7"/><path d="M4 12h12"/><path d="M4 18h9"/><circle cx="18" cy="6" r="2"/><circle cx="20" cy="18" r="2"/></svg>`;
-  const SVG_TASK_FOLDER = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 3h10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M7 13h10"/><path d="M7 17h6"/></svg>`;
 
   // ── State ────────────────────────────────────────────────────────────────────
   let rootHandle: FileSystemDirectoryHandle | null = null;
@@ -208,11 +206,6 @@ type TaskLocation = {
   let archiveMode   = false;  // true when browsing the archived/ subfolder
   let sortMode: "mtime" | "alpha" = 'mtime';
   let newFolderRow     = 0;      // 1 or 2 — which nav row triggered the new-folder modal
-  let allTasksMode        = false;  // true when All Tasks aggregate view is active
-  let returnToAllTasks    = false;  // true when a file was opened from All Tasks view
-  const ALL_TASKS_ENABLED_KEY = PREFERENCE_KEYS.allTasksEnabled;
-  let allTasksEnabled = localStorage.getItem(ALL_TASKS_ENABLED_KEY) !== 'off'; // global, persists across sessions
-  let allTasksStatusMode  = true;   // true: group All Tasks by priority/status; false: by folder
   let listLoadGeneration  = 0;      // prevents stale async list responses from repainting the UI
   let outputsMode         = false;  // true when in Outputs view
   // The configured Outputs folder — any directory on disk, not necessarily
@@ -232,15 +225,11 @@ type TaskLocation = {
   let isExternalFile      = false;  // true when currently editing a "Temporary" external file in place
   let currentExternalPath: string | null = null;             // absolute OS path (Tauri desktop mode)
   let currentExternalFileHandle: FileSystemFileHandle | null = null; // real handle (browser mode)
-  // ── Editor reading mode (Idea B) ──────────────────────────────────────────────
-  // Reading mode (default): a document opens showing only the rendered preview,
-  // and the live-preview pipeline is frozen while editing, so a keystroke costs
-  // nothing beyond CodeMirror's own incremental parse. `P` (when focus is not in
-  // a text field) enters edit mode; `Escape` while editing returns to preview.
-  // Classic mode restores the old always-live editor+preview split. Global
-  // preference, persisted across sessions.
-  const EDITOR_MODE_KEY = PREFERENCE_KEYS.editorMode;
-  let readingModeEnabled = localStorage.getItem(EDITOR_MODE_KEY) !== 'classic';
+  // ── Editor reading view ───────────────────────────────────────────────────────
+  // A document opens showing only the rendered preview, and the live-preview
+  // pipeline is frozen while editing, so a keystroke costs nothing beyond
+  // CodeMirror's own incremental parse. `I` (when focus is not in a text field)
+  // enters edit mode; `Escape` while editing returns to preview.
   let readingViewState: 'preview' | 'edit' = 'preview';
   let presentationOn = false;
   let navRow1Mode: "buttons" | "combo" = 'buttons';
@@ -260,7 +249,7 @@ type TaskLocation = {
   // A tab is a lightweight record; the single shared editor/preview is swapped to
   // match whichever tab is active.
   // { id, path, title, isNew, dirty, isOutputsFile, outputsFileHandle, outputsDirHandle,
-  //   returnToOutputs, returnToAllTasks }
+  //   returnToOutputs }
   let tabs: EditorTab[] = [];
   let activeTabId: number | null = null;
   let nextTabId           = 1;
@@ -329,7 +318,6 @@ type TaskLocation = {
   const btnNew       = $id('btn-new');
   const btnSortMtime        = $id('btn-sort-mtime');
   const btnSortAlpha        = $id('btn-sort-alpha');
-  const btnAllTasksMode     = $id('btn-all-tasks-mode');
   const titleInput   = $id('title-input');
   const btnSave      = $id('btn-save');
   const btnStampDate = $id('btn-stamp-date');
@@ -348,7 +336,7 @@ type TaskLocation = {
   const btnViewJournal    = $id('btn-view-journal');
   const tabStripEl        = $id('tab-strip');
   const mdEditor     = createLazyMarkdownEditor($id('md-editor'), {
-    lineNumbers: preferenceIsEnabled(localStorage.getItem(PREFERENCE_KEYS.lineNumbers), true),
+    lineNumbers: true,
     wordWrap: localStorage.getItem(PREFERENCE_KEYS.wordWrap) === 'on',
     getCompletions(prefix, query) {
       if (prefix === '[[') {
@@ -367,9 +355,7 @@ type TaskLocation = {
   const depStatusList = $id('dep-status-list');
   const depStatusErrorLine = $id('dep-status-error-line');
   const contentZoomSelect = $id('content-zoom-select');
-  const splitPane    = $id('split-pane');
   const editorPane   = $id('editor-pane');
-  const resizerEl    = $id('resizer');
   const previewPane     = $id('preview-pane');
   const previewPaneLabel = $maybe('preview-pane-label');
   const readingEscHint   = $maybe('reading-mode-hint');
@@ -610,7 +596,7 @@ type TaskLocation = {
 
   function openInboxDeleteModal(f: any, dirHandle: any, onDeleted: any) {
     _pendingInboxDelete = { f, dirHandle, onDeleted };
-    inboxDeleteMsg.textContent = `Move "${f.name}" to RecallStack Trash?`;
+    inboxDeleteMsg.textContent = `Move "${f.name}" to the system trash?`;
     inboxDeleteModal.classList.remove('hidden');
     inboxDeleteConfirmBtn.focus();
   }
@@ -874,7 +860,6 @@ type TaskLocation = {
     const folderLabel = l2Active ? l2Active!.name : l1Active!.name;
 
     showView('list');
-    updateAllTasksGroupingModeBtn();
 
     // Mark the nav button active
     const existing = $maybe('btn-orphan-assets');
@@ -971,11 +956,11 @@ type TaskLocation = {
       // Delete
       const delBtn = document.createElement('button');
       delBtn.className = 'btn-icon danger';
-      delBtn.title     = 'Move this file to RecallStack Trash';
+      delBtn.title     = 'Move this file to the system trash';
       delBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
       delBtn.addEventListener('click', async (e: any) => {
         e.stopPropagation();
-        if (!confirm(`Move "${entry.name}" to RecallStack Trash?`)) return;
+        if (!confirm(`Move "${entry.name}" to the system trash?`)) return;
         try {
           await assetsDir.removeEntry(entry.name);
           const key = 'assets/' + entry.name;
@@ -1022,8 +1007,6 @@ type TaskLocation = {
     savedContent = null;
     isNew = false;
     archiveMode = false;
-    allTasksMode = false;
-    returnToAllTasks = false;
     outputsMode = false;
     outputsActiveFolder = null;
     returnToOutputs = false;
@@ -1164,7 +1147,6 @@ type TaskLocation = {
     const navigationPreferences = readWorkspaceNavigationPreferences(localStorage, ws.name);
     navRow1Mode = navigationPreferences.row1Mode;
     navRow2Mode = navigationPreferences.row2Mode;
-    allTasksStatusMode = navigationPreferences.allTasksStatusMode;
     updateNavModeBtns();
 
     readmeLoaded    = false;
@@ -1259,11 +1241,11 @@ type TaskLocation = {
 
   // Persists the last folder/subfolder + listing-or-file state so the next
   // session can reopen exactly where the user left off. Skipped while in
-  // All Tasks / Outputs / search-derived contexts — those aren't plain
-  // folder browsing and already have their own return-to behavior.
+  // Outputs / search-derived contexts — those aren't plain folder browsing and
+  // already have their own return-to behavior.
   function saveLastView(mode: any, path: any) {
     if (!activeWorkspace || !l1Active) return;
-    if (allTasksMode || outputsMode || returnToAllTasks || returnToOutputs) return;
+    if (outputsMode || returnToOutputs) return;
     const state = {
       l1:   l1Active!.name,
       l2:   l2Active ? l2Active!.name : null,
@@ -1312,7 +1294,7 @@ type TaskLocation = {
     // not duplicated here as a text button in the top-level folder navigation.
     // Keep the Journal and Tasks icon shortcuts beside each other before folder tabs.
     navRow1.appendChild(mkReturnToTabBtn());
-    navRow1.appendChild(mkNavAllTasksBtn());
+    navRow1.appendChild(mkNavTaskListingBtn());
     navRow1.appendChild(mkNavWorkingTasksBtn());
     syncOutputsTopButton();
     navRow1.appendChild(mkNavSeparator());
@@ -1373,8 +1355,6 @@ type TaskLocation = {
 
   async function selectL1(folder: NamedDirectory, options: NavigationOptions = {}) {
     if (!await checkUnsavedNewNote()) return;
-    allTasksMode        = false;
-    returnToAllTasks    = false;
     outputsMode         = false;
     outputsActiveFolder = null;
     returnToOutputs     = false;
@@ -1384,12 +1364,9 @@ type TaskLocation = {
     isExternalFile      = false;
     currentExternalPath = null;
     currentExternalFileHandle = null;
-    updateAllTasksGroupingModeBtn();
     l1Active    = folder;
     l2Active    = null;
     archiveMode = false;
-    const allTasksBtn = $maybe('btn-all-tasks');
-    if (allTasksBtn) allTasksBtn.classList.remove('active');
     clearOutputsNavActive();
     navRow2.classList.remove('nav-row-disabled');
     btnNew.disabled = false;
@@ -1462,8 +1439,6 @@ type TaskLocation = {
     if (SYSTEM_FOLDER_NAMES.has(String(parts[0] || '').toLowerCase())) {
       l1Active         = null;
       l2Active         = null;
-      allTasksMode     = parts[0] === TASKS_ROOT;
-      returnToAllTasks = false;
       outputsMode      = false;
       outputsActiveFolder = null;
       returnToOutputs  = false;
@@ -1474,9 +1449,6 @@ type TaskLocation = {
       currentExternalPath = null;
       currentExternalFileHandle = null;
       archiveMode      = parts[1] === 'archived';
-      updateAllTasksGroupingModeBtn();
-      const allTasksBtn = $maybe('btn-all-tasks');
-      if (allTasksBtn) allTasksBtn.classList.toggle('active', allTasksMode);
       clearOutputsNavActive();
       navRow1.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
       navRow2.classList.add('nav-row-disabled');
@@ -1493,8 +1465,6 @@ type TaskLocation = {
       const l1Handle = await notesHandle!.getDirectoryHandle(l1Name);
       l1Active         = { name: l1Name, handle: l1Handle };
       l2Active         = null;
-      allTasksMode        = false;
-      returnToAllTasks    = false;
       outputsMode         = false;
       outputsActiveFolder = null;
       returnToOutputs     = false;
@@ -1504,10 +1474,7 @@ type TaskLocation = {
       isExternalFile      = false;
       currentExternalPath = null;
       currentExternalFileHandle = null;
-      updateAllTasksGroupingModeBtn();
       archiveMode      = false;
-      const allTasksBtn = $maybe('btn-all-tasks');
-      if (allTasksBtn) allTasksBtn.classList.remove('active');
       clearOutputsNavActive();
       navRow2.classList.remove('nav-row-disabled');
       btnNew.disabled = false;
@@ -1578,10 +1545,10 @@ type TaskLocation = {
     return btn;
   }
 
-  function mkNavAllTasksBtn() {
+  function mkNavTaskListingBtn() {
     const btn = document.createElement('button');
-    btn.id        = 'btn-all-tasks';
-    btn.className = 'nav-all-tasks-btn nav-icon-task-btn';
+    btn.id        = 'btn-task-listing';
+    btn.className = 'nav-task-listing-btn nav-icon-task-btn';
     btn.title = withShortcutHint('Task listing', 'tasks.list');
     btn.setAttribute('aria-label', 'Task listing');
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8h6M9 13h6M9 18h4"/><path d="m6.5 8 1 1 2-2" stroke="var(--green)"/><path d="m6.5 13 1 1 2-2" stroke="var(--yellow)"/></svg>`;
@@ -1652,7 +1619,6 @@ type TaskLocation = {
 
     outputsMode         = true;
     returnToOutputs     = false;
-    allTasksMode        = false;
     isOutputsFile       = false;
     currentOutputsFh    = null;
     currentOutputsDirFh = null;
@@ -1663,9 +1629,6 @@ type TaskLocation = {
     l2Active    = null;
     archiveMode = false;
 
-    const allTasksBtn = $maybe('btn-all-tasks');
-    if (allTasksBtn) allTasksBtn.classList.remove('active');
-    updateAllTasksGroupingModeBtn();
     navRow1.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     syncOutputsTopButton();
 
@@ -1707,7 +1670,6 @@ type TaskLocation = {
 
   async function loadOutputsFiles(folder: any) {
     showView('list');
-    updateAllTasksGroupingModeBtn();
     listHeading.textContent = folder.name;
     fileGrid.innerHTML = '';
 
@@ -1767,7 +1729,7 @@ type TaskLocation = {
     const { tab, previousActiveId, isNewTab } = claimTabSlot(pinned, {
       path: outputsPath, title: fileEntry.name.replace(/\.md$/i, ''), isNew: false, dirty: false,
       isOutputsFile: true, outputsFileHandle: fileEntry.handle, outputsDirHandle: fileEntry.dirHandle,
-      returnToOutputs: true, returnToAllTasks: false,
+      returnToOutputs: true,
       isExternalFile: false, externalPath: null, externalFileHandle: null,
     });
     const ok = await loadOutputsFileIntoEditor(tab, fileEntry);
@@ -1869,7 +1831,7 @@ type TaskLocation = {
     syncActiveTabFromState();
     const { tab, previousActiveId, isNewTab } = claimTabSlot(pinned, {
       path: pathKey, title: selection.name.replace(/\.md$/i, ''), isNew: false, dirty: false,
-      isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false,
+      isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false,
       isExternalFile: true, externalPath: selection.nativePath, externalFileHandle: selection.browserHandle,
     });
     const ok = await loadExternalFileIntoEditor(tab);
@@ -1957,25 +1919,6 @@ type TaskLocation = {
     return createNavSeparator();
   }
 
-  function updateAllTasksGroupingModeBtn(btn = $maybe('btn-all-tasks-mode')) {
-    if (!btn) return;
-    btn.classList.toggle('hidden', !allTasksMode || archiveMode);
-    btn.classList.toggle('active', allTasksStatusMode);
-    btn.title = allTasksStatusMode
-      ? 'All Tasks: grouped by status/priority'
-      : 'All Tasks: grouped by folder';
-    btn.innerHTML = allTasksStatusMode ? SVG_TASK_STATUS : SVG_TASK_FOLDER;
-  }
-
-  function toggleAllTasksGroupingMode() {
-    allTasksStatusMode = !allTasksStatusMode;
-    if (activeWorkspace) {
-      localStorage.setItem('pkm-all-tasks-mode-' + activeWorkspace, allTasksStatusMode ? 'status' : 'folder');
-    }
-    updateAllTasksGroupingModeBtn();
-    if (allTasksMode) loadAllTasks();
-  }
-
   function mkNav1Combo(folders: any) {
     return createNavCombo(1, folders, l1Active?.name || null, selected => refreshFolderNavigation(selected.name));
   }
@@ -2005,225 +1948,6 @@ type TaskLocation = {
 
   function updateNavModeBtns() {
     syncNavModeButtons(btnNav1Mode, btnNav2Mode, navRow1Mode, navRow2Mode);
-  }
-
-  function selectAllTasks(preserveArchiveMode = false) {
-    if (isManagedSystemWorkspace()) return;
-    allTasksMode        = true;
-    returnToAllTasks    = false;
-    outputsMode         = false;
-    outputsActiveFolder = null;
-    returnToOutputs     = false;
-    isOutputsFile       = false;
-    currentOutputsFh    = null;
-    currentOutputsDirFh = null;
-    isExternalFile      = false;
-    currentExternalPath = null;
-    currentExternalFileHandle = null;
-    l1Active         = null;
-    l2Active         = null;
-    archiveMode      = preserveArchiveMode === true;
-    const allTasksBtn = $maybe('btn-all-tasks');
-    if (allTasksBtn) allTasksBtn.classList.add('active');
-    clearOutputsNavActive();
-    updateAllTasksGroupingModeBtn();
-    navRow1.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    const _nav1Combo = $maybe('nav1-combo');
-    if (_nav1Combo) _nav1Combo.value = '';
-    const _r1Rename = $maybe('btn-rename-folder-1');
-    if (_r1Rename) _r1Rename.disabled = true;
-    navRow2.innerHTML = '';
-    navRow2.appendChild(mkArchiveToggleBtn());
-    navRow2.classList.remove('hidden', 'nav-row-disabled');
-    updateArchiveToggleBtn();
-    btnNew.disabled = false;
-    btnNew.classList.toggle('hidden', archiveMode);
-    loadAllTasks().catch(e => toast('Load failed: ' + e.message, 'error'));
-  }
-
-  async function loadAllTasks() {
-    const loadGeneration = ++listLoadGeneration;
-    if (!editorView.classList.contains('hidden') && !await checkUnsavedNewNote()) return;
-    showView('list');
-    btnViewJournal.classList.add('hidden');
-    listHeading.textContent = archiveMode ? 'Archived Tasks' : 'All Tasks';
-    updateAllTasksGroupingModeBtn();
-
-    const entries: any[] = [];
-    const workingEntries: any[] = [];
-    let tasksHandle: FileSystemDirectoryHandle;
-
-    try {
-      tasksHandle = await notesHandle!.getDirectoryHandle(TASKS_ROOT, { create: true });
-    } catch (error: any) {
-      toast('Could not open workspace tasks folder: ' + (error?.message || error), 'error');
-      return;
-    }
-
-    if (archiveMode) {
-      try {
-        const archivedHandle = await tasksHandle.getDirectoryHandle('archived', { create: true });
-        const archivedFiles = await Promise.all((await listMdFiles(archivedHandle)).map(enrichFileContent));
-        archivedFiles.forEach(file => entries.push({ tasksHandle, file, inArchived: true }));
-      } catch (error: any) {
-        toast('Could not open archived tasks folder: ' + (error?.message || error), 'error');
-        return;
-      }
-    } else if (window.__recallstackNative?.active) {
-      const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
-      const nativeTasks = await window.__recallstackNative!.tasks(prefix);
-      for (const item of nativeTasks) {
-        const file = {
-          name: item.name,
-          mtime: item.modifiedAt,
-          content: item.content,
-          handle: window.__recallstackNative!.fileHandle(DB_WS_PREFIX + item.path, {
-            name: item.name,
-            modifiedAt: item.modifiedAt,
-          }),
-        };
-        const target = { tasksHandle, file, inWorking: item.inWorking };
-        if (item.inWorking) workingEntries.push(target);
-        else entries.push(target);
-      }
-    } else {
-      const raw = await listMdFiles(tasksHandle);
-      const allEnriched = await Promise.all(raw.map(enrichFileContent));
-      allEnriched.forEach(file => entries.push({ tasksHandle, file }));
-      try {
-        const workingHandle = await tasksHandle.getDirectoryHandle('working');
-        const workingFiles = await Promise.all((await listMdFiles(workingHandle)).map(enrichFileContent));
-        workingFiles.forEach(file => workingEntries.push({ tasksHandle, file, inWorking: true }));
-      } catch {
-        // The Working subfolder is created on demand.
-      }
-    }
-
-    if (loadGeneration !== listLoadGeneration) return;
-    if (!entries.length && !workingEntries.length) {
-      fileGrid.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">${archiveMode ? '📦' : '✅'}</div>
-          <div class="empty-text">${archiveMode ? 'No archived task files found.' : 'No task files found in the workspace tasks folder.'}</div>
-        </div>`;
-      return;
-    }
-
-    if (archiveMode) workingEntries.length = 0;
-
-    const openTaskEntry = async (item: any, event?: MouseEvent) => {
-      if (!await autoSaveIfDirty()) return;
-      l1Active         = null;
-      l2Active         = null;
-      archiveMode      = !!item.inArchived;
-      returnToAllTasks = true;
-      openFile(item.file.name, `${TASKS_ROOT}/${item.inArchived ? 'archived/' : item.inWorking ? 'working/' : ''}${item.file.name}`, { pinned: isPinnedClick(event) });
-    };
-    const sourceLabel = (_item: any) => TASKS_ROOT;
-
-    const taskBuckets = partitionTasksBySuffix(entries, (item: any) => item.file.name, (item: any) => item.file.content);
-    const hasSpecialSections = !!(taskBuckets.deployment.length || taskBuckets.qaReview.length || taskBuckets.deployed.length || taskBuckets.completed.length || taskBuckets.backlog.length);
-
-    fileGrid.innerHTML = '';
-    renderTaskCountBar({
-      rest:       taskBuckets.rest.map(i => i.file.name),
-      completed:  taskBuckets.completed.map(i => i.file.name),
-      qaReview:   taskBuckets.qaReview.map(i => i.file.name),
-      deployment: taskBuckets.deployment.map(i => i.file.name),
-      deployed:   taskBuckets.deployed.map(i => i.file.name),
-      backlog:    taskBuckets.backlog.map(i => i.file.name),
-    });
-
-    if (!archiveMode) {
-      appendTaskSection('Working Tasks', sortTaskEntries(workingEntries),
-        (item: any) => buildTaskCard(item.file, (event: MouseEvent) => openTaskEntry(item, event), sourceLabel(item), {
-          rootParts: [TASKS_ROOT], inWorking: true, reload: loadAllTasks,
-        }), 'tasks-section-working');
-    }
-
-    if (allTasksStatusMode) {
-      const byStatus = new Map();
-      taskBuckets.rest.forEach(item => {
-        const status = normalizeTaskPriority(taskMetaFor(item.file.name, item.file.content || '').priority);
-        if (!byStatus.has(status)) byStatus.set(status, []);
-        byStatus.get(status).push(item);
-      });
-
-      const statuses = [...byStatus.keys()].sort((a, b) => {
-        const pa = PRIORITY_ORDER[a] ?? 99;
-        const pb = PRIORITY_ORDER[b] ?? 99;
-        if (pa !== pb) return pa - pb;
-        return taskPriorityLabel(a).localeCompare(taskPriorityLabel(b));
-      });
-
-      statuses.forEach(status => {
-        const items = byStatus.get(status);
-        const section = document.createElement('div');
-        section.className = `tasks-section tasks-section-status tasks-section-status-${status}`;
-
-        const header = document.createElement('div');
-        header.className = 'tasks-section-header';
-        header.innerHTML = `
-          <span class="tasks-section-title">${esc(taskPriorityLabel(status))}</span>
-          <span class="tasks-section-count">${items.length} task${items.length !== 1 ? 's' : ''}</span>`;
-        section.appendChild(header);
-
-        sortTaskFiles(items.map((item: any) => item.file)).forEach(file => {
-          const item = items.find((candidate: any) => candidate.file === file);
-          section.appendChild(buildTaskCard(file, (event: MouseEvent) => openTaskEntry(item, event), sourceLabel(item), archiveMode ? null : {
-            rootParts: [TASKS_ROOT], inWorking: false, reload: loadAllTasks,
-          }));
-        });
-
-        fileGrid.appendChild(section);
-      });
-    } else {
-      appendTaskSection('Tasks', sortTaskEntries(taskBuckets.rest),
-        (item: any) => buildTaskCard(item.file, (event: MouseEvent) => openTaskEntry(item, event), '', archiveMode ? null : {
-          rootParts: [TASKS_ROOT], inWorking: false, reload: loadAllTasks,
-        }));
-    }
-
-    if (hasSpecialSections) appendSectionDivider();
-
-    appendTaskSection('Completed', sortTaskEntries(taskBuckets.completed),
-      (item: any) => buildTaskCard(item.file, (event: MouseEvent) => openTaskEntry(item, event), sourceLabel(item), archiveMode ? null : {
-        rootParts: [TASKS_ROOT], inWorking: false, reload: loadAllTasks,
-      }));
-    appendTaskSection('In QA Review', sortTaskEntries(taskBuckets.qaReview),
-      (item: any) => buildTaskCard(item.file, (event: MouseEvent) => openTaskEntry(item, event), sourceLabel(item), archiveMode ? null : {
-        rootParts: [TASKS_ROOT], inWorking: false, reload: loadAllTasks,
-      }));
-
-    if (taskBuckets.deployment.length) {
-      const deploymentDivider = document.createElement('div');
-      deploymentDivider.className = 'tasks-section-deployment-divider';
-      fileGrid.appendChild(deploymentDivider);
-    }
-    appendTaskSection('Marked for Deployment', sortTaskEntries(taskBuckets.deployment),
-      (item: any) => buildTaskCard(item.file, (event: MouseEvent) => openTaskEntry(item, event), sourceLabel(item), archiveMode ? null : {
-        rootParts: [TASKS_ROOT], inWorking: false, reload: loadAllTasks,
-      }));
-
-    if (taskBuckets.deployed.length) {
-      const deployedDivider = document.createElement('div');
-      deployedDivider.className = 'tasks-section-deployed-divider';
-      fileGrid.appendChild(deployedDivider);
-    }
-    appendTaskSection('Deployed', sortTaskEntries(taskBuckets.deployed),
-      (item: any) => buildTaskCard(item.file, (event: MouseEvent) => openTaskEntry(item, event), sourceLabel(item), archiveMode ? null : {
-        rootParts: [TASKS_ROOT], inWorking: false, reload: loadAllTasks,
-      }));
-
-    if (taskBuckets.backlog.length) {
-      const backlogDivider = document.createElement('div');
-      backlogDivider.className = 'tasks-section-backlog-divider';
-      fileGrid.appendChild(backlogDivider);
-    }
-    appendTaskSection('Backlog / Deferred', sortTaskEntries(taskBuckets.backlog),
-      (item: any) => buildTaskCard(item.file, (event: MouseEvent) => openTaskEntry(item, event), sourceLabel(item), archiveMode ? null : {
-        rootParts: [TASKS_ROOT], inWorking: false, reload: loadAllTasks,
-      }));
   }
 
   function setActive(row: any, name: any) {
@@ -2344,7 +2068,6 @@ type TaskLocation = {
     const loadGeneration = ++listLoadGeneration;
     showView('list');
     btnViewJournal.classList.add('hidden');
-    updateAllTasksGroupingModeBtn();
     let targetHandle  = dirHandle;
     let targetHeading = heading;
     const isInbox     = heading === 'inbox';
@@ -2758,7 +2481,7 @@ type TaskLocation = {
     return syncTabFromDocument(activeTabRecord(), {
       path: currentPath, content: mdEditor.value, savedContent, isNew, isOutputsFile,
       outputsFileHandle: currentOutputsFh, outputsDirHandle: currentOutputsDirFh,
-      returnToOutputs, returnToAllTasks,
+      returnToOutputs,
       isExternalFile, externalPath: currentExternalPath, externalFileHandle: currentExternalFileHandle,
     }, tabTitleForPath);
   }
@@ -2934,7 +2657,7 @@ type TaskLocation = {
   }
 
   // Clears the shared "current document" state and returns to the appropriate
-  // list/search/outputs/all-tasks view — used when the last tab is closed.
+  // list/search/outputs view — used when the last tab is closed.
   function showEmptyEditorState() {
     currentPath          = null;
     savedContent         = null;
@@ -3064,7 +2787,7 @@ type TaskLocation = {
     syncActiveTabFromState();
     const { tab, previousActiveId, isNewTab } = claimTabSlot(pinned, {
       path: notesRelPath, title: tabTitleForPath(notesRelPath), isNew: false, dirty: false,
-      isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false,
+      isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false,
       isExternalFile: false, externalPath: null, externalFileHandle: null,
     });
     const ok = await loadFileIntoEditor(notesRelPath, options);
@@ -3193,7 +2916,7 @@ type TaskLocation = {
   async function createFileOfKind(kind: 'note' | 'task' | 'working') {
     if (kind === 'working') { await createWorkingTask(); return; }
     const createTask = kind === 'task';
-    if (!createTask && !l1Active && !allTasksMode && !isJournalNote()) { toast('Select a folder first', 'error'); return; }
+    if (!createTask && !l1Active && !isJournalNote()) { toast('Select a folder first', 'error'); return; }
     // Save the current editor first, avoiding a later unsaved-changes prompt.
     if (!editorView.classList.contains('hidden') && (currentPath || isNew) && !await saveNote()) return;
     const dir = createTask ? await getDirHandle(notesHandle!, [TASKS_ROOT], true) : await activeSaveDirHandle();
@@ -3413,15 +3136,15 @@ type TaskLocation = {
 
   async function deleteNote() {
     if (!currentPath) return;
-    // External/temporary files aren't owned by the workspace — there's no
-    // RecallStack Trash to move them to, and deleting the user's original
-    // file out from under them is out of scope for this editor-in-place mode.
+    // External/temporary files aren't owned by the workspace, and deleting the
+    // user's original file out from under them is out of scope for this
+    // editor-in-place mode.
     if (isExternalFile) {
       toast('External files can’t be deleted from RecallStack', 'error');
       return;
     }
     const name = currentPath!.split('/').at(-1)!;
-    if (!confirm(`Move "${name}" to RecallStack Trash?`)) return;
+    if (!confirm(`Move "${name}" to the system trash?`)) return;
 
     if (isOutputsFile && currentOutputsDirFh) {
       // Only the removal itself is essential — everything after it is either
@@ -3535,7 +3258,6 @@ type TaskLocation = {
       refreshCalendarIfVisible,
     ]);
     toast('Restored ✓');
-    if (isTaskNamespacePath(restoredPath)) returnToAllTasks = true;
     archiveMode = false;
     btnNew.classList.remove('hidden');
     updateArchiveToggleBtn();
@@ -3774,10 +3496,6 @@ type TaskLocation = {
         clearOutputsNavActive();
       }
 
-      allTasksMode = false;
-      returnToAllTasks = false;
-      const allTasksBtn = $maybe('btn-all-tasks');
-      if (allTasksBtn) allTasksBtn.classList.remove('active');
       navRow2.classList.remove('nav-row-disabled');
       refreshCalendarIfVisible();
       await openFile(finalFilename, finalPath);
@@ -3952,10 +3670,10 @@ type TaskLocation = {
   // ── Task date bar ─────────────────────────────────────────────────────────────
 
   function isTasksEditor() {
-    return currentPath ? isCurrentTaskPath(currentPath) : allTasksMode;
+    return currentPath ? isCurrentTaskPath(currentPath) : false;
   }
   function isTasksAreaEditor() {
-    return currentPath ? (isCurrentTaskPath(currentPath) || isJournalPath(currentPath)) : allTasksMode;
+    return currentPath ? (isCurrentTaskPath(currentPath) || isJournalPath(currentPath)) : false;
   }
   function isJournalNote(path = currentPath) {
     return isJournalPath(path);
@@ -4162,7 +3880,6 @@ type TaskLocation = {
   // when there is no journal to show (managed system workspace / no workspace).
   async function returnToDailyJournalAfterRemoval() {
     returnToOutputs           = false;
-    returnToAllTasks          = false;
     outputsMode               = false;
     outputsActiveFolder       = null;
     isOutputsFile             = false;
@@ -4252,8 +3969,8 @@ type TaskLocation = {
         navRow1.innerHTML = '';
         navRow1.appendChild(mkNavNewBtn(1));
         navRow1.appendChild(mkNavRenameBtn(1));
-        if (allTasksEnabled) navRow1.appendChild(mkNavAllTasksBtn());
-        if (allTasksEnabled) navRow1.appendChild(mkNavWorkingTasksBtn());
+        navRow1.appendChild(mkNavTaskListingBtn());
+        navRow1.appendChild(mkNavWorkingTasksBtn());
         navRow1.appendChild(mkNavSeparator());
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
@@ -4367,8 +4084,8 @@ type TaskLocation = {
         navRow1.innerHTML = '';
         navRow1.appendChild(mkNavNewBtn(1));
         navRow1.appendChild(mkNavRenameBtn(1));
-        if (allTasksEnabled) navRow1.appendChild(mkNavAllTasksBtn());
-        if (allTasksEnabled) navRow1.appendChild(mkNavWorkingTasksBtn());
+        navRow1.appendChild(mkNavTaskListingBtn());
+        navRow1.appendChild(mkNavWorkingTasksBtn());
         navRow1.appendChild(mkNavSeparator());
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
@@ -4476,9 +4193,7 @@ type TaskLocation = {
     archiveMode = !archiveMode;
     btnNew.classList.toggle('hidden', archiveMode); // no New Note while browsing archived
     updateArchiveToggleBtn();
-    if (allTasksMode) {
-      await loadAllTasks();
-    } else if (l2Active || l1Active) {
+    if (l2Active || l1Active) {
       await loadFiles(activeDirHandle(), activeFolderHeading());
     }
   }
@@ -4505,10 +4220,6 @@ type TaskLocation = {
       } else {
         populateOutputsNavRow2().catch(e => toast('Load failed: ' + e.message, 'error'));
       }
-    } else if (returnToAllTasks) {
-      const restoreArchiveMode = archiveMode;
-      returnToAllTasks = false;
-      selectAllTasks(restoreArchiveMode);
     } else if (l1Active && !folderUsesInlineList(activeFolderHeading(), l1Active.name)) {
       // Content folder: cancelling a note reopens that folder's notes modal.
       void openNotesListing().catch(e => toast('Could not load notes: ' + (e?.message || e), 'error'));
@@ -4610,11 +4321,11 @@ type TaskLocation = {
   }
 
   function renderPreview() {
-    // Reading mode, edit sub-state: the preview pane is hidden and deliberately
-    // frozen — skip the whole marked.parse + innerHTML rebuild + postProcess
-    // sweep on every keystroke. setReadingView('preview') renders once when the
-    // user switches back.
-    if (readingModeEnabled && readingViewState === 'edit') return;
+    // Edit sub-state: the preview pane is hidden and deliberately frozen — skip
+    // the whole marked.parse + innerHTML rebuild + postProcess sweep on every
+    // keystroke. setReadingView('preview') renders once when the user switches
+    // back.
+    if (readingViewState === 'edit') return;
     previewScheduler.schedule(mdEditor.length, !editorView.classList.contains('hidden'), () => {
       setPreviewMarkdown(mdEditor.value);
       postProcessPreview();
@@ -4622,18 +4333,15 @@ type TaskLocation = {
     });
   }
 
-  // ── Reading-mode layout (Idea B) ────────────────────────────────────────────
+  // ── Editor / preview layout ────────────────────────────────────────────────
   // Single source of truth for editor/preview pane visibility. Presentation
-  // mode owns the layout while it is active; otherwise reading mode collapses
-  // to a single pane (preview, or editor while editing) and classic mode shows
-  // the resizable split.
+  // mode owns the layout while it is active; otherwise exactly one pane shows
+  // at a time — the preview, or the editor while editing.
   function applyEditorLayout() {
     if (presentationOn) return;
-    const editing     = readingModeEnabled && readingViewState === 'edit';
-    const previewOnly  = readingModeEnabled && readingViewState === 'preview';
-    editorPane.style.display  = previewOnly ? 'none' : '';
+    const editing     = readingViewState === 'edit';
+    editorPane.style.display  = editing ? '' : 'none';
     previewPane.style.display = editing ? 'none' : '';
-    resizerEl.style.display   = readingModeEnabled ? 'none' : '';
     editorPane.style.flex = '1'; editorPane.style.width = '';
     previewPane.style.flex = '1'; previewPane.style.width = '';
     updateReadingModeHint();
@@ -4642,21 +4350,18 @@ type TaskLocation = {
     previewPane.style.overflow = 'hidden';
     requestAnimationFrame(() => {
       previewPane.style.overflow = '';
-      if (!previewOnly) mdEditor.view.requestMeasure();
+      if (editing) mdEditor.view.requestMeasure();
     });
   }
 
   function updateReadingModeHint() {
-    const editing    = readingModeEnabled && readingViewState === 'edit';
-    const previewing = readingModeEnabled && readingViewState === 'preview';
-    if (previewPaneLabel) previewPaneLabel.textContent = previewing ? 'Preview · press I to edit' : 'Preview';
+    const editing = readingViewState === 'edit';
+    if (previewPaneLabel) previewPaneLabel.textContent = editing ? 'Preview' : 'Preview · press I to edit';
     if (readingEscHint) readingEscHint.classList.toggle('hidden', !editing);
   }
 
-  // Switch between the reading-mode preview and edit sub-states. No-op in
-  // classic mode.
+  // Switch between the preview and edit sub-states.
   function setReadingView(state: 'preview' | 'edit', opts: { focus?: boolean } = {}) {
-    if (!readingModeEnabled) return;
     readingViewState = state;
     applyEditorLayout();
     if (state === 'preview') {
@@ -4670,12 +4375,10 @@ type TaskLocation = {
     }
   }
 
-  // Called by every "document just loaded into the editor" path. In reading
-  // mode a note with content opens in preview; an empty note opens ready to
-  // type. The preview itself has already been rendered once by the caller.
+  // Called by every "document just loaded into the editor" path. A note with
+  // content opens in preview; an empty note opens ready to type. The preview
+  // itself has already been rendered once by the caller.
   function enterReadingModeForOpenDoc() {
-    // Classic mode: leave the split (and any user-dragged divider width) alone.
-    if (!readingModeEnabled) return;
     readingViewState = !/\S/.test(mdEditor.value) ? 'edit' : 'preview';
     applyEditorLayout();
     if (readingViewState === 'edit') setTimeout(() => mdEditor.focus(), 0);
@@ -4683,7 +4386,7 @@ type TaskLocation = {
   }
 
   function canEnterEditFromPreview(): boolean {
-    if (!readingModeEnabled || readingViewState !== 'preview') return false;
+    if (readingViewState !== 'preview') return false;
     if (presentationOn || editorView.classList.contains('hidden')) return false;
     if (anyOverlayOpen()) return false;
     const el = document.activeElement as HTMLElement | null;
@@ -5104,7 +4807,6 @@ type TaskLocation = {
       mode: which === 'search' ? 'search'
         : which === 'calendar' ? 'calendar'
         : outputsMode ? 'outputs'
-        : allTasksMode ? 'all-tasks'
         : 'folder',
       workspace: activeWorkspace,
       level1: l1Active?.name || null,
@@ -5119,35 +4821,6 @@ type TaskLocation = {
     }
   }
 
-  // ── Resizable split pane ──────────────────────────────────────────────────────
-
-  (() => {
-    let dragging = false;
-    resizerEl.addEventListener('mousedown', (e: any) => {
-      dragging = true;
-      resizerEl.classList.add('dragging');
-      document.body.style.cursor     = 'col-resize';
-      document.body.style.userSelect = 'none';
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', (e: any) => {
-      if (!dragging) return;
-      const rect = splitPane.getBoundingClientRect();
-      const pct  = Math.min(Math.max((e.clientX - rect.left) / rect.width * 100, 15), 85);
-      editorPane.style.flex  = 'none';
-      editorPane.style.width = pct + '%';
-      previewPane.style.flex  = '1';
-      previewPane.style.width = '';
-    });
-    document.addEventListener('mouseup', () => {
-      if (!dragging) return;
-      dragging = false;
-      resizerEl.classList.remove('dragging');
-      document.body.style.cursor     = '';
-      document.body.style.userSelect = '';
-    });
-  })();
-
   // ── Presentation mode toggle ──────────────────────────────────────────────────
   (() => {
     const btnPresentation     = $id('btn-presentation');
@@ -5161,16 +4834,15 @@ type TaskLocation = {
       presentationOn = on;
 
       if (presentationOn) {
-        // Reading mode may be paused mid-edit with a stale, frozen preview.
-        // Flip back to a freshly rendered preview first so presentation shows
-        // current content (and the session lands back in preview on exit).
+        // The editor may be paused mid-edit with a stale, frozen preview. Flip
+        // back to a freshly rendered preview first so presentation shows current
+        // content (and the session lands back in preview on exit).
         // applyEditorLayout() no-ops here because presentationOn is already set.
-        if (readingModeEnabled && readingViewState === 'edit') setReadingView('preview', { focus: false });
-        // Hide editor pane and resizer; expand preview to full width. The
-        // preview pane is explicitly un-hidden here because reading mode's
-        // edit sub-state leaves `previewPane.style.display = 'none'` behind.
+        if (readingViewState === 'edit') setReadingView('preview', { focus: false });
+        // Expand the preview to full width. The preview pane is explicitly
+        // un-hidden here because the edit sub-state leaves
+        // `previewPane.style.display = 'none'` behind.
         editorPane.style.display  = 'none';
-        resizerEl.style.display   = 'none';
         previewPane.style.display = '';
         previewPane.style.flex    = '1';
         previewPane.style.width   = '';
@@ -5184,10 +4856,7 @@ type TaskLocation = {
         btnPresentation.classList.add('btn-primary');
         btnPresentation.classList.remove('btn-ghost');
       } else {
-        // Restore default two-panel layout
         editorPane.style.display  = '';
-        resizerEl.style.display   = '';
-        // Reset any manually dragged widths so both panes go back to flex:1 equal split
         editorPane.style.flex     = '1';
         editorPane.style.width    = '';
         previewPane.style.flex    = '1';
@@ -5201,7 +4870,7 @@ type TaskLocation = {
         presentationExitBar.classList.add('hidden');
         btnPresentation.classList.remove('btn-primary');
         btnPresentation.classList.add('btn-ghost');
-        // Hand the layout back to reading mode / classic split.
+        // Hand the layout back to the preview / edit sub-state.
         applyEditorLayout();
       }
 
@@ -5514,8 +5183,7 @@ type TaskLocation = {
       try { openListing.refresh(await activeListingRebuild()); } catch { /* best effort */ }
       return;
     }
-    switch (listReloadMode({ allTasksMode, outputsMode, outputsActiveFolder, l1Active, l2Active })) {
-      case "all-tasks": await loadAllTasks(); break;
+    switch (listReloadMode({ outputsMode, outputsActiveFolder, l1Active, l2Active })) {
       case "outputs": await loadOutputsFiles(outputsActiveFolder); break;
       case "folder":
         if (l1Active && !folderUsesInlineList(activeFolderHeading(), l1Active.name)) break; // notes modal owns it
@@ -5659,12 +5327,6 @@ type TaskLocation = {
     const path = normalizeAppPath(change?.path);
     const workspacePrefix = normalizeAppPath(DB_WS_PREFIX).replace(/\/+$/, '');
     if (!path || !workspacePrefix || !path.startsWith(workspacePrefix + '/')) return false;
-
-    const workspacePath = path.slice(workspacePrefix.length + 1);
-    if (allTasksMode) {
-      return change.entity === 'markdown'
-        && /^[^/]+\/tasks(?:\/working)?(?:\/[^/]+\.md)?$/i.test(workspacePath);
-    }
     if (!l1Active) return false;
 
     const visibleFolder = normalizeAppPath(DB_WS_PREFIX + activeFolderPath()).replace(/\/+$/, '');
@@ -5912,9 +5574,7 @@ type TaskLocation = {
     { id:'view.zoom-in', title:'Zoom In', category:'View', shortcut:'Ctrl++', isEnabled:needsWorkspace, run:() => stepContentZoom(1) },
     { id:'view.zoom-out', title:'Zoom Out', category:'View', shortcut:'Ctrl+-', isEnabled:needsWorkspace, run:() => stepContentZoom(-1) },
     { id:'view.zoom-reset', title:'Reset Zoom', category:'View', shortcut:'Ctrl+0', isEnabled:needsWorkspace, run:() => setContentZoom(0) },
-    { id:'view.line-numbers', title:'Toggle Editor Line Numbers', category:'View', isEnabled:needsEditor, run:() => $id('btn-line-numbers').click() },
-    { id:'view.editor-mode', title:'Toggle Editor Mode (Reading / Classic)', category:'View', keywords:['reading preview edit split idea b performance'], run:() => $id('btn-editor-mode').click() },
-    { id:'view.reading-toggle', title:'Reading Mode: Edit / Preview', category:'View', keywords:['reading preview edit insert i escape'], shortcut:'I', isEnabled:()=> readingModeEnabled && !editorView.classList.contains('hidden'), disabledReason:()=>'Reading mode with a note open', run:() => setReadingView(readingViewState === 'edit' ? 'preview' : 'edit') },
+    { id:'view.reading-toggle', title:'Edit / Preview', category:'View', keywords:['reading preview edit insert i escape'], shortcut:'I', isEnabled:()=> !editorView.classList.contains('hidden'), disabledReason:()=>'Open a note first', run:() => setReadingView(readingViewState === 'edit' ? 'preview' : 'edit') },
     { id:'editor.insert-link', title:'Insert Markdown Link', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('[link text](url)') },
     { id:'editor.insert-code', title:'Insert Code Block', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('```\n\n```') },
     { id:'editor.insert-mermaid', title:'Insert Mermaid Block', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('```mermaid\ngraph TD\n  A --> B\n```') },
@@ -6027,7 +5687,6 @@ type TaskLocation = {
 
   btnSortMtime.addEventListener('click', () => setSortMode('mtime'));
   btnSortAlpha.addEventListener('click', () => setSortMode('alpha'));
-  if (btnAllTasksMode) btnAllTasksMode.addEventListener('click', toggleAllTasksGroupingMode);
 
   // Set default active state to match initial sortMode
   btnSortMtime.classList.add('active');
@@ -7691,7 +7350,7 @@ type TaskLocation = {
   function openNewFileKindPicker() {
     if (!rootHandle) { toast('Open a workspace first', 'error'); return; }
     newFileKindPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    newFileKindIndex = (allTasksMode || isJournalNote()) ? 1 : 0;
+    newFileKindIndex = isJournalNote() ? 1 : 0;
     newFileKindModal.classList.remove('hidden');
     renderNewFileKind();
     requestAnimationFrame(() => newFileKindResults.focus());
@@ -7823,9 +7482,8 @@ type TaskLocation = {
     if (e.key === 'Escape') {
       if (anyOverlayOpen()) { e.preventDefault(); closeTopmostOverlay(); return; }
       if (escapeOverlayWasOpen) return; // an overlay's own handler already closed it
-      // Reading mode: Escape while editing returns to the preview (and triggers
-      // one render). Only here — in classic mode Escape keeps its old meaning.
-      if (readingModeEnabled && readingViewState === 'edit' && !presentationOn
+      // Escape while editing returns to the preview (and triggers one render).
+      if (readingViewState === 'edit' && !presentationOn
         && !editorView.classList.contains('hidden')) {
         e.preventDefault();
         if (currentPath && !isNew) void autoSaveIfDirty(true);
@@ -8249,8 +7907,8 @@ type TaskLocation = {
       navRow1.innerHTML = '';
       navRow1.appendChild(mkNavNewBtn(1));
       navRow1.appendChild(mkNavRenameBtn(1));
-      if (allTasksEnabled) navRow1.appendChild(mkNavAllTasksBtn());
-      if (allTasksEnabled) navRow1.appendChild(mkNavWorkingTasksBtn());
+      navRow1.appendChild(mkNavTaskListingBtn());
+      navRow1.appendChild(mkNavWorkingTasksBtn());
       navRow1.appendChild(mkNavSeparator());
       if (folders.length) {
         if (navRow1Mode === 'combo') {
@@ -8259,13 +7917,7 @@ type TaskLocation = {
           folders.forEach(f => navRow1.appendChild(mkNavBtn(f.name, () => refreshFolderNavigation(f.name))));
         }
       }
-      // Restore active state
-      if (allTasksMode) {
-        const allTasksBtn = $maybe('btn-all-tasks');
-        if (allTasksBtn) allTasksBtn.classList.add('active');
-      } else if (l1Active) {
-        setActive(navRow1, l1Active!.name);
-      }
+      if (l1Active) setActive(navRow1, l1Active!.name);
     });
   }
 
@@ -8314,22 +7966,6 @@ type TaskLocation = {
     wordWrapOn = !wordWrapOn;
     localStorage.setItem(WRAP_KEY, wordWrapOn ? 'on' : 'off');
     applyWordWrap();
-  });
-
-  const LINE_NUMBERS_KEY = PREFERENCE_KEYS.lineNumbers;
-  const btnLineNumbers = $id('btn-line-numbers');
-  let lineNumbersOn = preferenceIsEnabled(localStorage.getItem(LINE_NUMBERS_KEY), true);
-  function applyLineNumbers() {
-    mdEditor.setLineNumbers(lineNumbersOn);
-    btnLineNumbers.classList.toggle('wrap-active', lineNumbersOn);
-    btnLineNumbers.setAttribute('aria-pressed', String(lineNumbersOn));
-    btnLineNumbers.title = `Line Numbers: ${lineNumbersOn ? 'On' : 'Off'}`;
-  }
-  applyLineNumbers();
-  btnLineNumbers.addEventListener('click', () => {
-    lineNumbersOn = !lineNumbersOn;
-    localStorage.setItem(LINE_NUMBERS_KEY, lineNumbersOn ? 'on' : 'off');
-    applyLineNumbers();
   });
 
   // ── Cursor load-position toggle ───────────────────────────────────────────────
@@ -8417,82 +8053,8 @@ type TaskLocation = {
     renderWorkspaceSwitcher(activeWorkspace || '');
   });
 
-  // ── All Tasks feature toggle ─────────────────────────────────────────────────
-  const btnToggleAllTasks  = $id('btn-toggle-all-tasks');
-
-  const LIST_CHECKS_SVG    = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 18h8"/></svg>';
-  const LIST_CHECKS_OFF_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 18h8"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
-
-  function applyToggleAllTasksBtn() {
-    btnToggleAllTasks.querySelector<HTMLElement>('.settings-tile-icon')!.innerHTML = allTasksEnabled ? LIST_CHECKS_SVG : LIST_CHECKS_OFF_SVG;
-    btnToggleAllTasks.setAttribute('aria-pressed', String(allTasksEnabled));
-    btnToggleAllTasks.title = allTasksEnabled
-      ? 'Disable "All Tasks" view'
-      : 'Enable "All Tasks" view';
-    btnToggleAllTasks.classList.toggle('active', allTasksEnabled);
-    btnToggleAllTasks.classList.toggle('all-tasks-disabled', !allTasksEnabled);
-  }
-  applyToggleAllTasksBtn();
-
-  btnToggleAllTasks.addEventListener('click', async () => {
-    allTasksEnabled = !allTasksEnabled;
-    localStorage.setItem(ALL_TASKS_ENABLED_KEY, allTasksEnabled ? 'on' : 'off');
-    applyToggleAllTasksBtn();
-    if (!allTasksEnabled && allTasksMode) {
-      // Currently viewing All Tasks but the feature was just disabled —
-      // fall back to the first top-level folder (and its first subfolder).
-      const folders = await listWorkspaceTopDirs();
-      if (folders.length) await selectL1(folders[0]);
-      return;
-    }
-    const allTasksBtn = $maybe('btn-all-tasks');
-    if (allTasksEnabled && !allTasksBtn) {
-      const btn = mkNavAllTasksBtn();
-      const renameBtn = $maybe('btn-rename-folder-1');
-      if (renameBtn) renameBtn.after(btn);
-      else navRow1.appendChild(btn);
-    } else if (!allTasksEnabled && allTasksBtn) {
-      allTasksBtn.remove();
-    }
-  });
-
-  // ── Editor mode toggle: Reading (Idea B) ↔ Classic split ─────────────────────
-  const btnEditorMode = $id('btn-editor-mode');
-  const BOOK_OPEN_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>';
-  const SPLIT_COLS_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>';
-
-  function applyEditorModeBtn() {
-    btnEditorMode.querySelector<HTMLElement>('.settings-tile-icon')!.innerHTML = readingModeEnabled ? BOOK_OPEN_SVG : SPLIT_COLS_SVG;
-    btnEditorMode.setAttribute('aria-pressed', String(readingModeEnabled));
-    btnEditorMode.title = readingModeEnabled
-      ? 'Editor: Reading mode — opens in preview, I to edit, Esc back to preview'
-      : 'Editor: Classic — live editor + preview split while you type';
-    btnEditorMode.classList.toggle('active', readingModeEnabled);
-    const desc = btnEditorMode.querySelector<HTMLElement>('.settings-tile-description');
-    if (desc) desc.textContent = readingModeEnabled ? 'Reading — I to edit, Esc to preview' : 'Classic live split preview';
-  }
-  applyEditorModeBtn();
-  if (readingModeEnabled) applyEditorLayout();
-
-  btnEditorMode.addEventListener('click', () => {
-    readingModeEnabled = !readingModeEnabled;
-    localStorage.setItem(EDITOR_MODE_KEY, readingModeEnabled ? 'reading' : 'classic');
-    applyEditorModeBtn();
-    const docOpen = !editorView.classList.contains('hidden') && !!currentPath;
-    if (readingModeEnabled) {
-      readingViewState = docOpen && !/\S/.test(mdEditor.value) ? 'edit' : 'preview';
-    }
-    applyEditorLayout();
-    if (docOpen && (!readingModeEnabled || readingViewState === 'preview')) {
-      // Preview is (or just became) visible — make sure it reflects current text.
-      previewScheduler.cancel();
-      setPreviewMarkdown(mdEditor.value);
-      postProcessPreview();
-      if (isTasksEditor()) syncDateInputsFromEditor();
-    } else if (docOpen) {
-      setTimeout(() => mdEditor.focus(), 0);
-    }
-  });
+  // Set the initial single-pane (preview) layout before any document opens.
+  applyEditorLayout();
 
   // ── Markdown Reference ────────────────────────────────────────────────────────
   const MD_REF_SECTIONS = [
@@ -8796,50 +8358,7 @@ type TaskLocation = {
   }
   bindNativeProgressEvents(safetyToolsOutput);
 
-  async function showTrashRecords() {
-    const records = await window.__recallstackNative!.listTrash();
-    safetyToolsOutput.innerHTML = '';
-    if (!records.length) { safetyToolsOutput.textContent = 'RecallStack Trash is empty.'; return; }
-    records.forEach(record => {
-      const row = document.createElement('div'); row.className = 'safety-record';
-      const path = document.createElement('span'); path.className = 'safety-record-path';
-      path.textContent = `${record.originalPath}  •  ${record.deletedAt}`;
-      const restore = document.createElement('button'); restore.className = 'btn btn-ghost'; restore.textContent = 'Restore';
-      restore.addEventListener('click', async () => {
-        try { await window.__recallstackNative!.restoreTrash(String(record.id)); await showTrashRecords(); await reloadActiveList(); }
-        catch (error: any) { toast('Restore failed: ' + (error?.message || error), 'error'); }
-      });
-      row.append(path, restore); safetyToolsOutput.appendChild(row);
-    });
-    const empty = document.createElement('button'); empty.className = 'btn btn-danger'; empty.textContent = 'Empty Trash Permanently';
-    empty.addEventListener('click', async () => {
-      if (!confirm(`Permanently delete all ${records.length} Trash item(s)? This cannot be undone.`)) return;
-      const count = await window.__recallstackNative!.emptyTrash();
-      safetyText(`Permanently removed ${count} Trash item(s).`);
-    });
-    safetyToolsOutput.appendChild(empty);
-  }
 
-  async function showCurrentVersions() {
-    const path = appLocalPathForCurrentFile();
-    if (!path) { safetyText('Open a saved note to inspect its version history.'); return; }
-    const versions = await window.__recallstackNative!.listVersions(path);
-    safetyToolsOutput.innerHTML = '';
-    if (!versions.length) { safetyToolsOutput.textContent = 'No earlier versions have been recorded for this note.'; return; }
-    versions.forEach(version => {
-      const row = document.createElement('div'); row.className = 'safety-record';
-      const description = document.createElement('span'); description.className = 'safety-record-path';
-      description.textContent = `${version.createdAt}  •  ${version.size} bytes`;
-      const restore = document.createElement('button'); restore.className = 'btn btn-ghost'; restore.textContent = 'Restore';
-      restore.addEventListener('click', async () => {
-        if (!confirm('Restore this version? The current content will be retained as another recoverable version.')) return;
-        await window.__recallstackNative!.restoreVersion(String(version.id));
-        await openFile(currentPath!.split('/').at(-1)!, currentPath || undefined);
-        await showCurrentVersions();
-      });
-      row.append(description, restore); safetyToolsOutput.appendChild(row);
-    });
-  }
 
   async function loadRecentWorkspaceChoices() {
     const entries = await window.__recallstackNative!.recentWorkspaces();
@@ -8947,9 +8466,7 @@ type TaskLocation = {
       const health = await window.__recallstackNative!.indexHealth();
       await buildSearchIndex();
       safetyText(`Search index rebuilt successfully.\n${count} Markdown file(s) indexed.\n\n${JSON.stringify(health, null, 2)}`);
-    } else if (action === 'trash') await showTrashRecords();
-    else if (action === 'versions') await showCurrentVersions();
-    else if (action === 'git') safetyText(await window.__recallstackNative!.gitStatus());
+    } else if (action === 'git') safetyText(await window.__recallstackNative!.gitStatus());
   }
 
   function openSafetyTools() {

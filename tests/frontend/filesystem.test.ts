@@ -76,7 +76,7 @@ test("workspace selection and navigation preferences have stable fallbacks", () 
   assert.equal(selectInitialWorkspace([system, personal], "openbrain", false, new Set(["openbrain"])), personal);
   assert.equal(selectInitialWorkspace([system, personal], "personal", true, new Set(["openbrain"])), personal);
 
-  const values = new Map([["pkm-nav1-mode-personal", "combo"], ["pkm-all-tasks-mode-personal", "folder"]]);
+  const values = new Map([["pkm-nav1-mode-personal", "combo"]]);
   const preferences = readWorkspaceNavigationPreferences({ getItem: key => values.get(key) || null }, "personal");
-  assert.deepEqual(preferences, { row1Mode: "combo", row2Mode: "buttons", allTasksStatusMode: false });
+  assert.deepEqual(preferences, { row1Mode: "combo", row2Mode: "buttons" });
 });

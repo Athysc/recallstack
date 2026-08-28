@@ -140,7 +140,7 @@
   .settings-tile.btn-icon {
     box-sizing: border-box;
     min-width: 0;
-    min-height: 154px;
+    min-height: 126px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -201,11 +201,6 @@
     border-color: color-mix(in srgb, var(--blue) 65%, var(--surface1));
     background: color-mix(in srgb, var(--blue) 12%, var(--base));
     color: var(--blue);
-  }
-  .settings-tile.btn-icon.all-tasks-disabled {
-    border-color: color-mix(in srgb, var(--red) 55%, var(--surface1));
-    background: color-mix(in srgb, var(--red) 9%, var(--base));
-    color: var(--red);
   }
   .settings-theme-panel,
   .settings-output-panel {
@@ -285,7 +280,7 @@
     .settings-overlay { padding: 10px; }
     .settings-content { padding: 14px; }
     .settings-grid { grid-template-columns: 1fr; }
-    .settings-tile.btn-icon { min-height: 136px; }
+    .settings-tile.btn-icon { min-height: 118px; }
   }
 
   #search-view {

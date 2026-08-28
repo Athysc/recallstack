@@ -106,8 +106,8 @@
   /* ── Wide modal dialog (rename folder) ───────────────────────────────────── */
   .modal-dialog-wide { width: 520px; max-width: 92vw; }
 
-  /* ── Nav All Tasks button ────────────────────────────────────────────────── */
-  .nav-all-tasks-btn {
+  /* ── Nav Task-listing button ─────────────────────────────────────────────── */
+  .nav-task-listing-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -126,9 +126,8 @@
     user-select: none;
     letter-spacing: 0.02em;
   }
-  .nav-all-tasks-btn svg { flex: 0 0 auto; }
-  .nav-all-tasks-btn:hover  { background: var(--surface0); color: var(--text); }
-  .nav-all-tasks-btn.active { background: var(--surface0); color: var(--yellow); }
+  .nav-task-listing-btn svg { flex: 0 0 auto; }
+  .nav-task-listing-btn:hover  { background: var(--surface0); color: var(--text); }
   .nav-return-tab-btn {
     flex: 0 0 auto;
     width: 29px;
@@ -166,13 +165,6 @@
     align-items: center;
     gap: 7px;
   }
-  .all-tasks-mode-btn {
-    width: 26px;
-    height: 26px;
-    color: var(--overlay1);
-  }
-  .all-tasks-mode-btn:hover  { background: var(--surface0); color: var(--text); }
-  .all-tasks-mode-btn.active { background: var(--surface0); color: var(--yellow); }
 
   /* ── Nav separator ────────────────────────────────────────────────────────── */
   .nav-separator {
@@ -184,13 +176,13 @@
     align-self: center;
   }
 
-  /* ── Nav row 2 disabled (All Tasks mode) ─────────────────────────────────── */
+  /* ── Nav row 2 disabled (system folders / Outputs) ──────────────────────── */
   .nav-row-disabled {
     opacity: 0.3;
     pointer-events: none;
   }
 
-  /* ── All Tasks aggregate sections ────────────────────────────────────────── */
+  /* ── Task-listing sections (listing modals) ─────────────────────────────── */
   .tasks-section { display: flex; flex-direction: column; gap: 5px; }
   .tasks-section-high-priority {
     padding-bottom: 12px;

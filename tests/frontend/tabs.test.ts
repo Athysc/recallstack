@@ -14,7 +14,7 @@ import {
 function tab(id: number, path: string, outputs = false, external = false): EditorTab {
   return {
     id, path, title: path, isNew: false, dirty: false, isOutputsFile: outputs,
-    outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false,
+    outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false,
     isExternalFile: external, externalPath: external ? path : null, externalFileHandle: null, pinned: false,
   };
 }
@@ -34,7 +34,7 @@ test("document snapshots update dirty state and closed-history bounds", () => {
   const item = tab(1, "a.md");
   assert.equal(syncTabFromDocument(item, {
     path: "a.md", content: "changed", savedContent: "saved", isNew: false, isOutputsFile: false,
-    outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false, returnToAllTasks: false,
+    outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false,
   }, path => path || "Untitled"), true);
   assert.equal(item.dirty, true);
   const history: Array<{ path: string; title: string }> = [];

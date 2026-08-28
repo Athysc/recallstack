@@ -1,5 +1,5 @@
 export type AppView = "welcome" | "list" | "search" | "editor" | "calendar";
-export type NavigationMode = "folder" | "all-tasks" | "outputs" | "search" | "calendar";
+export type NavigationMode = "folder" | "outputs" | "search" | "calendar";
 
 export interface CurrentViewState {
   view: AppView;
@@ -53,10 +53,9 @@ export function createCurrentViewStore(initial?: Partial<CurrentViewState>) {
 // outputsMode at all, so toggling sort while viewing Outputs updated the
 // button state but never re-rendered the file grid) was exactly a missing
 // case here.
-export type ListReloadMode = "all-tasks" | "outputs" | "folder" | "none";
+export type ListReloadMode = "outputs" | "folder" | "none";
 
 export interface ListReloadState {
-  allTasksMode: boolean;
   outputsMode: boolean;
   outputsActiveFolder: unknown;
   l1Active: unknown;
@@ -64,7 +63,6 @@ export interface ListReloadState {
 }
 
 export function listReloadMode(state: ListReloadState): ListReloadMode {
-  if (state.allTasksMode) return "all-tasks";
   if (state.outputsMode) return state.outputsActiveFolder ? "outputs" : "none";
   if (state.l2Active || state.l1Active) return "folder";
   return "none";

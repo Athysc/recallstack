@@ -178,9 +178,9 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   {
     id: "view.reading-toggle",
     combo: "I",
-    label: "Edit / preview (reading mode)",
+    label: "Edit / preview",
     description:
-      "In reading mode a note opens in the preview; I (insert) switches to editing and Esc switches back. Classic editor mode ignores both.",
+      "A note opens in the preview; I (insert) switches to editing and Esc switches back.",
     category: "Views & Panels",
     editorOnly: true,
   },

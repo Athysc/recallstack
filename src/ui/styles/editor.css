@@ -210,7 +210,6 @@
     background: var(--base);
     color: var(--text);
     border: none;
-    border-right: 1px solid var(--surface0);
     outline: none;
     resize: none;
     margin: 2px;
@@ -240,17 +239,6 @@
   #md-editor .cm-activeLine, #md-editor .cm-activeLineGutter { background: color-mix(in srgb, var(--surface0) 48%, transparent); }
   #md-editor .cm-activeLine { text-shadow: 0 0 5px color-mix(in srgb, var(--text) 32%, transparent); }
   #md-editor .cm-selectionBackground { background: color-mix(in srgb, var(--blue) 28%, transparent) !important; }
-
-  .resizer {
-    flex-shrink: 0;
-    width: 5px;
-    background: var(--surface0);
-    cursor: col-resize;
-    transition: background 0.15s;
-    z-index: 1;
-  }
-  .resizer:hover,
-  .resizer.dragging { background: var(--mauve); }
 
   #preview-output {
     flex: 1;

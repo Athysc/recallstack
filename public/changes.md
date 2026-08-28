@@ -34,26 +34,32 @@ small optional **overlay** merged on top; it ships as a two-theme sample
 (Osaka Jade + Lupine) to copy from. **Settings → External theme file** and
 **Use sample themes** are unchanged.
 
-### Reading editor mode
+### One editor: preview-first, `I` to edit
 
-**Settings → Editor Mode** switches the editor between two modes. **Reading** is
-now the default.
+The old side-by-side "editor + live preview" split is gone. A note now opens
+showing only the rendered **Preview** at full width. Press **`I`** (as in
+*insert*) to switch to editing; press **`Esc`** while editing to go back to the
+preview, which re-renders once with your latest changes. A new, empty note opens
+straight in editing.
 
-- **Reading mode** — a note opens showing only the rendered **Preview** at full
-  width. Press **`I`** (as in *insert*) to switch to editing; press **`Esc`**
-  while editing to go back to the preview, which re-renders once with your latest
-  changes. A new, empty note opens straight in editing.
-- While you are editing in reading mode the preview is **not** rebuilt on every
-  keystroke, so typing stays fast in large notes — it catches up when you press
-  `Esc`. Pressing **Presentation** while editing drops back to a fresh preview
-  first, then starts the presentation.
-- **Classic mode** — the previous always-on side-by-side split with a live
-  preview that updates as you type and a draggable divider. `I` and `Esc` carry
-  no special meaning.
+- While you are editing the preview is **not** rebuilt on every keystroke, so
+  typing stays fast in large notes — it catches up when you press `Esc`.
+  Pressing **Presentation** while editing drops back to a fresh preview first,
+  then starts the presentation.
+- The **Settings → Editor Mode** tile, the draggable pane divider, and the
+  *Toggle Editor Mode* command are removed — there is nothing left to toggle.
+  The `Ctrl+K` sheet and command palette keep *Edit / Preview* (`I` / `Esc`).
 
-The choice persists across restarts and is also on the `Ctrl+K` shortcut sheet
-and in the command palette (*Toggle Editor Mode*, *Reading Mode: Edit /
-Preview*).
+### Settings pared down
+
+- **Line Numbers** tile removed — line numbers are always on.
+- **Editor Mode** tile removed (see above).
+- **All Tasks** tile removed, along with the old combined "All Tasks" view it
+  toggled: the aggregate in-place task list, its status/folder grouping button,
+  and the per-workspace grouping preference. The **`Ctrl+T` Task listing modal**
+  (and its Nav Row 1 icon) is the task workflow now.
+- The Theme list in Settings is shorter, and the tile grid is tighter now that
+  it holds six tiles instead of nine.
 
 ### Modal listing windows (Notes / Tasks / Working Tasks)
 
@@ -131,6 +137,47 @@ Quattro).
 nothing open it saves and jumps to today's Daily Journal. When no note, task, or
 working task is open, RecallStack shows the Daily Journal instead of an empty
 file list.
+
+### Faster saves — automatic file version history removed
+
+RecallStack no longer keeps a per-note version history. Every save previously
+copied the whole file into a hidden history store and then swept that store to
+enforce a 90-day / 250 MB retention limit — work that ran on **every** write
+(explicit save, autosave, each date-field edit) and got slower the longer the
+app had been used, showing up as a pause when creating or saving notes.
+
+- Saving, autosave, and creating a note / task / working task are now
+  noticeably quicker, and stay quick regardless of history size.
+- The **Safety & Workspace Tools → Current Note History** panel and the
+  `list_versions` / `restore_version` commands are gone.
+- Crash-recovery drafts (unsaved edits after a crash) are unchanged — only the
+  save-time versioning of existing files is removed.
+- The old `…/safety/<workspace>/versions/` folder in app data is now inert and
+  can be deleted to reclaim space.
+
+### Deletes go to the system trash
+
+Deleting a note, task, or folder now sends it straight to the operating
+system's trash — the **Recycle Bin** on Windows, **Trash** on macOS, the
+**freedesktop Trash** on Linux — instead of a `Data/.recallstack-trash/` folder
+inside the workspace.
+
+- Recover a deleted file from your normal file manager / desktop trash.
+- The in-app **Safety & Workspace Tools → Inspect Trash** panel and the
+  `trash_path` / `list_trash` / `restore_trash` / `empty_trash` /
+  `move_to_trash` commands are gone.
+- A leftover `Data/.recallstack-trash/` folder from an earlier version is left
+  alone — still skipped by the index, backups, and health checks — and can be
+  deleted by hand.
+- Editor undo/redo (`Ctrl+Z` / `Ctrl+Shift+Z`, up to 50 steps) is a separate,
+  in-editor feature and is unaffected by either of these changes.
+
+### Daily journal carry-forward fixed
+
+Opening the Daily Journal on a new day again seeds the new file with the
+contents of the most recent previous journal. A startup ordering bug meant the
+note catalog wasn't ready yet when the new journal was created, so it came up
+blank.
 
 ---
 

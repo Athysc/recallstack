@@ -1106,7 +1106,7 @@ pub fn read_note(state: State<'_, Arc<AppState>>, path: String) -> Result<Note, 
 
 #[tauri::command(async)]
 pub fn write_note(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     content: String,
@@ -1118,7 +1118,6 @@ pub fn write_note(
             return Err(err("Note does not exist; use create_note"));
         }
         state.record_internal_write(&format!("Data/{path}"));
-        let _ = safety::preserve_version(&app, &root, &note, &format!("Data/{path}"))?;
         let started = std::time::Instant::now();
         safety::atomic_write(&note, content.as_bytes())?;
         index_note(&root, &path, &content)?;
@@ -1155,24 +1154,6 @@ pub fn create_note(
             path,
             content,
         })
-    })
-}
-
-#[tauri::command(async)]
-pub fn move_to_trash(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    path: String,
-) -> Result<String, String> {
-    logged("move_to_trash", || {
-        let root = active_workspace(&state)?;
-        note_path(&root, &path)?;
-        let result = safety::trash_workspace_path(&app, &state, &format!("Data/{path}"))?;
-        remove_indexed_note(&open_db(&root)?, &path)?;
-        Ok(result
-            .recovery
-            .map(|recovery| recovery.id)
-            .unwrap_or(result.operation_id))
     })
 }
 

@@ -22,7 +22,7 @@ test("current view store publishes meaningful navigation transitions", () => {
 });
 
 test("list-reload dispatch has a branch for every active mode, including Outputs", () => {
-  const base = { allTasksMode: false, outputsMode: false, outputsActiveFolder: null, l1Active: null, l2Active: null };
+  const base = { outputsMode: false, outputsActiveFolder: null, l1Active: null, l2Active: null };
 
   // Regression case for the actual bug: Outputs mode active with a selected
   // folder must dispatch to "outputs", not silently fall through to "none"
@@ -32,14 +32,13 @@ test("list-reload dispatch has a branch for every active mode, including Outputs
   // root) has nothing to reload.
   assert.equal(listReloadMode({ ...base, outputsMode: true }), "none");
 
-  assert.equal(listReloadMode({ ...base, allTasksMode: true }), "all-tasks");
   assert.equal(listReloadMode({ ...base, l1Active: { name: "project" } }), "folder");
   assert.equal(listReloadMode({ ...base, l2Active: { name: "notes" } }), "folder");
   assert.equal(listReloadMode(base), "none");
 
-  // allTasksMode takes priority over a stale outputsMode/l1Active, matching
-  // reloadActiveList()'s original if/else-if ordering.
-  assert.equal(listReloadMode({ ...base, allTasksMode: true, outputsMode: true, outputsActiveFolder: { name: "x" }, l1Active: { name: "y" } }), "all-tasks");
+  // Outputs mode takes priority over a stale l1Active, matching
+  // reloadActiveList()'s if/else-if ordering.
+  assert.equal(listReloadMode({ ...base, outputsMode: true, outputsActiveFolder: { name: "x" }, l1Active: { name: "y" } }), "outputs");
 });
 
 test("last folder views round-trip and reject malformed persisted state", () => {

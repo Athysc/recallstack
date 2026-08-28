@@ -408,12 +408,6 @@ import { assertPortableName } from "./portable-names";
       return invoke('fs_write_text_versioned', { path, text, expectedVersion });
     },
     readPortableText(name) { return invoke('portable_read_text', { name }); },
-    trash(path) { return invoke('trash_path', { path }); },
-    listTrash() { return invoke('list_trash'); },
-    restoreTrash(id, restoreAs = null) { return invoke('restore_trash', { id, restoreAs }); },
-    emptyTrash() { return invoke('empty_trash'); },
-    listVersions(path = null) { return invoke('list_versions', { path }); },
-    restoreVersion(id) { return invoke('restore_version', { id }); },
     saveDraft(path, text) { return invoke('save_draft', { path, text }); },
     loadDraft(path) { return invoke('load_draft', { path }); },
     clearDraft(path) { return invoke('clear_draft', { path }); },

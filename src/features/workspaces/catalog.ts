@@ -64,7 +64,6 @@ export function selectInitialWorkspace(
 export interface WorkspaceNavigationPreferences {
   row1Mode: "buttons" | "combo";
   row2Mode: "buttons" | "combo";
-  allTasksStatusMode: boolean;
 }
 
 export function readWorkspaceNavigationPreferences(
@@ -74,6 +73,5 @@ export function readWorkspaceNavigationPreferences(
   return {
     row1Mode: storage.getItem(`pkm-nav1-mode-${workspace}`) === "combo" ? "combo" : "buttons",
     row2Mode: storage.getItem(`pkm-nav2-mode-${workspace}`) === "combo" ? "combo" : "buttons",
-    allTasksStatusMode: storage.getItem(`pkm-all-tasks-mode-${workspace}`) !== "folder",
   };
 }

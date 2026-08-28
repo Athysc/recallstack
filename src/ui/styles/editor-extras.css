@@ -4,7 +4,6 @@
   .btn-icon.cursor-pos-active  { color: var(--blue); background: var(--surface0); }
   .btn-icon.collapse-default-active { color: var(--blue); background: var(--surface0); }
   .btn-icon.system-folders-visible { color: var(--blue); background: var(--surface0); }
-  .btn-icon.all-tasks-disabled { color: var(--red); background: var(--surface0); }
 
   /* ── Markdown Reference modal ────────────────────────────────────────────── */
   #modal-md-ref {

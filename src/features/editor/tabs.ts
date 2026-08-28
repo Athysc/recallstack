@@ -8,7 +8,6 @@ export interface EditorTab {
   outputsFileHandle: FileSystemFileHandle | null;
   outputsDirHandle: FileSystemDirectoryHandle | null;
   returnToOutputs: boolean;
-  returnToAllTasks: boolean;
   // True for a file opened "Temporary — view/edit in place" from Open/Import
   // Files: it lives outside the workspace at its original OS location. Save
   // writes back there directly; it can never be archived, and Move behaves
@@ -36,7 +35,6 @@ export interface EditorDocumentSnapshot {
   outputsFileHandle: FileSystemFileHandle | null;
   outputsDirHandle: FileSystemDirectoryHandle | null;
   returnToOutputs: boolean;
-  returnToAllTasks: boolean;
   isExternalFile: boolean;
   externalPath: string | null;
   externalFileHandle: FileSystemFileHandle | null;
@@ -98,7 +96,6 @@ export function syncTabFromDocument(
     outputsFileHandle: snapshot.outputsFileHandle,
     outputsDirHandle: snapshot.outputsDirHandle,
     returnToOutputs: snapshot.returnToOutputs,
-    returnToAllTasks: snapshot.returnToAllTasks,
     isExternalFile: snapshot.isExternalFile,
     externalPath: snapshot.externalPath,
     externalFileHandle: snapshot.externalFileHandle,

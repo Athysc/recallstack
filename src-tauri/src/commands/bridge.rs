@@ -376,7 +376,6 @@ pub fn fs_read_text_versioned(
 
 #[tauri::command(async)]
 pub fn fs_write(
-    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     bytes: Vec<u8>,
@@ -387,8 +386,6 @@ pub fn fs_write(
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let workspace = root(&state)?;
-        let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
         record_internal_write(&state, &target)?;
         let started = std::time::Instant::now();
         safety::atomic_write(&target, &bytes)?;
@@ -398,7 +395,6 @@ pub fn fs_write(
 
 #[tauri::command(async)]
 pub fn fs_write_text(
-    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     text: String,
@@ -409,8 +405,6 @@ pub fn fs_write_text(
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let workspace = root(&state)?;
-        let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
         record_internal_write(&state, &target)?;
         let started = std::time::Instant::now();
         safety::atomic_write(&target, text.as_bytes())?;
@@ -420,7 +414,6 @@ pub fn fs_write_text(
 
 #[tauri::command(async)]
 pub fn fs_write_text_versioned(
-    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     text: String,
@@ -441,7 +434,6 @@ pub fn fs_write_text_versioned(
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let _ = safety::preserve_version(&app, &workspace, &target, &path)?;
         record_internal_write(&state, &target)?;
         let started = std::time::Instant::now();
         safety::atomic_write(&target, text.as_bytes())?;
@@ -462,14 +454,20 @@ pub fn fs_create_dir(state: State<'_, Arc<AppState>>, path: String) -> Result<()
 
 #[tauri::command(async)]
 pub fn fs_remove(
-    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     path: String,
     recursive: bool,
-) -> Result<safety::MutationResult, String> {
+) -> Result<(), String> {
     logged("fs_remove", || {
         let _ = recursive;
-        safety::trash_workspace_path(&app, &state, &path)
+        let target = safe_path(&state, &path)?;
+        if !target.exists() {
+            return Err("The item no longer exists".to_string());
+        }
+        record_internal_write(&state, &target)?;
+        // Send it to the OS trash (Recycle Bin / Trash / freedesktop Trash) so
+        // recovery is the platform's own, not an app-managed folder.
+        trash::delete(&target).map_err(|error| error.to_string())
     })
 }
 

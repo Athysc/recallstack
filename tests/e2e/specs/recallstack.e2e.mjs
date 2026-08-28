@@ -128,9 +128,6 @@ describe("RecallStack desktop smoke flow", () => {
     await browser.execute(path => {
       localStorage.clear();
       localStorage.setItem("recallstack-desktop-workspace-path", path);
-      // This smoke flow asserts the live editor+preview split and its visual
-      // baselines; pin the classic editor mode. Reading mode has its own test.
-      localStorage.setItem("pkm-editor-mode", "classic");
     }, workspacePath);
     await browser.refresh();
     await waitForVisible("#app");
@@ -432,7 +429,6 @@ describe("RecallStack desktop smoke flow", () => {
     await browser.execute(() => localStorage.clear());
     await browser.execute(path => {
       localStorage.setItem("recallstack-desktop-workspace-path", path);
-      // No pkm-editor-mode set → the default reading mode is active.
     }, workspacePath);
     await browser.refresh();
     await waitForVisible("#app");

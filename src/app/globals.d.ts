@@ -19,12 +19,6 @@ interface RecallStackNativeBridge {
   readText(path: string): Promise<{ text: string; version: string }>;
   writeText(path: string, text: string, expectedVersion?: string | null): Promise<string>;
   readPortableText(name: "readme.md" | "changes.md" | "theme.json"): Promise<string | null>;
-  trash(path: string): Promise<Record<string, unknown>>;
-  listTrash(): Promise<Array<Record<string, unknown>>>;
-  restoreTrash(id: string, restoreAs?: string | null): Promise<Record<string, unknown>>;
-  emptyTrash(): Promise<number>;
-  listVersions(path?: string | null): Promise<Array<Record<string, unknown>>>;
-  restoreVersion(id: string): Promise<Record<string, unknown>>;
   saveDraft(path: string, text: string): Promise<void>;
   loadDraft(path: string): Promise<string | null>;
   clearDraft(path: string): Promise<void>;

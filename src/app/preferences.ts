@@ -1,13 +1,10 @@
 export const PREFERENCE_KEYS = Object.freeze({
   activeWorkspace: "pkm-active-workspace",
-  allTasksEnabled: "pkm-all-tasks-enabled",
   appTitle: "pkm-app-title",
   collapseDefault: "pkm-collapse-default",
   contentZoom: "pkm-content-zoom",
   cursorLoadPosition: "pkm-cursor-load-pos",
-  editorMode: "pkm-editor-mode",
   loadRemoteMedia: "pkm-load-remote-media",
-  lineNumbers: "pkm-line-numbers",
   showSystemFolders: "pkm-show-system-folders",
   wordWrap: "pkm-word-wrap",
   workspaceRootPath: "recallstack-workspace-root-path",
@@ -18,7 +15,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   notesListingSort: "pkm-notes-listing-sort",
 });
 
-export type WorkspacePreference = "theme" | "nav1-mode" | "nav2-mode" | "all-tasks-mode" | "last-view";
+export type WorkspacePreference = "theme" | "nav1-mode" | "nav2-mode" | "last-view";
 
 export function workspacePreferenceKey(kind: WorkspacePreference, workspace: string): string {
   return `pkm-${kind}-${workspace}`;

@@ -279,10 +279,8 @@ Results are written to `performance-results/windows.json` or `performance-result
 | Folder nav mode icon | Toggle Nav Row 1 between **buttons** and **dropdown** display; persists per workspace |
 | Subfolder nav mode icon | Toggle Nav Row 2 between **buttons** and **dropdown** display; persists per workspace |
 | Word wrap icon | Toggle word wrap on/off in the editor; persists globally |
-| Line numbers icon | Toggle CodeMirror line numbers on/off; persists globally |
 | Cursor position icon | Toggle where the cursor lands when opening a file — **First Line** (default) or **Last Line**; persists globally |
 | Collapse icon | Toggle whether collapsible preview sections are **expanded** (default) or **collapsed** by default on render; persists globally. Also immediately opens/closes all collapsible sections in the current preview |
-| Editor Mode icon | Switch between **Reading** (default — a note opens in the preview; `I` edits, `Esc` returns) and **Classic** (live side-by-side editor + preview); persists globally. See [Reading Mode](#reading-mode) |
 | Book icon | Markdown syntax reference |
 | Info icon | User guide |
 | Clock icon | What's New — change log for this version of RecallStack |
@@ -464,7 +462,7 @@ RecallStack saves your work automatically — in most situations you never need 
 | Move icon | — | Move file to a different folder or to a top-level folder **root** destination |
 | Archive icon | — | Move file to `archived/` subfolder; hidden for root-level notes |
 | Restore icon | — | Move archived file back to active folder |
-| Trash icon | — | Move the file to recoverable RecallStack Trash |
+| Trash icon | — | Send the file to the OS trash (Recycle Bin / Trash / freedesktop Trash) |
 | **Cancel** | `Esc` | Exit editor; discards new unsaved notes silently |
 | **+ New** *(editor)* | — | Save the current file, then open the filename prompt for a new note or task in the active subfolder or active **root** |
 | Presentation icon | — | Enter full-screen presentation mode (Escape to exit) |
@@ -488,30 +486,15 @@ The small calendar-action button beside **Start Date** or **Completed Date** mar
 
 Priority and Status controls are borderless until selected; the selected option is outlined to make the active choice clear.
 
-### Split Pane
+### Editor and preview
 
-The editor is split into two panes:
-
-- **Left — Markdown**: CodeMirror 6 source editor with Markdown highlighting, folding, history, optional line numbers, current-line highlighting, a subtle current-line text glow, a glowing caret, and note/tag completion
-- **Right — Preview**: Live-rendered output
-
-Drag the **divider bar** between the panes to resize them.
-
-### Reading Mode
-
-**Settings → Editor Mode** chooses how the editor behaves. **Reading** is the default.
-
-**Reading mode** — a note opens showing only the rendered **Preview** (full width; the Markdown pane is collapsed).
+A note opens showing only the rendered **Preview** (full width). Behind it is a CodeMirror 6 source editor with Markdown highlighting, folding, undo/redo history, line numbers, current-line highlighting, a subtle current-line text glow, a glowing caret, and note/tag completion.
 
 - Press **`I`** (as in *insert*) to switch to editing — the Markdown pane takes over full width.
 - Press **`Esc`** while editing to return to the preview; it re-renders once with your latest changes.
 - A new, empty note opens straight in editing so you can start typing.
-- While you are editing, the preview is **not** re-rendered on every keystroke — that is the point of reading mode, and it keeps typing fast in large notes. It catches up the moment you press `Esc`.
+- While you are editing, the preview is **not** re-rendered on every keystroke — this keeps typing fast in large notes. It catches up the moment you press `Esc`.
 - Pressing the **Presentation** button while editing first drops you back to a fresh preview, then starts the presentation.
-
-**Classic mode** — the familiar side-by-side split: the Markdown editor on the left, a **live preview that updates as you type** on the right, with a draggable divider. `I` and `Esc` have no special meaning here.
-
-Switching modes takes effect immediately for the note you have open. The choice is remembered across restarts.
 
 ---
 
@@ -630,9 +613,7 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 | Command | Shortcut |
 |---|---|
 | Toggle Presentation Mode | — |
-| Toggle Editor Line Numbers | — |
-| Toggle Editor Mode (Reading / Classic) | — |
-| Reading Mode: Edit / Preview | `I` (edit) · `Esc` (preview) |
+| Edit / Preview | `I` (edit) · `Esc` (preview) |
 | Change Theme *(opens an argument list)* | — |
 | Open Theme Switcher | `Ctrl+Shift+T` |
 | Show Notes Listing | `Ctrl+L` |
@@ -1195,7 +1176,7 @@ Use a Working Task for an active task you want to keep separate from the main Ta
 
 Working Tasks remain editable and savable, but cannot be stamped, converted, copied, moved, archived, restored, or deleted until returned to the main Tasks list.
 
-### All Tasks View
+### Task Listing
 
 Click the **Task listing** icon in Nav Row 1, or press **Ctrl+T**, to see tasks from the workspace-level `tasks/` folder in the listing modal. It is sectioned as **Tasks**, **Completed**, **In QA Review**, **Marked for Deployment**, **Deployed**, and **Backlog / Deferred**, with each row color-coded by priority. Use arrows or **J/K**, type the displayed one- or two-letter code, press **Enter** to open (or **Ctrl+Enter** to pin). The header **Sort** button toggles A–Z / Modified, and **Show archived** switches to `tasks/archived/`. Each row's trailing button is **→ Working** (Tasks section), **Archive** (status sections), or **Restore** (when showing archived). Press **Ctrl+N** to create a new task.
 
