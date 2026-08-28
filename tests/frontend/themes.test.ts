@@ -5,19 +5,30 @@ import test from "node:test";
 import { parseThemeCatalog, parseExternalThemeCatalog } from "../../src/features/themes/catalog.ts";
 import { colorContrastRatio, darkenHex, hexToRgba, mixHex, readableThemeAccent, themeRuntimeState } from "../../src/features/themes/runtime.ts";
 
-test("the shipped external theme catalog is valid", async () => {
-  const source = await readFile(new URL("../../themes.json", import.meta.url), "utf8");
+test("the built-in theme catalog is valid", async () => {
+  const source = await readFile(new URL("../../builtin-themes.json", import.meta.url), "utf8");
   const catalog = parseThemeCatalog(source);
 
   assert.equal(catalog.version, 1);
-  assert.ok(catalog.themes.length > 1);
+  assert.ok(catalog.themes.length >= 20, `expected the full built-in set, got ${catalog.themes.length}`);
   assert.ok(catalog.themes.some((theme) => theme.id === catalog.defaultTheme));
   assert.ok(catalog.themes.some((theme) => theme.mode === "light"));
   assert.ok(catalog.themes.some((theme) => theme.mode === "dark"));
 });
 
-test("active-tab accents retain readable contrast in every shipped theme", async () => {
+test("the bundled theme.json sample is a valid catalog to copy from", async () => {
   const source = await readFile(new URL("../../themes.json", import.meta.url), "utf8");
+  const catalog = parseThemeCatalog(source);
+
+  assert.equal(catalog.version, 1);
+  assert.ok(catalog.themes.length >= 1 && catalog.themes.length <= 4, "the sample stays small");
+  assert.ok(catalog.themes.some((theme) => theme.id === catalog.defaultTheme));
+  assert.ok(catalog.themes.some((theme) => theme.mode === "light"));
+  assert.ok(catalog.themes.some((theme) => theme.mode === "dark"));
+});
+
+test("active-tab accents retain readable contrast in every built-in theme", async () => {
+  const source = await readFile(new URL("../../builtin-themes.json", import.meta.url), "utf8");
   const catalog = parseThemeCatalog(source);
   for (const theme of catalog.themes) {
     const background = mixHex(theme.variables["--mauve"], theme.variables["--mantle"], 0.14);
@@ -26,8 +37,23 @@ test("active-tab accents retain readable contrast in every shipped theme", async
   }
 });
 
+test("no built-in theme reuses one colour for two palette roles", async () => {
+  const source = await readFile(new URL("../../builtin-themes.json", import.meta.url), "utf8");
+  const catalog = parseThemeCatalog(source);
+  const roles = [
+    "--base", "--mantle", "--crust", "--surface0", "--surface1", "--surface2",
+    "--overlay0", "--overlay1", "--subtext0", "--subtext1", "--text",
+    "--lavender", "--blue", "--sapphire", "--green", "--yellow", "--peach",
+    "--red", "--mauve", "--pink",
+  ];
+  for (const theme of catalog.themes) {
+    const used = roles.map((role) => theme.variables[role].toLowerCase());
+    assert.equal(new Set(used).size, roles.length, `${theme.id} repeats a colour across roles`);
+  }
+});
+
 test("theme validation rejects duplicate ids and missing colors", async () => {
-  const source = await readFile(new URL("../../themes.json", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../builtin-themes.json", import.meta.url), "utf8");
   const duplicate = JSON.parse(source);
   duplicate.themes[1].id = duplicate.themes[0].id;
   assert.throws(() => parseThemeCatalog(JSON.stringify(duplicate)), /duplicated/);
@@ -38,7 +64,7 @@ test("theme validation rejects duplicate ids and missing colors", async () => {
 });
 
 test("theme runtime derives indexed state and color tints", async () => {
-  const source = await readFile(new URL("../../themes.json", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../builtin-themes.json", import.meta.url), "utf8");
   const catalog = parseThemeCatalog(source);
   const state = themeRuntimeState(catalog);
   assert.equal(state.defaultTheme, catalog.defaultTheme);

@@ -126,6 +126,9 @@ async function writeArtifactMetadata() {
 async function copyPortableDocuments(destination) {
   await cp(resolve(root, "portable/readme.md"), resolve(destination, "readme.md"));
   await cp(resolve(root, "portable/changes.md"), resolve(destination, "changes.md"));
+  // theme.json beside the executable is an optional user overlay (a copy-me
+  // sample); builtin-themes.json is the actual shipped catalog, also embedded.
+  await cp(resolve(root, "builtin-themes.json"), resolve(destination, "builtin-themes.json"));
   await cp(resolve(root, "themes.json"), resolve(destination, "theme.json"));
 }
 

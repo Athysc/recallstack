@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 const workspacePath = resolve(import.meta.dirname, "../.workspace");
 const screenshotPath = resolve(import.meta.dirname, "../.visual-output/actual");
-const themeCatalog = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../../themes.json"), "utf8"));
+const themeCatalog = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../../builtin-themes.json"), "utf8"));
 const themeBaseColors = new Map(themeCatalog.themes.map(theme => [theme.id, theme.variables["--base"]]));
 const viewportSizes = [
   { width: 900, height: 620, tag: "compact" },

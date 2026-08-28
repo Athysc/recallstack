@@ -118,7 +118,7 @@ For Linux tarball/AppImage details beyond Arch, macOS build and Gatekeeper notes
 
 The desktop build runs through `index.html` and the TypeScript entry at `src/main.ts`. Screenshot and native end-to-end tests cover the production interface directly; the former monolithic HTML parity fixture has been retired. A Tauri workspace facade exposes native Rust filesystem commands to the frontend. Rust SQLite is the sole search index; there is no browser/IndexedDB or sql.js runtime. Markdown remains canonical in the selected workspace.
 
-The in-app guide, change history, and editable theme catalog are loaded from `readme.md`, `changes.md`, and `theme.json` beside the executable. Embedded defaults and legacy workspace files provide fallbacks. See [docs/themes.md](docs/themes.md) for the theme schema.
+The in-app guide and change history are loaded from `readme.md` and `changes.md` beside the executable (embedded defaults are the fallback). The theme catalog is the embedded `builtin-themes.json`; an optional `theme.json` beside the executable adds themes on top of it. See [docs/themes.md](docs/themes.md) for the schema.
 
 ## Ownership and license
 

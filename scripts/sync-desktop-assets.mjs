@@ -15,6 +15,7 @@ const files = [
 for (const [source, destination] of files) {
   await copyFile(resolve(root, source), resolve(output, destination));
 }
+await copyFile(resolve(root, "builtin-themes.json"), resolve(root, "public", "builtin-themes.json"));
 await copyFile(resolve(root, "themes.json"), resolve(root, "public", "theme.json"));
 await copyFile(resolve(root, "external-themes.sample.json"), resolve(root, "public", "external-themes.sample.json"));
 await copyFile(resolve(root, "portable", "readme.md"), resolve(root, "public", "readme.md"));

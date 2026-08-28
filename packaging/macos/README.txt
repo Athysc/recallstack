@@ -2,7 +2,7 @@ RecallStack Portable for macOS
 ===============================
 
 1. Extract the entire ZIP to a folder you can write to. Keep readme.md,
-   changes.md, and theme.json beside RecallStack.app.
+   changes.md, builtin-themes.json, and theme.json beside RecallStack.app.
 2. The universal RecallStack.app runs on both Apple Silicon and Intel Macs.
    No installation or administrator access is required.
 3. Choose a workspace folder containing Data/ when prompted.
@@ -25,4 +25,4 @@ workspace you select. Back up that workspace independently.
 
 Upgrade: close RecallStack, replace RecallStack.app, and reopen your workspace.
 
-The three sidecar files are editable. Restart RecallStack after editing theme.json.
+readme.md, changes.md, and theme.json are editable; builtin-themes.json is a copy of the embedded theme catalog. Restart RecallStack after editing theme.json.

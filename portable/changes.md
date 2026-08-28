@@ -4,6 +4,36 @@
 
 ## Version 0.1.4 — 2026-08-27 (unreleased)
 
+### Theme catalog rebuilt
+
+The old catalog is replaced. Six **Blazory** themes are kept (Vapor, Vapor Mist,
+Superhero, Superhero Mist, Minty, Minty Fog) and everything else is dropped in
+favour of **25 themes ported from Omarchy** — every theme in the local Omarchy
+install (`/usr/share/omarchy/themes/` plus `~/.config/omarchy/themes/`), keeping
+each one's name: Catppuccin, Catppuccin Latte, Tokyo Night, Nord, Gruvbox,
+Everforest, Kanagawa, Rose Pine, Flexoki Light, Ethereal, Ristretto, Osaka Jade,
+Lupine, Matte Black, Miasma, Lumon, Hackerman, Last Horizon, Retro 82, Solitude,
+Vantablack, White, Emerald Dream, Supergirl, and Wonder Woman.
+
+- Each Omarchy palette (~26 source colours) is refitted to RecallStack's fixed
+  set of colour roles: an 11-step light-to-dark background ramp built from the
+  theme's own tones, plus nine mutually distinct accents. **No colour is reused
+  for two different roles** in any theme.
+- Deliberately monochrome sources (Vantablack, White, Solitude) keep their look
+  but get nine faint, still-distinguishable accent tints so task priorities,
+  links, and date fields remain legible.
+- The default theme is now **Vapor**; a saved theme that no longer exists falls
+  back to it automatically.
+- 31 built-in themes total, in two selector groups: **Blazory** and **Omarchy**.
+
+**Where the themes live.** The 31 built-ins are now a dedicated
+`builtin-themes.json` compiled into the app — always loaded, and a stray
+`theme.json` in a workspace can no longer hide them. `theme.json` (beside the
+executable, or `<workspace>/Apps/theme.json`, or the bundled copy) is now a
+small optional **overlay** merged on top; it ships as a two-theme sample
+(Osaka Jade + Lupine) to copy from. **Settings → External theme file** and
+**Use sample themes** are unchanged.
+
 ### Reading editor mode
 
 **Settings → Editor Mode** switches the editor between two modes. **Reading** is

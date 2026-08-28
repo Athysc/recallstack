@@ -118,7 +118,7 @@ cd RecallStack-*/
 ./recallstack
 ```
 
-Keep `readme.md`, `changes.md`, and `theme.json` beside `recallstack`. The archive also includes a desktop entry and application icon under `share/`; these can be copied to the equivalent paths below `~/.local/share/` if desktop-menu integration is wanted.
+Keep `readme.md`, `changes.md`, `builtin-themes.json`, and `theme.json` beside `recallstack`. The archive also includes a desktop entry and application icon under `share/`; these can be copied to the equivalent paths below `~/.local/share/` if desktop-menu integration is wanted.
 
 #### Install as an Arch package
 
@@ -189,6 +189,7 @@ README.txt
 LICENSE
 readme.md
 changes.md
+builtin-themes.json
 theme.json
 ```
 
@@ -239,6 +240,7 @@ README.txt
 LICENSE
 readme.md
 changes.md
+builtin-themes.json
 theme.json
 ```
 
@@ -724,10 +726,11 @@ workspace; **Esc** reverts to the theme you started on. The Theme list in
 themes that are merged with the built-ins. The choice persists across restarts.
 One file can define multiple themes; any theme whose `id` collides with a
 built-in one is skipped. **Use sample themes** loads the bundled **Lupine** and
-**Osaka Jade** themes (from Omarchy Quattro) without picking a file. The format
-matches the built-in `themes.json` catalog — a `themes` array (or a bare array),
-each entry with `id`, `name`, `group`, `mode` (`"light"` / `"dark"`), and a
-`variables` map of the required `--base` … `--pink` six-digit hex colors.
+**Osaka Jade** example without picking a file. The format matches
+`builtin-themes.json` — a `themes` array (or a bare array), each entry with
+`id`, `name`, `group`, `mode` (`"light"` / `"dark"`), and a `variables` map of
+the required `--base` … `--pink` six-digit hex colors. `docs/themes.md` has the
+full schema.
 
 ## The Escape Key
 
@@ -1200,21 +1203,46 @@ Click the **Task listing** icon in Nav Row 1, or press **Ctrl+T**, to see tasks 
 
 ## Themes
 
-Theme preference is saved **per workspace**.
+Theme preference is saved **per workspace**. **31 built-in themes** ship in two groups,
+compiled into the app (`builtin-themes.json`). Every palette is fitted to RecallStack's
+fixed set of colour roles, and **no colour is reused for two different roles** in a
+theme — the background ladder is a strict light-to-dark ramp and the nine accents are
+all mutually distinct.
 
-| Theme | Style |
-|---|---|
-| Catppuccin | Dark — cool purple tones *(default)* |
-| Dracula | Dark — high contrast |
-| Tokyo Night | Dark — cool blue tones |
-| Rose Pine | Dark — warm mauve/rose tones |
-| Kanagawa | Dark — Japanese ink palette |
-| Citrus ☀ | Light — warm yellows |
-| Watermelon ☀ | Light — pink/red |
-| Peachy Sorbet ☀ | Light — peach |
-| Berry Smoothie ☀ | Light — berry |
-| Tropical Sherbet ☀ | Light — tropical |
-| Citrus Fizz ☀ | Light — bright citrus |
+**Blazory** — Vapor *(default)*, Vapor Mist ☀, Superhero, Superhero Mist ☀, Minty ☀, Minty Fog.
+
+**Omarchy** — ported from the themes in your Omarchy install (`/usr/share/omarchy/themes/`
+and `~/.config/omarchy/themes/`), keeping each theme's name:
+
+| Theme | | Theme | |
+|---|---|---|---|
+| Catppuccin | dark | Ristretto | dark |
+| Catppuccin Latte ☀ | light | Osaka Jade | dark |
+| Tokyo Night | dark | Lupine ☀ | light |
+| Nord | dark | Matte Black | dark |
+| Gruvbox | dark | Miasma | dark |
+| Everforest | dark | Lumon | dark |
+| Kanagawa | dark | Hackerman | dark |
+| Rose Pine ☀ | light | Last Horizon | dark |
+| Flexoki Light ☀ | light | Retro 82 | dark |
+| Ethereal | dark | Solitude | dark |
+| Vantablack | dark | White ☀ | light |
+| Emerald Dream | dark | Supergirl | dark |
+| Wonder Woman | dark | | |
+
+Deliberately monochrome sources (Vantablack, White, Solitude) keep their character but
+still get nine faint, distinguishable accent tints so priorities, links, and task states
+stay readable.
+
+### Adding your own themes
+
+The built-in catalog can't be removed, but you can add themes on top of it two ways:
+
+- **`theme.json`** — drop a JSON file beside the RecallStack executable (or at
+  `<workspace>/Apps/theme.json`). A small two-theme sample ships next to the
+  executable as a starting point. Ids that match a built-in are ignored.
+- **Settings → External theme file** — point RecallStack at any JSON file of extra
+  themes, or press **Use sample themes** to load the bundled Lupine + Osaka Jade example.
 
 ---
 

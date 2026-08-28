@@ -119,7 +119,7 @@ export function invalidationScopes(batch: WorkspaceChangeBatch): Set<Invalidatio
   }
   for (const change of batch.changes) {
     const path = normalizePath(change.path);
-    if (path === "Apps/themes.json") scopes.add("themes");
+    if (path === "Apps/theme.json") scopes.add("themes");
     if (change.entity === "directory") scopes.add("navigation");
     if (change.entity === "asset") scopes.add("assets");
     if (change.entity === "markdown") {

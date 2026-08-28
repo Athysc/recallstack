@@ -2,7 +2,7 @@ RecallStack Portable for Windows
 ================================
 
 1. Extract the entire ZIP to a folder you can write to. Keep readme.md,
-   changes.md, and theme.json beside RecallStack.exe.
+   changes.md, builtin-themes.json, and theme.json beside RecallStack.exe.
 2. Run RecallStack.exe. No installation or administrator access is required.
 3. Choose a workspace folder containing Data/ when prompted.
 
@@ -17,4 +17,4 @@ workspace you select. Back up that workspace independently.
 Upgrade: close RecallStack, replace RecallStack.exe, and reopen your workspace.
 The Windows artifact may be unsigned; Windows SmartScreen may show a warning.
 
-The three sidecar files are editable. Restart RecallStack after editing theme.json.
+readme.md, changes.md, and theme.json are editable; builtin-themes.json is a copy of the embedded theme catalog. Restart RecallStack after editing theme.json.

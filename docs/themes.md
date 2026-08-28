@@ -1,24 +1,38 @@
-# External Theme Catalog
+# Theme Catalogs
 
-RecallStack loads its editable theme catalog from:
+RecallStack builds its theme list from up to three layers. The first layer that
+claims a given theme `id` wins.
 
-```text
-theme.json beside RecallStack.exe (or beside the Linux executable)
-```
+1. **Built-in catalog** — `builtin-themes.json`, compiled into the app. This is
+   the shipped set (the **Blazory** and **Omarchy** groups). It always loads and
+   cannot be replaced by a file in a workspace.
+2. **`theme.json` overlay** — optional user additions, merged on top of the
+   built-ins. RecallStack looks for `theme.json` beside the executable, then
+   `<workspace>/Apps/theme.json`, then the bundled copy-me sample. Themes whose
+   `id` collides with a built-in are ignored. The portable archive ships a small
+   two-theme `theme.json` next to the executable so the format is easy to copy.
+3. **External theme file** — a JSON file chosen in **Settings → External theme
+   file**, merged last. See `external-themes.sample.json` and the **Use sample
+   themes** button.
 
-The portable archive supplies this file next to the executable. It contains every standard theme and can be edited with any text editor. Restart RecallStack after editing. A legacy `<workspace>/Apps/themes.json` remains a compatibility fallback when the portable sidecar is missing; the application also carries an embedded fallback so a missing or invalid external file cannot prevent startup.
+Restart RecallStack after editing any of these. If `builtin-themes.json` cannot
+be read, RecallStack falls back to a single embedded Catppuccin palette so
+startup is never blocked. RecallStack never rewrites any of these files.
 
 ## File Format
 
-The catalog is JSON with this top-level structure:
+`builtin-themes.json`, and a full `theme.json`, use this structure:
 
 ```json
 {
   "version": 1,
-  "defaultTheme": "catppuccin",
+  "defaultTheme": "vapor",
   "themes": []
 }
 ```
+
+A `theme.json` overlay or an external theme file may instead be a bare array of
+theme entries, or `{ "themes": [ ... ] }` with no `defaultTheme`.
 
 Each theme has selector metadata and a CSS-variable palette:
 
@@ -59,9 +73,10 @@ Each theme has selector metadata and a CSS-variable palette:
 - `name` is the text displayed in the theme selector.
 - `group` creates or selects a theme-selector group.
 - `mode` must be `light` or `dark`; RecallStack no longer guesses mode from the ID.
-- Every base palette variable shown above is required.
-- Additional supported variables, such as button, navigation, date-picker, glow, and font variables, are optional. Existing themes in `theme.json` provide examples.
-- `defaultTheme` must match one of the theme IDs.
-- The catalog is limited to 200 themes and 1 MB.
-
-If the portable catalog is invalid, RecallStack reports the validation error and uses its bundled catalog. It does not overwrite the external file. A minimal built-in Catppuccin palette remains available if both catalogs fail.
+- Every base palette variable shown above is required and must be a six-digit hex colour.
+- Additional supported variables — button, navigation, date-picker, glow, and font
+  variables — are optional. The built-in themes provide examples.
+- Every shipped built-in theme uses a distinct colour for each of the twenty base
+  roles; no colour is reused for two roles.
+- `defaultTheme` must match one of the theme IDs (full-catalog form only).
+- A full catalog is limited to 200 themes and 1 MB; an overlay or external file to 100.

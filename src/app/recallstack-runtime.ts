@@ -5715,7 +5715,7 @@ type TaskLocation = {
     const currentNativePath = currentPath ? normalizeAppPath(DB_WS_PREFIX + currentPath) : null;
     for (const change of changes) {
       if (change.entity === 'markdown') hasMarkdown = true;
-      if (!change.internal && change.path === 'Apps/themes.json') themeChanged = true;
+      if (!change.internal && change.path === 'Apps/theme.json') themeChanged = true;
       if (!bulk) {
         if (currentNativePath) void handleExternalEditorChange(change, currentNativePath);
         if (!affectsActiveList && !change.internal && changeAffectsActiveList(change)) affectsActiveList = true;
@@ -7941,17 +7941,27 @@ type TaskLocation = {
 
   const EXTERNAL_THEME_PATH_KEY = PREFERENCE_KEYS.externalThemePath;
   const SAMPLE_EXTERNAL_THEMES = '__bundled-sample__';
+  // The catalog is three layers, merged newest-wins-nothing (first id seen wins):
+  //   1. builtinThemeCatalog — the shipped built-in set (bundled builtin-themes.json)
+  //   2. catalogOverlayDefs  — optional user additions from theme.json (sidecar /
+  //      workspace Apps/theme.json / bundled copy-me sample)
+  //   3. externalThemeDefs   — the user's chosen external theme file (Settings)
   let builtinThemeCatalog: ThemeCatalog = FALLBACK_THEME_CATALOG;
+  let catalogOverlayDefs: ThemeDefinition[] = [];
   let externalThemeDefs: ThemeDefinition[] = [];
 
   function rebuildThemeRuntime() {
+    const seen = new Set(builtinThemeCatalog.themes.map(theme => theme.id));
+    const additions: ThemeDefinition[] = [];
+    for (const theme of [...catalogOverlayDefs, ...externalThemeDefs]) {
+      if (seen.has(theme.id)) continue;
+      seen.add(theme.id);
+      additions.push(theme);
+    }
     const merged: ThemeCatalog = {
       version: 1,
       defaultTheme: builtinThemeCatalog.defaultTheme,
-      themes: [
-        ...builtinThemeCatalog.themes,
-        ...externalThemeDefs.filter(theme => !builtinThemeCatalog.themes.some(builtin => builtin.id === theme.id)),
-      ],
+      themes: [...builtinThemeCatalog.themes, ...additions],
     };
     const state = themeRuntimeState(merged);
     THEMES = state.variables;
@@ -7988,49 +7998,57 @@ type TaskLocation = {
     return file.text();
   }
 
-  async function loadBuiltinThemes() {
-    let text = null;
-    let source = 'portable';
+  // The shipped built-in catalog. Always the bundled builtin-themes.json — it is
+  // part of the app and cannot be replaced by a stray file in a workspace.
+  async function loadBuiltinCatalog() {
+    try {
+      installThemeConfig(parseThemeConfig(await bundledPortableText('builtin-themes.json')));
+      return true;
+    } catch (error: any) {
+      installThemeConfig(FALLBACK_THEME_CONFIG);
+      toast('Built-in theme catalog unavailable: ' + (error?.message || error), 'error');
+      return false;
+    }
+  }
+
+  // Optional user additions merged on top of the built-ins: theme.json beside the
+  // executable, else <workspace>/Apps/theme.json, else the bundled copy-me sample.
+  // Parsed leniently (a bare array or { themes: [...] }); ids that collide with a
+  // built-in are ignored.
+  async function loadCatalogOverlay() {
+    let text: string | null = null;
+    let source = 'theme.json beside the executable';
     try {
       text = await portableSidecarText('theme.json');
     } catch (portableError: any) {
       console.warn('Could not read theme.json beside the executable', portableError);
     }
-
     if (text === null) {
-      source = 'workspace';
+      source = 'Apps/theme.json';
       try {
-        text = await workspaceAppText('themes.json');
+        text = await workspaceAppText('theme.json');
       } catch {
-        source = 'bundled';
+        source = 'bundled sample';
         try {
           text = await bundledPortableText('theme.json');
-        } catch (bundledError: any) {
-          installThemeConfig(FALLBACK_THEME_CONFIG);
-          toast('Theme catalog unavailable: ' + bundledError.message, 'error');
-          return false;
+        } catch {
+          catalogOverlayDefs = [];
+          rebuildThemeRuntime();
+          return;
         }
       }
     }
-
     try {
-      installThemeConfig(parseThemeConfig(text));
-    } catch (externalError: any) {
-      if (source !== 'bundled') {
-        try {
-          installThemeConfig(parseThemeConfig(await bundledPortableText('theme.json')));
-          const label = source === 'portable' ? 'theme.json beside the executable' : 'Apps/themes.json';
-          toast(label + ' is invalid; using bundled themes. ' + externalError.message, 'error');
-          return false;
-        } catch (bundledError: any) {
-          console.error('Bundled theme fallback failed', bundledError);
-        }
+      catalogOverlayDefs = parseExternalThemeCatalog(text);
+    } catch (error: any) {
+      catalogOverlayDefs = [];
+      if (source !== 'bundled sample') {
+        toast(source + ' is invalid; ignoring it. ' + (error?.message || error), 'error');
+      } else {
+        console.warn('Bundled theme.json sample is invalid', error);
       }
-      installThemeConfig(FALLBACK_THEME_CONFIG);
-      toast('Could not load themes: ' + externalError.message, 'error');
-      return false;
     }
-    return true;
+    rebuildThemeRuntime();
   }
 
   // ── External theme file (user-selected JSON of extra themes) ────────────────
@@ -8062,8 +8080,12 @@ type TaskLocation = {
       const text = await readExternalThemeText(source);
       if (text === null) { externalThemeDefs = []; rebuildThemeRuntime(); return; }
       const parsed = parseExternalThemeCatalog(text);
-      const collisions = parsed.filter(theme => builtinThemeCatalog.themes.some(builtin => builtin.id === theme.id));
-      externalThemeDefs = parsed.filter(theme => !collisions.some(c => c.id === theme.id));
+      const claimed = new Set([
+        ...builtinThemeCatalog.themes.map(theme => theme.id),
+        ...catalogOverlayDefs.map(theme => theme.id),
+      ]);
+      const collisions = parsed.filter(theme => claimed.has(theme.id));
+      externalThemeDefs = parsed.filter(theme => !claimed.has(theme.id));
       rebuildThemeRuntime();
       if (collisions.length) {
         toast(`Skipped ${collisions.length} external theme${collisions.length === 1 ? '' : 's'} that reuse a built-in id`, 'error');
@@ -8077,7 +8099,8 @@ type TaskLocation = {
   }
 
   async function loadWorkspaceThemes() {
-    const ok = await loadBuiltinThemes();
+    const ok = await loadBuiltinCatalog();
+    await loadCatalogOverlay();
     await loadExternalThemes();
     return ok;
   }

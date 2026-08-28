@@ -5,7 +5,7 @@ Run ./recallstack from this directory. RecallStack requires GTK 3, WebKitGTK 4.1
 and the standard Tauri 2 Linux runtime libraries. On Arch Linux these are supplied
 by gtk3 and webkit2gtk-4.1 (plus their dependencies).
 
-Keep readme.md, changes.md, and theme.json beside the recallstack executable.
+Keep readme.md, changes.md, builtin-themes.json, and theme.json beside the recallstack executable.
 They provide the in-app guide, change history, and editable theme catalog.
 
 The included desktop file and icon may optionally be copied to the matching paths

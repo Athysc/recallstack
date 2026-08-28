@@ -22,7 +22,7 @@ npm run build:windows:portable
 npm run package:windows:portable
 ```
 
-The release directory contains a raw `.exe` and `RecallStack-<version>-windows-x86_64-portable.zip`. The ZIP contains `RecallStack.exe`, `README.txt`, `LICENSE`, `readme.md`, `changes.md`, and `theme.json`. Keep all six together after extraction. The three lowercase sidecars remain editable and are also embedded as startup fallbacks. Signing is optional when a certificate is configured; the manifest identifies Windows artifacts as unsigned by default. Test an unsigned release from an ordinary non-administrator account because SmartScreen reputation warnings are expected.
+The release directory contains a raw `.exe` and `RecallStack-<version>-windows-x86_64-portable.zip`. The ZIP contains `RecallStack.exe`, `README.txt`, `LICENSE`, `readme.md`, `changes.md`, `builtin-themes.json`, and `theme.json`. Keep them together after extraction. `readme.md` / `changes.md` are editable copies of embedded fallbacks; `builtin-themes.json` is a copy of the embedded theme catalog; `theme.json` is an optional user overlay (a copy-me sample). Signing is optional when a certificate is configured; the manifest identifies Windows artifacts as unsigned by default. Test an unsigned release from an ordinary non-administrator account because SmartScreen reputation warnings are expected.
 
 If RecallStack does not open, install or repair the WebView2 Evergreen Runtime from Microsoft. The runtime is not copied beside RecallStack because the fixed-runtime distribution is much larger.
 
@@ -73,8 +73,9 @@ chmod +x release/RecallStack-*-linux-x86_64.AppImage
 ./release/RecallStack-*-linux-x86_64.AppImage
 ```
 
-Keep `readme.md`, `changes.md`, and `theme.json` beside the AppImage so their
-external, editable versions remain available. If the AppImage reports a FUSE
+Keep `readme.md`, `changes.md`, `builtin-themes.json`, and `theme.json` beside
+the AppImage. `readme.md` / `changes.md` are editable doc copies, and `theme.json`
+is an optional overlay for adding themes on top of the built-ins. If the AppImage reports a FUSE
 error, install the Arch `fuse2` package:
 
 ```bash
@@ -109,7 +110,7 @@ producing a single `RecallStack.app` containing both an Apple Silicon and an
 Intel binary (a "fat" Mach-O), at
 `src-tauri/target/universal-apple-darwin/release/bundle/macos/RecallStack.app`.
 `package:macos:app` stages that bundle with `LICENSE`, `README.txt`, and the
-editable `readme.md`/`changes.md`/`theme.json` sidecars, then zips it to
+`readme.md` / `changes.md` / `builtin-themes.json` / `theme.json` sidecars, then zips it to
 `release/RecallStack-<version>-macos-universal.zip`.
 
 RecallStack.app is not signed with an Apple Developer ID and is not notarized,
