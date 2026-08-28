@@ -280,6 +280,7 @@ Results are written to `performance-results/windows.json` or `performance-result
 | Line numbers icon | Toggle CodeMirror line numbers on/off; persists globally |
 | Cursor position icon | Toggle where the cursor lands when opening a file — **First Line** (default) or **Last Line**; persists globally |
 | Collapse icon | Toggle whether collapsible preview sections are **expanded** (default) or **collapsed** by default on render; persists globally. Also immediately opens/closes all collapsible sections in the current preview |
+| Editor Mode icon | Switch between **Reading** (default — a note opens in the preview; `I` edits, `Esc` returns) and **Classic** (live side-by-side editor + preview); persists globally. See [Reading Mode](#reading-mode) |
 | Book icon | Markdown syntax reference |
 | Info icon | User guide |
 | Clock icon | What's New — change log for this version of RecallStack |
@@ -490,9 +491,25 @@ Priority and Status controls are borderless until selected; the selected option 
 The editor is split into two panes:
 
 - **Left — Markdown**: CodeMirror 6 source editor with Markdown highlighting, folding, history, optional line numbers, current-line highlighting, a subtle current-line text glow, a glowing caret, and note/tag completion
-- **Right — Preview**: Live-rendered output, updates as you type
+- **Right — Preview**: Live-rendered output
 
 Drag the **divider bar** between the panes to resize them.
+
+### Reading Mode
+
+**Settings → Editor Mode** chooses how the editor behaves. **Reading** is the default.
+
+**Reading mode** — a note opens showing only the rendered **Preview** (full width; the Markdown pane is collapsed).
+
+- Press **`I`** (as in *insert*) to switch to editing — the Markdown pane takes over full width.
+- Press **`Esc`** while editing to return to the preview; it re-renders once with your latest changes.
+- A new, empty note opens straight in editing so you can start typing.
+- While you are editing, the preview is **not** re-rendered on every keystroke — that is the point of reading mode, and it keeps typing fast in large notes. It catches up the moment you press `Esc`.
+- Pressing the **Presentation** button while editing first drops you back to a fresh preview, then starts the presentation.
+
+**Classic mode** — the familiar side-by-side split: the Markdown editor on the left, a **live preview that updates as you type** on the right, with a draggable divider. `I` and `Esc` have no special meaning here.
+
+Switching modes takes effect immediately for the note you have open. The choice is remembered across restarts.
 
 ---
 
@@ -612,6 +629,8 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 |---|---|
 | Toggle Presentation Mode | — |
 | Toggle Editor Line Numbers | — |
+| Toggle Editor Mode (Reading / Classic) | — |
+| Reading Mode: Edit / Preview | `I` (edit) · `Esc` (preview) |
 | Change Theme *(opens an argument list)* | — |
 | Open Theme Switcher | `Ctrl+Shift+T` |
 | Show Notes Listing | `Ctrl+L` |

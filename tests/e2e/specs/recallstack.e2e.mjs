@@ -128,6 +128,9 @@ describe("RecallStack desktop smoke flow", () => {
     await browser.execute(path => {
       localStorage.clear();
       localStorage.setItem("recallstack-desktop-workspace-path", path);
+      // This smoke flow asserts the live editor+preview split and its visual
+      // baselines; pin the classic editor mode. Reading mode has its own test.
+      localStorage.setItem("pkm-editor-mode", "classic");
     }, workspacePath);
     await browser.refresh();
     await waitForVisible("#app");
@@ -423,5 +426,55 @@ describe("RecallStack desktop smoke flow", () => {
       core.invoke("fs_read_text", { path: "Data/personal/project/tasks/working/Modal Working Task -- s00000000_c00000000_due00000000_normal.md" }));
     expect(workingTaskText).toBe("");
 
+  });
+
+  it("reading editor mode opens in preview, I edits, Esc returns to preview", async () => {
+    await browser.execute(() => localStorage.clear());
+    await browser.execute(path => {
+      localStorage.setItem("recallstack-desktop-workspace-path", path);
+      // No pkm-editor-mode set → the default reading mode is active.
+    }, workspacePath);
+    await browser.refresh();
+    await waitForVisible("#app");
+    await clickButtonWithText("#nav-row-1", "project");
+    await clickButtonWithText("#nav-row-2", "notes");
+    await waitForVisible("#file-grid .file-card");
+
+    let noteCard;
+    for (const candidate of await $$("#file-grid .file-card")) {
+      if ((await candidate.getText()).includes("Welcome Note")) { noteCard = candidate; break; }
+    }
+    if (!noteCard) throw new Error("Welcome Note card was not rendered");
+    await noteCard.waitForClickable();
+    await noteCard.click();
+
+    // Opens straight into the rendered preview; the editor pane is collapsed.
+    await waitForVisible("#preview-output");
+    const paneDisplay = selector => browser.execute(
+      sel => getComputedStyle(document.querySelector(sel)).display, selector);
+    await browser.waitUntil(async () => (await paneDisplay("#editor-pane")) === "none", {
+      timeout: 5_000, timeoutMsg: "editor pane was not collapsed on open in reading mode",
+    });
+
+    // I (insert) switches to editing.
+    await browser.keys(["i"]);
+    await waitForVisible("#md-editor .cm-editor");
+    expect(await paneDisplay("#preview-pane")).toBe("none");
+    const editor = await $("#md-editor .cm-content");
+    await editor.click();
+    await editor.setValue("# Welcome Note\n\nReading-mode smoke edit\n");
+
+    // While editing, the frozen preview must not have re-rendered.
+    expect((await $("#preview-output").getText()).includes("Reading-mode smoke edit")).toBe(false);
+
+    // Esc returns to the preview and renders once.
+    await browser.keys(["Escape"]);
+    await browser.waitUntil(async () => (await paneDisplay("#editor-pane")) === "none", {
+      timeout: 5_000, timeoutMsg: "editor pane did not collapse after Escape",
+    });
+    await browser.waitUntil(
+      async () => (await $("#preview-output").getText()).includes("Reading-mode smoke edit"),
+      { timeout: 10_000, timeoutMsg: "preview did not refresh after returning from edit mode" },
+    );
   });
 });

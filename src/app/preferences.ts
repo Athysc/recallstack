@@ -5,6 +5,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   collapseDefault: "pkm-collapse-default",
   contentZoom: "pkm-content-zoom",
   cursorLoadPosition: "pkm-cursor-load-pos",
+  editorMode: "pkm-editor-mode",
   loadRemoteMedia: "pkm-load-remote-media",
   lineNumbers: "pkm-line-numbers",
   showSystemFolders: "pkm-show-system-folders",

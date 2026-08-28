@@ -232,6 +232,17 @@ type TaskLocation = {
   let isExternalFile      = false;  // true when currently editing a "Temporary" external file in place
   let currentExternalPath: string | null = null;             // absolute OS path (Tauri desktop mode)
   let currentExternalFileHandle: FileSystemFileHandle | null = null; // real handle (browser mode)
+  // ── Editor reading mode (Idea B) ──────────────────────────────────────────────
+  // Reading mode (default): a document opens showing only the rendered preview,
+  // and the live-preview pipeline is frozen while editing, so a keystroke costs
+  // nothing beyond CodeMirror's own incremental parse. `P` (when focus is not in
+  // a text field) enters edit mode; `Escape` while editing returns to preview.
+  // Classic mode restores the old always-live editor+preview split. Global
+  // preference, persisted across sessions.
+  const EDITOR_MODE_KEY = PREFERENCE_KEYS.editorMode;
+  let readingModeEnabled = localStorage.getItem(EDITOR_MODE_KEY) !== 'classic';
+  let readingViewState: 'preview' | 'edit' = 'preview';
+  let presentationOn = false;
   let navRow1Mode: "buttons" | "combo" = 'buttons';
   let navRow2Mode: "buttons" | "combo" = 'buttons';
   let renameFolderRow     = 0;         // 1 or 2 — which nav row triggered the rename modal
@@ -360,6 +371,8 @@ type TaskLocation = {
   const editorPane   = $id('editor-pane');
   const resizerEl    = $id('resizer');
   const previewPane     = $id('preview-pane');
+  const previewPaneLabel = $maybe('preview-pane-label');
+  const readingEscHint   = $maybe('reading-mode-hint');
   const taskDateBar        = $id('task-date-bar');
   const taskInputStart     = $id('task-input-start');
   const taskInputCompleted = $id('task-input-completed');
@@ -376,6 +389,7 @@ type TaskLocation = {
   const taskEditorLayout = $id('task-editor-layout');
   const taskEditorTop = $id('task-editor-top');
   const btnPinCurrentFile = $id('btn-pin-current-file');
+  const btnPinCurrentFilePreview = $maybe('btn-pin-current-file-preview');
   const newFileModalEl = $id('modal-new-file');
   const newFileModal = new NewFileModalController({
     overlay: newFileModalEl,
@@ -1819,6 +1833,7 @@ type TaskLocation = {
       showTaskDateBar();
       applyJournalToolbarRestrictions();
       updateConvertToTaskBtn();
+      enterReadingModeForOpenDoc();
       return true;
     } catch (e: any) {
       if (e?.name === 'NotFoundError' && outputsActiveFolder) {
@@ -1928,6 +1943,7 @@ type TaskLocation = {
       showTaskDateBar();
       applyJournalToolbarRestrictions();
       updateConvertToTaskBtn();
+      enterReadingModeForOpenDoc();
       return true;
     } catch (e: any) {
       toast('Could not open file: ' + e.message, 'error');
@@ -2777,13 +2793,23 @@ type TaskLocation = {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5"/></svg>';
   }
 
-  // The pin-this-file button (where the Working Tasks toggle used to live, in
-  // the editor pane's label row) only appears while the active tab is real and
-  // not already pinned — clicking it pins the tab and the button disappears.
+  // The pin-this-file button only appears while the active tab is real and not
+  // already pinned — clicking it pins the tab and the button disappears. It is
+  // mirrored in both pane labels (editor "MD" and "Preview") so it stays
+  // reachable in reading mode's preview sub-state, where the editor pane is
+  // collapsed.
   function updatePinCurrentFileButton() {
     const tab = activeTabRecord();
     const pinnable = !!tab && !tab.pinned && !isProtectedDailyJournalTab(tab);
     btnPinCurrentFile.classList.toggle('hidden', !pinnable);
+    btnPinCurrentFilePreview?.classList.toggle('hidden', !pinnable);
+  }
+
+  function pinCurrentFile() {
+    const tab = activeTabRecord();
+    if (!tab || tab.pinned) return;
+    tab.pinned = true;
+    renderTabStrip();
   }
 
   function renderTabStrip() {
@@ -2981,6 +3007,7 @@ type TaskLocation = {
       updateConvertToTaskBtn();
       updateConvertToNoteBtn();
       applyJournalToolbarRestrictions();
+      enterReadingModeForOpenDoc();
       saveLastView('file', notesRelPath);
       return true;
     } catch (e: any) {
@@ -4575,11 +4602,85 @@ type TaskLocation = {
   }
 
   function renderPreview() {
+    // Reading mode, edit sub-state: the preview pane is hidden and deliberately
+    // frozen — skip the whole marked.parse + innerHTML rebuild + postProcess
+    // sweep on every keystroke. setReadingView('preview') renders once when the
+    // user switches back.
+    if (readingModeEnabled && readingViewState === 'edit') return;
     previewScheduler.schedule(mdEditor.length, !editorView.classList.contains('hidden'), () => {
       setPreviewMarkdown(mdEditor.value);
       postProcessPreview();
       if (isTasksEditor()) syncDateInputsFromEditor();
     });
+  }
+
+  // ── Reading-mode layout (Idea B) ────────────────────────────────────────────
+  // Single source of truth for editor/preview pane visibility. Presentation
+  // mode owns the layout while it is active; otherwise reading mode collapses
+  // to a single pane (preview, or editor while editing) and classic mode shows
+  // the resizable split.
+  function applyEditorLayout() {
+    if (presentationOn) return;
+    const editing     = readingModeEnabled && readingViewState === 'edit';
+    const previewOnly  = readingModeEnabled && readingViewState === 'preview';
+    editorPane.style.display  = previewOnly ? 'none' : '';
+    previewPane.style.display = editing ? 'none' : '';
+    resizerEl.style.display   = readingModeEnabled ? 'none' : '';
+    editorPane.style.flex = '1'; editorPane.style.width = '';
+    previewPane.style.flex = '1'; previewPane.style.width = '';
+    updateReadingModeHint();
+    // Force a reflow so the newly revealed pane recomputes its scroll area, and
+    // let CodeMirror re-measure after being shown from display:none.
+    previewPane.style.overflow = 'hidden';
+    requestAnimationFrame(() => {
+      previewPane.style.overflow = '';
+      if (!previewOnly) mdEditor.view.requestMeasure();
+    });
+  }
+
+  function updateReadingModeHint() {
+    const editing    = readingModeEnabled && readingViewState === 'edit';
+    const previewing = readingModeEnabled && readingViewState === 'preview';
+    if (previewPaneLabel) previewPaneLabel.textContent = previewing ? 'Preview · press I to edit' : 'Preview';
+    if (readingEscHint) readingEscHint.classList.toggle('hidden', !editing);
+  }
+
+  // Switch between the reading-mode preview and edit sub-states. No-op in
+  // classic mode.
+  function setReadingView(state: 'preview' | 'edit', opts: { focus?: boolean } = {}) {
+    if (!readingModeEnabled) return;
+    readingViewState = state;
+    applyEditorLayout();
+    if (state === 'preview') {
+      previewScheduler.cancel();
+      setPreviewMarkdown(mdEditor.value);
+      postProcessPreview();
+      if (isTasksEditor()) syncDateInputsFromEditor();
+      if (opts.focus !== false) setTimeout(() => { try { previewOut.focus({ preventScroll: true }); } catch { /* not focusable */ } }, 0);
+    } else if (opts.focus !== false) {
+      setTimeout(() => mdEditor.focus(), 0);
+    }
+  }
+
+  // Called by every "document just loaded into the editor" path. In reading
+  // mode a note with content opens in preview; an empty note opens ready to
+  // type. The preview itself has already been rendered once by the caller.
+  function enterReadingModeForOpenDoc() {
+    // Classic mode: leave the split (and any user-dragged divider width) alone.
+    if (!readingModeEnabled) return;
+    readingViewState = !/\S/.test(mdEditor.value) ? 'edit' : 'preview';
+    applyEditorLayout();
+    if (readingViewState === 'edit') setTimeout(() => mdEditor.focus(), 0);
+    else setTimeout(() => { try { previewOut.focus({ preventScroll: true }); } catch { /* not focusable */ } }, 0);
+  }
+
+  function canEnterEditFromPreview(): boolean {
+    if (!readingModeEnabled || readingViewState !== 'preview') return false;
+    if (presentationOn || editorView.classList.contains('hidden')) return false;
+    if (anyOverlayOpen()) return false;
+    const el = document.activeElement as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.closest('.cm-editor'))) return false;
+    return true;
   }
 
   // ── Block-level render caching ────────────────────────────────────────────────
@@ -5047,15 +5148,22 @@ type TaskLocation = {
     const editorToolbarEl     = $id('editor-toolbar');
     const presentationExitBar = $id('presentation-exit-bar');
     const presentationTitle   = $id('presentation-title');
-    let presentationOn = false;
 
     function setPresentation(on: any) {
       presentationOn = on;
 
       if (presentationOn) {
-        // Hide editor pane and resizer; expand preview to full width
+        // Reading mode may be paused mid-edit with a stale, frozen preview.
+        // Flip back to a freshly rendered preview first so presentation shows
+        // current content (and the session lands back in preview on exit).
+        // applyEditorLayout() no-ops here because presentationOn is already set.
+        if (readingModeEnabled && readingViewState === 'edit') setReadingView('preview', { focus: false });
+        // Hide editor pane and resizer; expand preview to full width. The
+        // preview pane is explicitly un-hidden here because reading mode's
+        // edit sub-state leaves `previewPane.style.display = 'none'` behind.
         editorPane.style.display  = 'none';
         resizerEl.style.display   = 'none';
+        previewPane.style.display = '';
         previewPane.style.flex    = '1';
         previewPane.style.width   = '';
         // Hide the top header, editor toolbar, and task metadata bar
@@ -5085,6 +5193,8 @@ type TaskLocation = {
         presentationExitBar.classList.add('hidden');
         btnPresentation.classList.remove('btn-primary');
         btnPresentation.classList.add('btn-ghost');
+        // Hand the layout back to reading mode / classic split.
+        applyEditorLayout();
       }
 
       // Force a layout reflow so the preview pane recalculates its scroll area
@@ -5795,6 +5905,8 @@ type TaskLocation = {
     { id:'view.zoom-out', title:'Zoom Out', category:'View', shortcut:'Ctrl+-', isEnabled:needsWorkspace, run:() => stepContentZoom(-1) },
     { id:'view.zoom-reset', title:'Reset Zoom', category:'View', shortcut:'Ctrl+0', isEnabled:needsWorkspace, run:() => setContentZoom(0) },
     { id:'view.line-numbers', title:'Toggle Editor Line Numbers', category:'View', isEnabled:needsEditor, run:() => $id('btn-line-numbers').click() },
+    { id:'view.editor-mode', title:'Toggle Editor Mode (Reading / Classic)', category:'View', keywords:['reading preview edit split idea b performance'], run:() => $id('btn-editor-mode').click() },
+    { id:'view.reading-toggle', title:'Reading Mode: Edit / Preview', category:'View', keywords:['reading preview edit insert i escape'], shortcut:'I', isEnabled:()=> readingModeEnabled && !editorView.classList.contains('hidden'), disabledReason:()=>'Reading mode with a note open', run:() => setReadingView(readingViewState === 'edit' ? 'preview' : 'edit') },
     { id:'editor.insert-link', title:'Insert Markdown Link', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('[link text](url)') },
     { id:'editor.insert-code', title:'Insert Code Block', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('```\n\n```') },
     { id:'editor.insert-mermaid', title:'Insert Mermaid Block', category:'Editor', isEnabled:needsEditor, run:() => insertAtCursor('```mermaid\ngraph TD\n  A --> B\n```') },
@@ -6499,12 +6611,8 @@ type TaskLocation = {
     saveNote(true);
   });
   taskKindIndicator.addEventListener('click', () => toggleWorkingTask().catch(e => toast('Could not move task: ' + e.message, 'error')));
-  btnPinCurrentFile.addEventListener('click', () => {
-    const tab = activeTabRecord();
-    if (!tab || tab.pinned) return;
-    tab.pinned = true;
-    renderTabStrip();
-  });
+  btnPinCurrentFile.addEventListener('click', pinCurrentFile);
+  btnPinCurrentFilePreview?.addEventListener('click', pinCurrentFile);
   btnViewJournal.addEventListener('click', () => openTodayJournal().catch(e => toast('Could not open journal: ' + e.message, 'error')));
   // On blur: re-sync display (restores today hint if user dismissed without selecting,
   // or shows the committed date if they did select one).
@@ -7707,6 +7815,15 @@ type TaskLocation = {
     if (e.key === 'Escape') {
       if (anyOverlayOpen()) { e.preventDefault(); closeTopmostOverlay(); return; }
       if (escapeOverlayWasOpen) return; // an overlay's own handler already closed it
+      // Reading mode: Escape while editing returns to the preview (and triggers
+      // one render). Only here — in classic mode Escape keeps its old meaning.
+      if (readingModeEnabled && readingViewState === 'edit' && !presentationOn
+        && !editorView.classList.contains('hidden')) {
+        e.preventDefault();
+        if (currentPath && !isNew) void autoSaveIfDirty(true);
+        setReadingView('preview');
+        return;
+      }
       if (!searchView.classList.contains('hidden') && document.activeElement !== searchInput) {
         e.preventDefault();
         clearTimeout(_searchTimer);
@@ -7717,6 +7834,13 @@ type TaskLocation = {
       }
       e.preventDefault();
       void handleGlobalEscape();
+      return;
+    }
+
+    // Reading mode: bare `I` (insert — when focus isn't in a text field) enters edit mode.
+    if (!mod && plain && key === 'i' && canEnterEditFromPreview()) {
+      e.preventDefault();
+      setReadingView('edit');
       return;
     }
 
@@ -8298,6 +8422,44 @@ type TaskLocation = {
       else navRow1.appendChild(btn);
     } else if (!allTasksEnabled && allTasksBtn) {
       allTasksBtn.remove();
+    }
+  });
+
+  // ── Editor mode toggle: Reading (Idea B) ↔ Classic split ─────────────────────
+  const btnEditorMode = $id('btn-editor-mode');
+  const BOOK_OPEN_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>';
+  const SPLIT_COLS_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>';
+
+  function applyEditorModeBtn() {
+    btnEditorMode.querySelector<HTMLElement>('.settings-tile-icon')!.innerHTML = readingModeEnabled ? BOOK_OPEN_SVG : SPLIT_COLS_SVG;
+    btnEditorMode.setAttribute('aria-pressed', String(readingModeEnabled));
+    btnEditorMode.title = readingModeEnabled
+      ? 'Editor: Reading mode — opens in preview, I to edit, Esc back to preview'
+      : 'Editor: Classic — live editor + preview split while you type';
+    btnEditorMode.classList.toggle('active', readingModeEnabled);
+    const desc = btnEditorMode.querySelector<HTMLElement>('.settings-tile-description');
+    if (desc) desc.textContent = readingModeEnabled ? 'Reading — I to edit, Esc to preview' : 'Classic live split preview';
+  }
+  applyEditorModeBtn();
+  if (readingModeEnabled) applyEditorLayout();
+
+  btnEditorMode.addEventListener('click', () => {
+    readingModeEnabled = !readingModeEnabled;
+    localStorage.setItem(EDITOR_MODE_KEY, readingModeEnabled ? 'reading' : 'classic');
+    applyEditorModeBtn();
+    const docOpen = !editorView.classList.contains('hidden') && !!currentPath;
+    if (readingModeEnabled) {
+      readingViewState = docOpen && !/\S/.test(mdEditor.value) ? 'edit' : 'preview';
+    }
+    applyEditorLayout();
+    if (docOpen && (!readingModeEnabled || readingViewState === 'preview')) {
+      // Preview is (or just became) visible — make sure it reflects current text.
+      previewScheduler.cancel();
+      setPreviewMarkdown(mdEditor.value);
+      postProcessPreview();
+      if (isTasksEditor()) syncDateInputsFromEditor();
+    } else if (docOpen) {
+      setTimeout(() => mdEditor.focus(), 0);
     }
   });
 

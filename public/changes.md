@@ -4,6 +4,27 @@
 
 ## Version 0.1.4 — 2026-08-27 (unreleased)
 
+### Reading editor mode
+
+**Settings → Editor Mode** switches the editor between two modes. **Reading** is
+now the default.
+
+- **Reading mode** — a note opens showing only the rendered **Preview** at full
+  width. Press **`I`** (as in *insert*) to switch to editing; press **`Esc`**
+  while editing to go back to the preview, which re-renders once with your latest
+  changes. A new, empty note opens straight in editing.
+- While you are editing in reading mode the preview is **not** rebuilt on every
+  keystroke, so typing stays fast in large notes — it catches up when you press
+  `Esc`. Pressing **Presentation** while editing drops back to a fresh preview
+  first, then starts the presentation.
+- **Classic mode** — the previous always-on side-by-side split with a live
+  preview that updates as you type and a draggable divider. `I` and `Esc` carry
+  no special meaning.
+
+The choice persists across restarts and is also on the `Ctrl+K` shortcut sheet
+and in the command palette (*Toggle Editor Mode*, *Reading Mode: Edit /
+Preview*).
+
 ### Modal listing windows (Notes / Tasks / Working Tasks)
 
 Note, task, and working-task browsing all move into a centered listing modal —

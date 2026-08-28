@@ -176,6 +176,15 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     editorOnly: true,
   },
   {
+    id: "view.reading-toggle",
+    combo: "I",
+    label: "Edit / preview (reading mode)",
+    description:
+      "In reading mode a note opens in the preview; I (insert) switches to editing and Esc switches back. Classic editor mode ignores both.",
+    category: "Views & Panels",
+    editorOnly: true,
+  },
+  {
     id: "view.zoom-in",
     combo: "Ctrl++",
     label: "Zoom in",

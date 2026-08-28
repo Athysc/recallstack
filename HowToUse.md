@@ -40,6 +40,7 @@ workspace-root/
 | **Daily Journal icon / Ctrl+J** | Opens/creates today's entry in `dailylogs/` |
 | **Search box / Ctrl+/** | Full-text search across every note (3+ characters) |
 | **Ctrl+K** | Keyboard-shortcut reference sheet |
+| **`I`** / **`Esc`** *(reading mode)* | In the default reading editor mode a note opens in the preview; **`I`** switches to editing, **`Esc`** switches back |
 | **Ctrl+P** | Command palette — run any command, or search notes (`@`) / tags (`#`) |
 | **Ctrl+Shift+T** | Theme switcher with live preview |
 | **Ctrl+Z / Ctrl+Shift+Z** | Undo / redo in the editor (up to 50 steps) |
@@ -51,6 +52,13 @@ workspace-root/
 | **Trash icon** | Moves the note to recoverable Trash |
 | **Calendar icon** | Shows tasks by Start/Due/Completed date |
 | **Outputs icon** | Opens a separate configured export/output folder |
+
+## Editor Mode (Reading vs Classic)
+
+**Settings → Editor Mode** picks how the editor works. **Reading** is the default.
+
+- **Reading** — a note opens showing only the rendered **Preview**. Press **`I`** to edit, **`Esc`** to go back to the preview (it re-renders once). Empty notes open ready to type. The preview isn't rebuilt on every keystroke while you edit, which keeps typing fast in big notes; the **Presentation** button flips back to a fresh preview first.
+- **Classic** — the side-by-side editor + live preview split, updating as you type.
 
 ## Saving
 
