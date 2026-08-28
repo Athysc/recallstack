@@ -204,6 +204,88 @@ impl AppState {
     }
 }
 
+/// Linux/WebKitGTK graphics-stack teardown guard.
+///
+/// On Linux, `libEGL.so` is libglvnd's vendor-neutral dispatch. It loads every
+/// vendor library listed in `/usr/share/glvnd/egl_vendor.d/*.json` (NVIDIA's
+/// `10_nvidia.json` sorts ahead of Mesa's `50_mesa.json`). On a machine that has
+/// NVIDIA *userspace* packages installed but **no** NVIDIA GPU/driver, WebKitGTK
+/// still dlopen()s `libEGL_nvidia`, and its `atexit` teardown then faults with
+/// SIGSEGV during the webview process's `exit(0)` (a fault inside proprietary
+/// `libnvidia-eglcore` / `libnvidia-gpucomp`, not RecallStack code). It recurs
+/// on every clean shutdown.
+///
+/// Mitigation, only in that exact broken shape: pin libglvnd to Mesa's vendor
+/// JSON so `libEGL_nvidia` is never loaded into the process. This is a no-op on
+/// a real NVIDIA machine, on a machine with no NVIDIA vendor file, on macOS, and
+/// on the Windows portable build (WebView2, compiled out entirely). Set
+/// `RECALLSTACK_NO_EGL_VENDOR_PIN=1`, or any `__EGL_VENDOR_LIBRARY_*` var, to
+/// opt out.
+/// Pure decision for [`pin_egl_vendor_if_stale_nvidia`]: pin only when NVIDIA has
+/// a libglvnd EGL vendor file but no GPU/driver, the user has not opted out or
+/// set their own vendor, and a Mesa vendor JSON actually exists to pin to.
+#[cfg(target_os = "linux")]
+fn egl_vendor_pin_target(
+    opt_out: bool,
+    explicit_vendor_env: bool,
+    nvidia_driver_present: bool,
+    nvidia_vendor_json_present: bool,
+    mesa_vendor_json: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if opt_out || explicit_vendor_env || nvidia_driver_present || !nvidia_vendor_json_present {
+        return None;
+    }
+    mesa_vendor_json
+}
+
+#[cfg(target_os = "linux")]
+fn pin_egl_vendor_if_stale_nvidia() {
+    use std::path::{Path, PathBuf};
+
+    let opt_out = std::env::var_os("RECALLSTACK_NO_EGL_VENDOR_PIN").is_some();
+    let explicit_vendor_env = std::env::var_os("__EGL_VENDOR_LIBRARY_FILENAMES").is_some()
+        || std::env::var_os("__EGL_VENDOR_LIBRARY_DIRS").is_some();
+    let nvidia_driver_present = Path::new("/proc/driver/nvidia/version").exists()
+        || Path::new("/sys/module/nvidia").exists()
+        || Path::new("/dev/nvidia0").exists();
+
+    let mut nvidia_vendor_json_present = false;
+    let mut mesa_vendor_json: Option<PathBuf> = None;
+    for dir in ["/usr/share/glvnd/egl_vendor.d", "/etc/glvnd/egl_vendor.d"] {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if !name.ends_with(".json") {
+                continue;
+            }
+            if name.contains("nvidia") {
+                nvidia_vendor_json_present = true;
+            } else if name.contains("mesa") && mesa_vendor_json.is_none() {
+                mesa_vendor_json = Some(entry.path());
+            }
+        }
+    }
+
+    if let Some(mesa) = egl_vendor_pin_target(
+        opt_out,
+        explicit_vendor_env,
+        nvidia_driver_present,
+        nvidia_vendor_json_present,
+        mesa_vendor_json,
+    ) {
+        eprintln!(
+            "RecallStack: stale NVIDIA EGL vendor detected with no NVIDIA GPU; \
+             pinning libglvnd to {} to avoid a WebKit shutdown crash",
+            mesa.display()
+        );
+        // Safe on edition 2021, and this runs before any thread or the Tauri
+        // builder; libglvnd reads the variable lazily on first eglInitialize().
+        std::env::set_var("__EGL_VENDOR_LIBRARY_FILENAMES", &mesa);
+    }
+}
+
 pub fn run() {
     // Always on, independent of the e2e-only tracing subscriber below: logs
     // a Rust panic to today's daily error log beside the executable before
@@ -212,6 +294,9 @@ pub fn run() {
     // main.rs — no attached console at all) would be completely invisible.
     // See task_20260815_0003.
     error_log::install_panic_hook();
+
+    #[cfg(target_os = "linux")]
+    pin_egl_vendor_if_stale_nvidia();
 
     // e2e-only: without a `tracing` subscriber, tauri-plugin-wdio-webdriver's
     // startup/bind errors (tracing::error! in its embedded server thread) go
@@ -380,5 +465,60 @@ mod asset_protocol_tests {
         assert_eq!(parse_byte_range("bytes=7-", 10), Some((7, 9)));
         assert_eq!(parse_byte_range("bytes=-3", 10), Some((7, 9)));
         assert_eq!(parse_byte_range("bytes=20-30", 10), None);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod egl_vendor_pin_tests {
+    use super::egl_vendor_pin_target;
+    use std::path::PathBuf;
+
+    fn mesa() -> Option<PathBuf> {
+        Some(PathBuf::from("/usr/share/glvnd/egl_vendor.d/50_mesa.json"))
+    }
+
+    #[test]
+    fn pins_to_mesa_only_in_the_stale_nvidia_shape() {
+        // NVIDIA vendor file present, no driver, not opted out, Mesa available.
+        assert_eq!(
+            egl_vendor_pin_target(false, false, false, true, mesa()),
+            mesa()
+        );
+    }
+
+    #[test]
+    fn leaves_a_real_nvidia_machine_alone() {
+        assert_eq!(
+            egl_vendor_pin_target(false, false, true, true, mesa()),
+            None
+        );
+    }
+
+    #[test]
+    fn no_op_without_a_stale_nvidia_vendor_file() {
+        assert_eq!(
+            egl_vendor_pin_target(false, false, false, false, mesa()),
+            None
+        );
+    }
+
+    #[test]
+    fn respects_opt_out_and_explicit_vendor_env() {
+        assert_eq!(
+            egl_vendor_pin_target(true, false, false, true, mesa()),
+            None
+        );
+        assert_eq!(
+            egl_vendor_pin_target(false, true, false, true, mesa()),
+            None
+        );
+    }
+
+    #[test]
+    fn does_not_pin_when_no_mesa_vendor_file_exists() {
+        assert_eq!(
+            egl_vendor_pin_target(false, false, false, true, None),
+            None
+        );
     }
 }
