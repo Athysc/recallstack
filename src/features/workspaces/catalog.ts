@@ -3,6 +3,12 @@ import { getDirHandle, listDirs, type NamedDirectory } from "../../services/file
 export interface WorkspaceDirectory extends NamedDirectory {
   dbPrefix: string;
   topLevelDirs?: NamedDirectory[];
+  // Set for the user-configured Extra Data Folder: an arbitrary directory on
+  // disk surfaced as the first workspace. Its files live outside Data/, so all
+  // reads/writes route through the external FS bridge and it is left out of the
+  // search index. `extraPath` is its absolute OS path (native mode).
+  isExtraData?: boolean;
+  extraPath?: string;
 }
 
 export async function discoverWorkspaces(root: FileSystemDirectoryHandle): Promise<{

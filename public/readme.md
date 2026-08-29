@@ -28,9 +28,20 @@ workspace-root/
     └── index.db            ← search index (SQLite)
 ```
 
+### Extra Data Folder
+
+**Display & Navigation → Extra Data Folder** points RecallStack at any directory on disk outside the workspace `Data/` tree. It appears as the **first entry in the workspace switcher** — left of the `Data/` workspaces — and works like one: its subfolders are Nav Row 1, its sub-subfolders are Nav Row 2, and browsing, opening, editing, creating, renaming, moving, archiving, and deleting all behave normally (deletes go to the OS trash). Its `assets/` images render in the preview. The choice persists across sessions and workspace switches. **Clear** removes it and switches back to a `Data/` workspace.
+
+**Limitations**
+
+- **Not indexed.** Its notes do not appear in workspace search, the calendar, backlinks, or `[[wikilink]]` completion — those stay scoped to the `Data/` workspaces.
+- **No tasks or journal.** The Task, Working Task, and Daily Journal icons are hidden while it is the active workspace; `tasks/` and `dailylogs/` are never created inside your folder.
+- **Name.** The switcher label is the folder's own name. If it matches a `Data/` workspace name, both chips carry that name; the Extra Data Folder is always the first one.
+- **Browser build only:** the chosen folder is not remembered across page reloads (the File System Access API can't persist a directory handle) — the same as the Outputs folder. The desktop app remembers it via its path.
+
 ### Workspace Outputs Folder
 
-The Outputs icon beside workspace refresh opens the configured Outputs folder. Configure the path from **Display & Navigation**. If no path is set, RecallStack defaults to `<workspace path>/openbrain/outputs` using the platform's native path handling and creates the folder automatically when needed. The Outputs folder controls live below the Display & Navigation tile grid, while the theme list remains in its right-side panel.
+The Outputs icon beside workspace refresh opens the configured Outputs folder. Configure the path from **Display & Navigation**. If no path is set, RecallStack defaults to `<workspace path>/openbrain/outputs` using the platform's native path handling and creates the folder automatically when needed. The Extra Data Folder, Outputs folder, and External theme file controls all live full-width below the Display & Navigation tile grid, while the theme list remains in its right-side panel.
 
 ### Opening a Workspace
 
@@ -274,7 +285,7 @@ Results are written to `performance-results/windows.json` or `performance-result
 | Outputs icon | Open the configured Outputs folder; the old top-level Outputs text button has been removed |
 | Calendar icon | Toggle calendar view |
 | Search box | Native full-text and structured search; hover for the supported filter list. Search results support `J/K`, arrow keys, `Enter`, `Escape`, and displayed one- or two-letter jump codes |
-| Display & Navigation icon | Opens layout/navigation preferences: the tile grid, theme selector, Outputs folder path, and the External theme file picker |
+| Display & Navigation icon | Opens layout/navigation preferences: the tile grid, theme selector, Extra Data Folder, Outputs folder, and the External theme file picker |
 | Theme list | Choose from the built-in themes plus any from an external theme file; also reachable with `Ctrl+Shift+T` as a live-preview switcher |
 | Folder nav mode icon | Toggle Nav Row 1 between **buttons** and **dropdown** display; persists per workspace |
 | Subfolder nav mode icon | Toggle Nav Row 2 between **buttons** and **dropdown** display; persists per workspace |

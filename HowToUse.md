@@ -31,7 +31,8 @@ workspace-root/
 
 | UI Element | What it does |
 |---|---|
-| **Nav Row 1** (top folder buttons) | Pick a top-level folder in `Data/[workspace]/` — opens its Notes listing modal |
+| **Nav Row 1** (top folder buttons) | Pick a top-level folder in the current workspace — opens its Notes listing modal |
+| **Workspace switcher** (chips, top-left) | Switch workspace. The Extra Data Folder, if set, is the first chip |
 | **Nav Row 2** (subfolder buttons) | Pick a subfolder — opens its Notes listing modal |
 | **root** button | Shows notes saved directly in the folder (not in any subfolder) |
 | **Ctrl+L** | Notes listing modal for the current folder (sort + archived toggle) |
@@ -52,6 +53,12 @@ workspace-root/
 | **Trash icon** | Moves the note to the system trash (Recycle Bin / Trash) |
 | **Calendar icon** | Shows tasks by Start/Due/Completed date |
 | **Outputs icon** | Opens a separate configured export/output folder |
+
+## Extra Data Folder
+
+**Settings → Extra Data Folder** points RecallStack at any folder on disk outside the workspace `Data/` tree. It appears as the **first chip in the workspace switcher** (left of the `Data/` workspaces) and works like one — its subfolders are Nav Row 1, and browse / open / edit / create / rename / move / archive / delete all behave normally. It persists across sessions; **Clear** removes it.
+
+Limitations: its notes are **not** in search, the calendar, backlinks, or `[[wikilink]]` completion; it has no Tasks or Daily Journal (those icons are hidden while it's active).
 
 ## The editor
 

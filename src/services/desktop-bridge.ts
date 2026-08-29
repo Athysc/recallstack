@@ -316,6 +316,28 @@ import { assertPortableName } from "./portable-names";
       for await (const entry of this.values()) yield [entry.name, entry];
     }
 
+    async getDirectoryHandle(name: string, options: { create?: boolean } = {}) {
+      validateName(name);
+      const path = join(this.path, name);
+      const metadata = await invoke<NativeMetadata | null>('external_fs_entry', { path });
+      if (!metadata && options.create) await invoke('external_fs_create_dir', { path });
+      else if (!metadata) throw new DOMException(`Directory not found: ${name}`, 'NotFoundError');
+      else if (!metadata.isDir) throw new DOMException(`Not a directory: ${name}`, 'TypeMismatchError');
+      return new NativeExternalDirectoryHandle(path, name);
+    }
+
+    async getFileHandle(name: string, options: { create?: boolean } = {}) {
+      validateName(name);
+      const path = join(this.path, name);
+      let metadata = await invoke<NativeMetadata | null>('external_fs_entry', { path });
+      if (!metadata && options.create) {
+        await invoke('external_fs_write_text', { path, text: '' });
+        metadata = await invoke('external_fs_entry', { path });
+      } else if (!metadata) throw new DOMException(`File not found: ${name}`, 'NotFoundError');
+      if (metadata?.isDir) throw new DOMException(`Not a file: ${name}`, 'TypeMismatchError');
+      return new NativeExternalFileHandle(path, metadata || { name, path });
+    }
+
     async removeEntry(name: string) {
       validateName(name);
       return invoke('external_fs_remove', { path: join(this.path, name) });
@@ -474,6 +496,13 @@ import { assertPortableName } from "./portable-names";
       if (!value) return null;
       return typeof value === 'string' ? value : value.path || String(value);
     },
+    async chooseExtraDataFolder() {
+      if (typeof window.__TAURI__?.dialog?.open !== 'function') return null;
+      const value = await window.__TAURI__.dialog.open({ title: 'Choose Extra Data Folder', directory: true, multiple: false });
+      if (!value) return null;
+      return typeof value === 'string' ? value : value.path || String(value);
+    },
+    externalRename(from, to) { return invoke('external_fs_rename', { from, to }); },
     rebuildIndex() { return invoke('rebuild_index'); },
     cancelIndex() { return invoke('cancel_index'); },
     indexHealth() { return invoke('index_health'); },

@@ -335,7 +335,16 @@
         </div>
         <select id="theme-select" class="settings-theme-list" size="10" title="Switch theme" aria-label="Theme"><option value="catppuccin">Catppuccin</option></select>
       </section>
-      <section class="settings-output-panel" aria-labelledby="settings-output-title">
+      <section class="settings-output-panel settings-path-panel" aria-labelledby="settings-extra-data-title">
+        <label id="settings-extra-data-title" for="settings-extra-data-path">Extra Data Folder</label>
+        <div class="settings-path-row">
+          <input id="settings-extra-data-path" class="modal-input" type="text" value="" placeholder="Not set" spellcheck="false" autocomplete="off" readonly />
+          <button class="btn btn-primary" id="btn-browse-extra-data-path" type="button" title="Choose an extra data folder">Browse…</button>
+          <button class="btn btn-ghost" id="btn-clear-extra-data-path" type="button" title="Stop using an extra data folder">Clear</button>
+        </div>
+        <p class="settings-help-text">Any folder on disk, outside the workspace <code>Data/</code> tree. It appears as the first entry in the workspace switcher (left of the <code>Data/</code> workspaces) with its own subfolders and notes. Full browse / edit / create / rename / move / archive / delete; not included in search, the calendar, or backlinks; no tasks or journal.</p>
+      </section>
+      <section class="settings-output-panel settings-path-panel" aria-labelledby="settings-output-title">
         <label id="settings-output-title" for="settings-outputs-path">Outputs folder</label>
         <div class="settings-path-row">
           <input id="settings-outputs-path" class="modal-input" type="text" value="" placeholder="Not set" spellcheck="false" autocomplete="off" readonly />
@@ -343,7 +352,7 @@
         </div>
         <p class="settings-help-text">Any folder on disk. Files placed there by other tools appear in RecallStack's Outputs view.</p>
       </section>
-      <section class="settings-output-panel settings-external-theme-panel" aria-labelledby="settings-external-theme-title">
+      <section class="settings-output-panel settings-path-panel settings-external-theme-panel" aria-labelledby="settings-external-theme-title">
         <label id="settings-external-theme-title" for="settings-external-theme-path">External theme file</label>
         <div class="settings-path-row">
           <input id="settings-external-theme-path" class="modal-input" type="text" value="" placeholder="Not set" spellcheck="false" autocomplete="off" readonly />

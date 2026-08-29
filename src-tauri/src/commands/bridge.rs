@@ -598,11 +598,95 @@ pub fn external_fs_read(path: String) -> Result<Vec<u8>, String> {
     })
 }
 
+// Like validate_external_file, but the target itself may not exist yet (a new
+// note being created in the Extra Data Folder). The parent directory must be a
+// real directory, and neither the parent nor an existing target may be a
+// symlink.
+fn validate_external_write_target(path: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(path);
+    if !candidate.is_absolute() {
+        return Err("External file path must be absolute".to_string());
+    }
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| "External file has no parent directory".to_string())?;
+    let parent_meta = fs::symlink_metadata(parent).map_err(|e| e.to_string())?;
+    if parent_meta.file_type().is_symlink() || !parent_meta.is_dir() {
+        return Err("External file parent is not a directory".to_string());
+    }
+    if let Ok(meta) = fs::symlink_metadata(&candidate) {
+        if meta.file_type().is_symlink() {
+            return Err("Symbolic links are not allowed for external files".to_string());
+        }
+        if !meta.is_file() {
+            return Err("External path exists and is not a regular file".to_string());
+        }
+    }
+    Ok(candidate)
+}
+
 #[tauri::command(async)]
 pub fn external_fs_write_text(path: String, text: String) -> Result<(), String> {
     logged("external_fs_write_text", || {
-        let candidate = validate_external_file(&path)?;
+        let candidate = validate_external_write_target(&path)?;
         safety::atomic_write(&candidate, text.as_bytes())
+    })
+}
+
+// Stat any external path (file or directory); Ok(None) when it does not exist.
+#[tauri::command(async)]
+pub fn external_fs_entry(path: String) -> Result<Option<NativeEntry>, String> {
+    logged("external_fs_entry", || {
+        let candidate = PathBuf::from(&path);
+        if !candidate.is_absolute() {
+            return Err("External path must be absolute".to_string());
+        }
+        match fs::symlink_metadata(&candidate) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                Err("Symbolic links are not allowed for external paths".to_string())
+            }
+            Ok(_) => Ok(Some(external_native_entry(&candidate)?)),
+            Err(_) => Ok(None),
+        }
+    })
+}
+
+#[tauri::command(async)]
+pub fn external_fs_create_dir(path: String) -> Result<(), String> {
+    logged("external_fs_create_dir", || {
+        let candidate = PathBuf::from(&path);
+        if !candidate.is_absolute() {
+            return Err("External folder path must be absolute".to_string());
+        }
+        if let Ok(meta) = fs::symlink_metadata(&candidate) {
+            if meta.file_type().is_symlink() {
+                return Err("Symbolic links are not allowed for external folders".to_string());
+            }
+            if meta.is_dir() {
+                return Ok(());
+            }
+            return Err("External path exists and is not a directory".to_string());
+        }
+        fs::create_dir_all(&candidate).map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command(async)]
+pub fn external_fs_rename(from: String, to: String) -> Result<(), String> {
+    logged("external_fs_rename", || {
+        let source = PathBuf::from(&from);
+        if !source.is_absolute() {
+            return Err("External path must be absolute".to_string());
+        }
+        let source_meta = fs::symlink_metadata(&source).map_err(|e| e.to_string())?;
+        if source_meta.file_type().is_symlink() {
+            return Err("Symbolic links are not allowed for external paths".to_string());
+        }
+        let target = validate_external_write_target(&to)?;
+        if target.exists() {
+            return Err("A file or folder with that name already exists".to_string());
+        }
+        fs::rename(&source, &target).map_err(|e| e.to_string())
     })
 }
 
@@ -666,8 +750,16 @@ pub fn external_fs_list_recursive(path: String) -> Result<Vec<NativeEntry>, Stri
 #[tauri::command(async)]
 pub fn external_fs_remove(path: String) -> Result<(), String> {
     logged("external_fs_remove", || {
-        let candidate = validate_external_file(&path)?;
-        fs::remove_file(candidate).map_err(|e| e.to_string())
+        let candidate = PathBuf::from(&path);
+        if !candidate.is_absolute() {
+            return Err("External path must be absolute".to_string());
+        }
+        let meta = fs::symlink_metadata(&candidate).map_err(|e| e.to_string())?;
+        if meta.file_type().is_symlink() {
+            return Err("Symbolic links are not allowed for external paths".to_string());
+        }
+        // Send it to the OS trash, matching the workspace fs_remove.
+        trash::delete(&candidate).map_err(|error| error.to_string())
     })
 }
 
@@ -681,7 +773,8 @@ mod tests {
     use super::{
         list_external_directory, list_external_directory_recursive, markdown_asset_references,
         portable_read_text_from, rename_directory, validate_external_directory,
-        validate_external_file, validate_portable_target, PORTABLE_TEXT_FILES,
+        validate_external_file, validate_external_write_target, validate_portable_target,
+        PORTABLE_TEXT_FILES,
     };
     use std::collections::BTreeSet;
     use std::fs;
@@ -803,6 +896,38 @@ mod tests {
         )
         .is_err());
 
+        fs::remove_dir_all(directory).expect("remove fixture");
+    }
+
+    #[test]
+    fn external_write_target_allows_a_missing_file_with_a_real_parent() {
+        let directory = std::env::temp_dir().join(format!(
+            "recallstack-external-write-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("fixture directory");
+        // New file, parent exists → allowed (this is a new note in the Extra Data Folder).
+        assert!(validate_external_write_target(
+            directory.join("new-note.md").to_str().expect("utf8 path")
+        )
+        .is_ok());
+        // Existing regular file → allowed (overwrite on save).
+        let existing = directory.join("existing.md");
+        fs::write(&existing, "x").expect("fixture");
+        assert!(validate_external_write_target(existing.to_str().expect("utf8 path")).is_ok());
+        // Parent does not exist → rejected.
+        assert!(validate_external_write_target(
+            directory.join("missing/child.md").to_str().expect("utf8 path")
+        )
+        .is_err());
+        // Relative path → rejected.
+        assert!(validate_external_write_target("relative/child.md").is_err());
+        // Target is a directory → rejected.
+        assert!(validate_external_write_target(directory.to_str().expect("utf8 path")).is_err());
         fs::remove_dir_all(directory).expect("remove fixture");
     }
 

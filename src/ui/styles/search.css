@@ -57,7 +57,7 @@
   }
   .settings-dialog {
     width: min(1060px, 96vw);
-    max-height: min(780px, 94vh);
+    max-height: min(936px, 96vh);
     overflow-y: auto;
     background: var(--mantle);
     border: 1px solid var(--surface1);
@@ -129,26 +129,24 @@
     grid-column: 2;
     grid-row: 1 / span 2;
   }
-  .settings-output-panel {
-    grid-column: 1;
-    grid-row: 2;
-  }
-  .settings-external-theme-panel {
+  /* The path panels (Extra Data Folder, Outputs folder, External theme file)
+     all span the full width so their controls line up. */
+  .settings-path-panel {
     grid-column: 1 / -1;
     grid-row: auto;
   }
   .settings-tile.btn-icon {
     box-sizing: border-box;
     min-width: 0;
-    min-height: 126px;
+    min-height: 98px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 16px 13px;
+    gap: 5px;
+    padding: 11px 11px;
     border: 1px solid var(--surface1);
-    border-radius: 13px;
+    border-radius: 11px;
     background: var(--base);
     color: var(--subtext0);
     text-align: center;
@@ -156,11 +154,11 @@
     transition: transform .12s, border-color .15s, background .15s, color .15s, box-shadow .15s;
   }
   .settings-tile.btn-icon:hover {
-    transform: translateY(-2px);
+    transform: translateY(-1px);
     border-color: var(--overlay0);
     background: var(--surface0);
     color: var(--text);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .2);
   }
   .settings-tile.btn-icon:focus-visible {
     border-color: var(--mauve);
@@ -169,8 +167,8 @@
   }
   .settings-tile.btn-icon > svg,
   .settings-tile-icon svg {
-    width: 32px;
-    height: 32px;
+    width: 26px;
+    height: 26px;
     flex: 0 0 auto;
     color: var(--blue);
     pointer-events: none;
@@ -179,19 +177,18 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 32px;
+    height: 26px;
   }
   .settings-tile-title {
     color: var(--text);
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 700;
     line-height: 1.2;
   }
   .settings-tile-description {
-    min-height: 28px;
     color: var(--overlay1);
-    font-size: 11px;
-    line-height: 1.35;
+    font-size: 10.5px;
+    line-height: 1.3;
   }
   .settings-tile.btn-icon.active,
   .settings-tile.btn-icon.wrap-active,
@@ -280,7 +277,7 @@
     .settings-overlay { padding: 10px; }
     .settings-content { padding: 14px; }
     .settings-grid { grid-template-columns: 1fr; }
-    .settings-tile.btn-icon { min-height: 118px; }
+    .settings-tile.btn-icon { min-height: 92px; }
   }
 
   #search-view {

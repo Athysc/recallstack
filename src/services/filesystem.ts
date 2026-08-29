@@ -113,23 +113,35 @@ export interface MarkdownFilesystemOptions {
   notesHandle: () => FileSystemDirectoryHandle;
   dbPrefix: () => string;
   nativeVersions: Map<string, string>;
+  // True when a workspace-relative path lives outside the workspace Data/ tree
+  // (the Extra Data Folder). Such paths skip the native readText/writeText
+  // shortcut and go handle-based through resolveDir().
+  isExternalPath?: (path: string) => boolean;
+  // Resolves a folder path (already split into parts) to its directory handle,
+  // routing Extra Data Folder parts to the external handle.
+  resolveDir?: (parts: string[], create?: boolean) => Promise<FileSystemDirectoryHandle>;
 }
 
 export function createMarkdownFilesystem(options: MarkdownFilesystemOptions) {
+  const resolveDir = (parts: string[], create = false) =>
+    options.resolveDir
+      ? options.resolveDir(parts, create)
+      : getDirHandle(options.notesHandle(), parts, create);
+
   async function read(path: string): Promise<string> {
-    if (window.__recallstackNative?.active) {
+    if (window.__recallstackNative?.active && !options.isExternalPath?.(path)) {
       const nativePath = options.dbPrefix() + path;
       const result = await window.__recallstackNative.readText(nativePath);
       options.nativeVersions.set(nativePath, result.version);
       return result.text;
     }
     const parts = path.split("/");
-    const dir = await getDirHandle(options.notesHandle(), parts.slice(0, -1));
+    const dir = await resolveDir(parts.slice(0, -1));
     return (await (await dir.getFileHandle(parts.at(-1)!)).getFile()).text();
   }
 
   async function write(path: string, content: string): Promise<void> {
-    if (window.__recallstackNative?.active) {
+    if (window.__recallstackNative?.active && !options.isExternalPath?.(path)) {
       const nativePath = options.dbPrefix() + path;
       const version = await window.__recallstackNative.writeText(
         nativePath,
@@ -140,7 +152,7 @@ export function createMarkdownFilesystem(options: MarkdownFilesystemOptions) {
       return;
     }
     const parts = path.split("/");
-    const dir = await getDirHandle(options.notesHandle(), parts.slice(0, -1), true);
+    const dir = await resolveDir(parts.slice(0, -1), true);
     const writable = await (await dir.getFileHandle(parts.at(-1)!, { create: true })).createWritable();
     try {
       await writable.write(content);
@@ -151,13 +163,13 @@ export function createMarkdownFilesystem(options: MarkdownFilesystemOptions) {
 
   async function remove(path: string): Promise<void> {
     const parts = path.split("/");
-    const dir = await getDirHandle(options.notesHandle(), parts.slice(0, -1));
+    const dir = await resolveDir(parts.slice(0, -1));
     await dir.removeEntry(parts.at(-1)!);
     options.nativeVersions.delete(options.dbPrefix() + path);
   }
 
   async function uniquePath(folderParts: string[], filename: string): Promise<string> {
-    const dir = await getDirHandle(options.notesHandle(), folderParts, true);
+    const dir = await resolveDir(folderParts, true);
     return [...folderParts, await uniqueFilenameInDir(dir, filename)].join("/");
   }
 

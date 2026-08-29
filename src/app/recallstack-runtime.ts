@@ -166,6 +166,7 @@ type TaskLocation = {
   const DEFAULT_WORKSPACE_ROOT_PATH = '/home/scdev/notes';
   const WORKSPACE_ROOT_PATH_KEY = PREFERENCE_KEYS.workspaceRootPath;
   const OUTPUTS_FOLDER_PATH_KEY = PREFERENCE_KEYS.outputsFolderPath;
+  const EXTRA_DATA_FOLDER_PATH_KEY = PREFERENCE_KEYS.extraDataFolderPath;
   const SYSTEM_FOLDER_NAMES = new Set([TASKS_ROOT, DAILYLOGS_ROOT]);
   let   DB_WS_PREFIX = 'Data/';            // updated each time the workspace switches
 
@@ -187,6 +188,10 @@ type TaskLocation = {
   let l1Active: NamedDirectory | null = null;
   let l2Active: NamedDirectory | null = null;
   let currentPath: string | null = null;
+  // The user-configured "Extra Data Folder": an arbitrary directory on disk,
+  // outside the workspace Data/ tree, surfaced as the first workspace in the
+  // switcher. null when unset. Persisted in EXTRA_DATA_FOLDER_PATH_KEY.
+  let extraDataWorkspace: WorkspaceDirectory | null = null;
   const nativeFileVersions = new Map<string, string>();
   const currentView = createCurrentViewStore();
   currentView.subscribe(state => {
@@ -196,6 +201,8 @@ type TaskLocation = {
     notesHandle: () => notesHandle!,
     dbPrefix: () => DB_WS_PREFIX,
     nativeVersions: nativeFileVersions,
+    isExternalPath: (path: string) => isExtraDataPath(path),
+    resolveDir: (parts: string[], create?: boolean) => dirHandleForParts(parts, create),
   });
   const readMdFile = markdownFilesystem.read;
   const writeMdFile = markdownFilesystem.write;
@@ -582,7 +589,8 @@ type TaskLocation = {
   async function buildWorkspaceList(root: any) {
     const discovered = await discoverWorkspaces(root);
     dataHandle = discovered.dataHandle;
-    return discovered.workspaces;
+    // The Extra Data Folder is always the first workspace, before the Data/ ones.
+    return extraDataWorkspace ? [extraDataWorkspace, ...discovered.workspaces] : discovered.workspaces;
   }
 
   async function listWorkspaceTopDirs() {
@@ -590,8 +598,69 @@ type TaskLocation = {
     return dirs.filter(dir => !SYSTEM_FOLDER_NAMES.has(String(dir.name).toLowerCase()));
   }
 
+  // ── Extra Data Folder (a synthetic first workspace) ────────────────────────
+  // The Extra Data Folder is surfaced as the first entry in the workspace
+  // switcher, left of the Data/ workspaces. It lives outside Data/, so while it
+  // is active every read/write routes through the external FS bridge and its
+  // notes are left out of the search index.
+  function isExtraDataWorkspace(): boolean {
+    return !!currentWorkspace?.isExtraData;
+  }
+  // Kept for the markdownFilesystem hook — any path is "external" when the
+  // Extra Data Folder is the active workspace.
+  function isExtraDataPath(_path?: string | null): boolean {
+    return isExtraDataWorkspace();
+  }
+
+  async function dirHandleForParts(parts: string[], create = false): Promise<FileSystemDirectoryHandle> {
+    return getDirHandle(notesHandle!, parts, create);
+  }
+
+  // Absolute OS path for a workspace-relative path inside the active Extra Data
+  // Folder workspace.
+  function extraAbsPath(relPath: string): string {
+    const base = String(currentWorkspace?.extraPath || '').replace(/[\\/]+$/, '');
+    return relPath ? `${base}/${relPath}` : base;
+  }
+
+  // Rename/move a file or folder by workspace-relative path.
+  async function renameRelPath(oldRel: string, newRel: string): Promise<void> {
+    if (isExtraDataWorkspace()) {
+      await window.__recallstackNative!.externalRename(extraAbsPath(oldRel), extraAbsPath(newRel));
+      return;
+    }
+    await window.__recallstackNative!.renamePath(`${DB_WS_PREFIX}${oldRel}`, `${DB_WS_PREFIX}${newRel}`);
+  }
+
+  function baseNameOf(p: string): string {
+    return String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'Extra';
+  }
+
+  // The configured Extra Data Folder as a synthetic workspace (native mode),
+  // or null. Rebuilt from EXTRA_DATA_FOLDER_PATH_KEY; a listing probe confirms
+  // the folder is still reachable. Browser mode keeps whatever
+  // chooseExtraDataFolder() set (directory handles are not persistable).
+  async function ensureConfiguredExtraDataWorkspace(): Promise<void> {
+    if (!window.__recallstackNative?.active) return; // browser: keep in-memory value
+    const path = (localStorage.getItem(EXTRA_DATA_FOLDER_PATH_KEY) || '').trim();
+    if (!path) { extraDataWorkspace = null; return; }
+    const handle = window.__recallstackNative!.externalDirectoryHandle(path);
+    try {
+      await listDirs(handle);
+      extraDataWorkspace = { name: baseNameOf(path), handle, dbPrefix: '', isExtraData: true, extraPath: path };
+    } catch {
+      extraDataWorkspace = null;
+    }
+  }
+
   function isManagedSystemWorkspace() {
     return activeWorkspace != null && SYSTEM_WORKSPACES.has(activeWorkspace);
+  }
+
+  // Workspaces with no tasks/ or dailylogs/ semantics: the managed system
+  // workspaces and the Extra Data Folder. Folder create/rename still work.
+  function isNotesOnlyWorkspace() {
+    return isManagedSystemWorkspace() || isExtraDataWorkspace();
   }
 
   function openInboxDeleteModal(f: any, dirHandle: any, onDeleted: any) {
@@ -724,7 +793,7 @@ type TaskLocation = {
   // Files inside an archived/ subfolder use '../assets/' links; normal files use 'assets/'.
   async function getAssetsDirInfo() {
     const location = assetLocation(currentPath, activeFolderPath());
-    const parentHandle = await getDirHandle(notesHandle!, location.parentParts);
+    const parentHandle = await dirHandleForParts(location.parentParts);
     const prefix = location.prefix;
     return { parentHandle, prefix };
   }
@@ -773,11 +842,15 @@ type TaskLocation = {
         for (const url of oldUrls) URL.revokeObjectURL(url);
         return;
       } // no assets folder yet — nothing to load
+      const extraFolderAssets = isExtraDataPath(currentPath);
       for await (const entry of assetsDir.values()) {
         if (entry.kind !== 'file') continue;
         try {
           const nativePath = (entry as FileSystemFileHandle & { path?: string }).path;
-          if (window.__recallstackNative?.active && nativePath) {
+          // Extra Data Folder assets live outside the workspace, so the
+          // recallstack-asset:// protocol (workspace-scoped) can't serve them —
+          // fall through to a blob URL from the external file bytes.
+          if (window.__recallstackNative?.active && nativePath && !extraFolderAssets) {
             assetBlobUrls.set(prefix + entry.name, window.__recallstackNative!.assetUrl(nativePath));
             continue;
           }
@@ -802,7 +875,7 @@ type TaskLocation = {
 
     let srcAssetsDir;
     try {
-      const srcParent = await getDirHandle(notesHandle!, srcAssetParentParts);
+      const srcParent = await dirHandleForParts(srcAssetParentParts);
       srcAssetsDir = await srcParent.getDirectoryHandle('assets');
     } catch {
       return; // no assets folder in source — nothing to move
@@ -810,7 +883,7 @@ type TaskLocation = {
 
     const destIsArchived = destFolderParts.at(-1)! === 'archived';
     const destAssetParentParts = destIsArchived ? destFolderParts.slice(0, -1) : destFolderParts;
-    const destParent = await getDirHandle(notesHandle!, destAssetParentParts);
+    const destParent = await dirHandleForParts(destAssetParentParts);
     const destAssetsDir = await destParent.getDirectoryHandle('assets', { create: true });
 
     for (const name of refs) {
@@ -1075,6 +1148,7 @@ type TaskLocation = {
       await ensureWorkspaceStructure(handle);
       if (freshRoot) resetWorkspaceSessionState();
       rootHandle  = handle;
+      await ensureConfiguredExtraDataWorkspace();
       workspaces  = await buildWorkspaceList(rootHandle);
       await loadWorkspaceThemes();
 
@@ -1132,7 +1206,9 @@ type TaskLocation = {
     currentWorkspace = ws;
     activeWorkspace = ws.name;
     notesHandle     = ws.handle;
-    DB_WS_PREFIX    = ws.dbPrefix || ('Data/' + ws.name + '/');
+    DB_WS_PREFIX    = ws.isExtraData
+      ? String(ws.extraPath || '').replace(/[\\/]+$/, '') + '/'
+      : (ws.dbPrefix || ('Data/' + ws.name + '/'));
     await ensureWorkspaceSystemFolders();
     localStorage.setItem('pkm-active-workspace', ws.name);
     renderWorkspaceSwitcher(ws.name);
@@ -1204,6 +1280,9 @@ type TaskLocation = {
 
   async function ensureWorkspaceSystemFolders() {
     if (!notesHandle || isManagedSystemWorkspace()) return;
+    // The Extra Data Folder is the user's own arbitrary directory — don't
+    // create tasks/ or dailylogs/ inside it.
+    if (isExtraDataWorkspace()) return;
     await notesHandle.getDirectoryHandle(TASKS_ROOT, { create: true });
     await notesHandle.getDirectoryHandle(DAILYLOGS_ROOT, { create: true });
     if (currentWorkspace?.topLevelDirs) {
@@ -1296,9 +1375,12 @@ type TaskLocation = {
     // The Outputs entry lives in the app header as an icon button (btnOutputsTop) —
     // not duplicated here as a text button in the top-level folder navigation.
     // Keep the Journal and Tasks icon shortcuts beside each other before folder tabs.
-    navRow1.appendChild(mkReturnToTabBtn());
-    navRow1.appendChild(mkNavTaskListingBtn());
-    navRow1.appendChild(mkNavWorkingTasksBtn());
+    // The Extra Data Folder has no journal/tasks, so those icons are omitted there.
+    if (!isExtraDataWorkspace()) {
+      navRow1.appendChild(mkReturnToTabBtn());
+      navRow1.appendChild(mkNavTaskListingBtn());
+      navRow1.appendChild(mkNavWorkingTasksBtn());
+    }
     syncOutputsTopButton();
     navRow1.appendChild(mkNavSeparator());
     if (!folders.length) {
@@ -1324,7 +1406,7 @@ type TaskLocation = {
       toast(`“${options.preferredL1}” is no longer available. Folders were refreshed.`, 'error');
     }
 
-    if (isManagedSystemWorkspace()) {
+    if (isNotesOnlyWorkspace()) {
       if (folders.length) {
         if (!restoreView || !await restoreLastView(folders)) await selectL1(folders[0]);
       } else {
@@ -2981,7 +3063,7 @@ type TaskLocation = {
     if (!createTask && !l1Active && !isJournalNote()) { toast('Select a folder first', 'error'); return; }
     // Save the current editor first, avoiding a later unsaved-changes prompt.
     if (!editorView.classList.contains('hidden') && (currentPath || isNew) && !await saveNote()) return;
-    const dir = createTask ? await getDirHandle(notesHandle!, [TASKS_ROOT], true) : await activeSaveDirHandle();
+    const dir = createTask ? await dirHandleForParts([TASKS_ROOT], true) : await activeSaveDirHandle();
     const folderPath = createTask ? TASKS_ROOT : activeFolderPath();
     const defaultFilename = await uniqueDatedTitleInDir(dir, kind);
     newFileModal.open({
@@ -3122,7 +3204,7 @@ type TaskLocation = {
         // An opened file (including a journal entry nested under tasks/journal)
         // always saves beside itself; only brand-new files use the active folder.
         const folderPath = currentPath ? currentPath!.split('/').slice(0, -1).join('/') : activeFolderPath();
-        const dir = currentPath ? await getDirHandle(notesHandle!, folderPath.split('/'), true) : await activeSaveDirHandle();
+        const dir = currentPath ? await dirHandleForParts(folderPath.split('/'), true) : await activeSaveDirHandle();
         let   finalFilename = filename;
         let   notesRelPath = folderPath + '/' + finalFilename;
         const origPath     = isNew ? null : currentPath;
@@ -3478,7 +3560,7 @@ type TaskLocation = {
   // files outside the workspace.
   async function importActiveExternalFile(destParts: [string, string]) {
     const content = mdEditor.value;
-    const destDir = await getDirHandle(notesHandle!, destParts, true);
+    const destDir = await dirHandleForParts(destParts, true);
     const sourceName = currentPath!.split(/[\\/]/).pop() || 'untitled.md';
     const baseFilename = sourceName.toLowerCase().endsWith('.md') ? sourceName : sourceName + '.md';
     const finalFilename = await uniqueFilenameInDir(destDir, baseFilename);
@@ -3514,7 +3596,7 @@ type TaskLocation = {
 
       const oldPath = currentPath;
       const filename = oldPath.split('/').at(-1)!;
-      const destDir = await getDirHandle(notesHandle!, destParts, true);
+      const destDir = await dirHandleForParts(destParts, true);
       const movingTaskAsNote = isCurrentTaskFile() && moveAsNonTaskInput.checked;
       let finalFilename = movingTaskAsNote ? regularNoteFilename(filename) : filename;
       if (await fileExistsInDir(destDir, finalFilename)) {
@@ -3585,7 +3667,7 @@ type TaskLocation = {
       const parts        = currentPath!.split('/');
       const origFilename = parts.at(-1)!;
       const folderParts = parts.slice(0, -1);
-      const dirHandle   = await getDirHandle(notesHandle!, folderParts);
+      const dirHandle   = await dirHandleForParts(folderParts);
       const copyFilename = await nextDuplicateFilename(origFilename, candidate => fileExistsInDir(dirHandle, candidate));
 
       const content     = mdEditor.value;
@@ -3864,7 +3946,7 @@ type TaskLocation = {
     if (!editorView.classList.contains('hidden') && (currentPath || isNew) && !await saveNote()) return;
     const rootParts = currentTasksRootParts();
     if (!rootParts.length) return;
-    const dir = await getDirHandle(notesHandle!, [...rootParts, 'working'], true);
+    const dir = await dirHandleForParts([...rootParts, 'working'], true);
     const defaultFilename = await uniqueDatedTitleInDir(dir, 'working-task');
     newFileModal.open({
       title: newMarkdownFileTitle('working-task'),
@@ -3926,7 +4008,7 @@ type TaskLocation = {
   // When nothing but the (protected) daily journal is open, land on the journal
   // instead of the file list — there is no "dynamic" file to show.
   async function ensureJournalWhenEmpty() {
-    if (!notesHandle || isManagedSystemWorkspace()) return;
+    if (!notesHandle || isNotesOnlyWorkspace()) return;
     const hasDynamicTab = tabs.some(tab => !tab.pinned);
     const hasOtherPinned = tabs.some(tab => tab.pinned && !isProtectedDailyJournalTab(tab));
     if (hasDynamicTab || hasOtherPinned) return;
@@ -3950,7 +4032,7 @@ type TaskLocation = {
     isExternalFile            = false;
     currentExternalPath       = null;
     currentExternalFileHandle = null;
-    if (!notesHandle || isManagedSystemWorkspace()) { cancelEdit(); return; }
+    if (!notesHandle || isNotesOnlyWorkspace()) { cancelEdit(); return; }
     try {
       await openTodayJournal();
     } catch (error) {
@@ -4128,7 +4210,7 @@ type TaskLocation = {
         if (await dirExists(notesHandle!, newName)) {
           throw new Error(`Folder "${newName}" already exists`);
         }
-        await window.__recallstackNative!.renamePath(`${DB_WS_PREFIX}${oldL1Name}`, `${DB_WS_PREFIX}${newName}`);
+        await renameRelPath(oldL1Name, newName);
         l1Active!.handle = await notesHandle!.getDirectoryHandle(newName);
         l1Active!.name   = newName;
 
@@ -4203,9 +4285,9 @@ type TaskLocation = {
         if (await dirExists(l1Active!.handle, newName)) {
           throw new Error(`Subfolder "${newName}" already exists`);
         }
-        await window.__recallstackNative!.renamePath(
-          `${DB_WS_PREFIX}${l1Active!.name}/${oldL2Name}`,
-          `${DB_WS_PREFIX}${l1Active!.name}/${newName}`,
+        await renameRelPath(
+          `${l1Active!.name}/${oldL2Name}`,
+          `${l1Active!.name}/${newName}`,
         );
         l2Active!.handle = await l1Active!.handle.getDirectoryHandle(newName);
         l2Active!.name   = newName;
@@ -4963,6 +5045,9 @@ type TaskLocation = {
   async function buildSearchIndex() {
     const generation = workspaceSessionGeneration;
     const nextIndex: SearchIndexEntry[] = [];
+    // The Extra Data Folder is intentionally left out of search / backlinks /
+    // wikilink completion.
+    if (isExtraDataWorkspace()) { searchIndex = []; return; }
     if (window.__recallstackNative?.active) {
       const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
       const notes = await window.__recallstackNative!.indexedNotes(prefix);
@@ -5564,7 +5649,7 @@ type TaskLocation = {
   }
 
   async function collectQuickTaskItems() {
-    const tasksDir = await getDirHandle(notesHandle!, [TASKS_ROOT], true);
+    const tasksDir = await dirHandleForParts([TASKS_ROOT], true);
     const entries: any[] = [];
     const raw = await Promise.all((await listMdFiles(tasksDir)).map(enrichFileContent));
     raw.forEach(file => entries.push({ file, path: `${TASKS_ROOT}/${file.name}`, inWorking: false }));
@@ -6610,7 +6695,7 @@ type TaskLocation = {
   // workspace folder (a copy-in — the external source is left untouched) and
   // returns the new workspace-relative path.
   async function importExternalSelectionIntoWorkspace(file: OpenImportSelection, destParts: [string, string]): Promise<string> {
-    const destDir = await getDirHandle(notesHandle!, destParts, true);
+    const destDir = await dirHandleForParts(destParts, true);
     const baseFilename = file.name.toLowerCase().endsWith('.md') ? file.name : file.name + '.md';
     const finalFilename = await uniqueFilenameInDir(destDir, baseFilename);
     const finalPath = buildImportedFilePath(destParts, finalFilename);
@@ -7065,7 +7150,7 @@ type TaskLocation = {
   }
 
   async function buildTaskSections(archived: boolean, sort: ListingSort): Promise<ListingSection[]> {
-    const tasksDir = await getDirHandle(notesHandle!, [TASKS_ROOT], true);
+    const tasksDir = await dirHandleForParts([TASKS_ROOT], true);
     const folderParts = archived ? [TASKS_ROOT, 'archived'] : [TASKS_ROOT];
     let dir: FileSystemDirectoryHandle = tasksDir;
     if (archived) {
@@ -7084,7 +7169,7 @@ type TaskLocation = {
   }
 
   async function buildWorkingSections(sort: ListingSort): Promise<ListingSection[]> {
-    const tasksDir = await getDirHandle(notesHandle!, [TASKS_ROOT], true);
+    const tasksDir = await dirHandleForParts([TASKS_ROOT], true);
     let dir: FileSystemDirectoryHandle;
     try { dir = await tasksDir.getDirectoryHandle('working'); } catch { return []; }
     const files = await listMdFiles(dir);
@@ -7900,6 +7985,73 @@ type TaskLocation = {
     chooseOutputsFolder().catch(e => toast('Could not open that folder: ' + (e?.message || e), 'error'));
   });
 
+  // ── Extra Data Folder ─────────────────────────────────────────────────────
+  const extraDataPathInput = $id<HTMLInputElement>('settings-extra-data-path');
+  const btnBrowseExtraDataPath = $id('btn-browse-extra-data-path');
+  const btnClearExtraDataPath = $id('btn-clear-extra-data-path');
+
+  function syncExtraDataPathInput() {
+    extraDataPathInput.value = window.__recallstackNative?.active
+      ? (localStorage.getItem(EXTRA_DATA_FOLDER_PATH_KEY) || '')
+      : (extraDataWorkspace?.name || '');
+    btnClearExtraDataPath.disabled = !(window.__recallstackNative?.active
+      ? localStorage.getItem(EXTRA_DATA_FOLDER_PATH_KEY)
+      : extraDataWorkspace);
+  }
+
+  async function refreshWorkspaceSwitcherAfterExtraDataChange(activateExtra: boolean) {
+    if (!rootHandle) return;
+    workspaces = await buildWorkspaceList(rootHandle);
+    if (activateExtra && extraDataWorkspace) {
+      await switchWorkspace(extraDataWorkspace, { restoreView: false });
+    } else {
+      renderWorkspaceSwitcher(activeWorkspace || '');
+    }
+  }
+
+  async function chooseExtraDataFolder() {
+    if (window.__recallstackNative?.active) {
+      const path = await window.__recallstackNative!.chooseExtraDataFolder();
+      if (!path) return;
+      localStorage.setItem(EXTRA_DATA_FOLDER_PATH_KEY, path);
+      await ensureConfiguredExtraDataWorkspace();
+      if (!extraDataWorkspace) { toast('Could not open that folder', 'error'); localStorage.removeItem(EXTRA_DATA_FOLDER_PATH_KEY); }
+      else toast(`Extra data folder set: ${extraDataWorkspace.name} ✓`);
+    } else {
+      try {
+        const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        extraDataWorkspace = { name: handle.name, handle, dbPrefix: '', isExtraData: true, extraPath: handle.name };
+        toast(`Extra data folder set: ${handle.name} ✓`);
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') toast('Could not open that folder: ' + e.message, 'error');
+        return;
+      }
+    }
+    syncExtraDataPathInput();
+    await refreshWorkspaceSwitcherAfterExtraDataChange(!!extraDataWorkspace);
+  }
+
+  async function clearExtraDataFolder() {
+    localStorage.removeItem(EXTRA_DATA_FOLDER_PATH_KEY);
+    const wasActive = isExtraDataWorkspace();
+    extraDataWorkspace = null;
+    syncExtraDataPathInput();
+    toast('Extra data folder cleared');
+    if (wasActive) {
+      workspaces = await buildWorkspaceList(rootHandle);
+      const fallback = workspaces.find(w => !SYSTEM_WORKSPACES.has(w.name)) || workspaces[0];
+      if (fallback) { await switchWorkspace(fallback, { restoreView: false }); return; }
+    }
+    await refreshWorkspaceSwitcherAfterExtraDataChange(false);
+  }
+
+  btnBrowseExtraDataPath.addEventListener('click', () => {
+    chooseExtraDataFolder().catch(e => toast('Could not open that folder: ' + (e?.message || e), 'error'));
+  });
+  btnClearExtraDataPath.addEventListener('click', () => {
+    clearExtraDataFolder().catch(e => toast('Could not clear: ' + (e?.message || e), 'error'));
+  });
+
   // ── External theme file ───────────────────────────────────────────────────
   const externalThemePathInput = $id<HTMLInputElement>('settings-external-theme-path');
   const btnBrowseExternalTheme = $id('btn-browse-external-theme');
@@ -7960,7 +8112,7 @@ type TaskLocation = {
     overlay: modalSettings,
     closeButton: btnSettingsClose,
     trigger: btnSettings,
-    beforeOpen: () => { syncOutputsPathInput(); syncExternalThemeInput(); },
+    beforeOpen: () => { syncExtraDataPathInput(); syncOutputsPathInput(); syncExternalThemeInput(); },
   });
 
   // ── Nav row mode toggle buttons ───────────────────────────────────────────────

@@ -4,6 +4,29 @@
 
 ## Version 0.1.4 — 2026-08-27 (unreleased)
 
+### Extra Data Folder
+
+**Settings → Extra Data Folder** points RecallStack at any directory on disk
+outside the workspace's `Data/` tree. It appears as the **first chip in the
+workspace switcher**, before the `Data/` workspaces, and behaves like one — its
+subfolders are Nav Row 1, and browse / open / edit / create / rename / move /
+archive / delete all work the same (deletes go to the OS trash). Assets in its
+`assets/` subfolders render in the preview.
+
+- The choice **persists across sessions and workspace switches** — it's a global
+  setting.
+- Its notes are **not** added to search, the calendar, backlinks, or
+  `[[wikilink]]` completion.
+- It has no Tasks or Daily Journal — those nav icons are hidden while it is the
+  active workspace, and `tasks/` / `dailylogs/` are never created inside it.
+- **Clear** removes it and switches back to a `Data/` workspace.
+
+### Settings layout
+
+The three folder/file panels — **Extra Data Folder**, **Outputs folder**,
+**External theme file** — now share one full width so their controls line up.
+The preference tiles are shorter, with less padding.
+
 ### Theme catalog rebuilt
 
 The old catalog is replaced. Six **Blazory** themes are kept (Vapor, Vapor Mist,

@@ -9,6 +9,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   wordWrap: "pkm-word-wrap",
   workspaceRootPath: "recallstack-workspace-root-path",
   outputsFolderPath: "recallstack-outputs-folder-path",
+  extraDataFolderPath: "recallstack-extra-data-folder-path",
   externalThemePath: "recallstack-external-theme-path",
   taskListingSort: "pkm-task-listing-sort",
   workingListingSort: "pkm-working-listing-sort",
