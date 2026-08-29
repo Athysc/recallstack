@@ -4538,6 +4538,50 @@ type TaskLocation = {
     return true;
   }
 
+  // Reading-mode keyboard navigation (bare J/K/H/L), gated by the same conditions
+  // as canEnterEditFromPreview(): a note is open, its preview is showing, and
+  // focus is not in a text field.
+
+  // Scroll offsets (from the top of the scrollable content) of each visible
+  // top-level block in the preview — the "paragraphs" J/K step through.
+  function previewBlockOffsets(): number[] {
+    const surface = previewOut.querySelector<HTMLElement>('.preview-zoom-surface') || previewOut;
+    const base = previewOut.getBoundingClientRect().top - previewOut.scrollTop;
+    return Array.from(surface.children)
+      .filter((el): el is HTMLElement => el instanceof HTMLElement && el.offsetParent !== null)
+      .map(el => Math.round(el.getBoundingClientRect().top - base));
+  }
+
+  function scrollPreviewByBlock(direction: 1 | -1): void {
+    const maxTop = Math.max(0, previewOut.scrollHeight - previewOut.clientHeight);
+    const current = previewOut.scrollTop;
+    const offsets = previewBlockOffsets();
+    const EPSILON = 2;
+    let target: number;
+    if (!offsets.length) {
+      target = current + direction * Math.round(previewOut.clientHeight * 0.9);
+    } else if (direction === 1) {
+      target = offsets.find(top => top > current + EPSILON) ?? maxTop;
+    } else {
+      target = [...offsets].reverse().find(top => top < current - EPSILON) ?? 0;
+    }
+    previewOut.scrollTop = Math.max(0, Math.min(maxTop, target));
+  }
+
+  // Move to the tab immediately left (-1) or right (+1) of the active one. Unlike
+  // switchToRelativeTab this does not wrap: at either end nothing happens. A tab
+  // that comes up in edit mode (an empty note) is switched to its preview.
+  async function focusAdjacentTab(direction: 1 | -1): Promise<void> {
+    const index = tabs.findIndex(tab => tab.id === activeTabId);
+    if (index < 0) return;
+    const next = tabs[index + direction];
+    if (!next || next.id === activeTabId) return;
+    await activateTab(next.id);
+    if (readingViewState === 'edit' && !editorView.classList.contains('hidden')) {
+      setReadingView('preview');
+    }
+  }
+
   // ── Block-level render caching ────────────────────────────────────────────────
   // The expensive parts of a preview render are per-block: hljs.highlight() for
   // each fenced code block and Mermaid's dagre layout for each diagram (see the
@@ -7659,6 +7703,15 @@ type TaskLocation = {
     if (!mod && plain && key === 'i' && canEnterEditFromPreview()) {
       e.preventDefault();
       setReadingView('edit');
+      return;
+    }
+
+    // Reading mode: J/K scroll the preview a paragraph at a time (the arrow keys
+    // still scroll by line); H/L move to the previous / next tab without wrapping.
+    if (!mod && plain && (key === 'j' || key === 'k' || key === 'h' || key === 'l') && canEnterEditFromPreview()) {
+      e.preventDefault();
+      if (key === 'j' || key === 'k') scrollPreviewByBlock(key === 'j' ? 1 : -1);
+      else void focusAdjacentTab(key === 'l' ? 1 : -1);
       return;
     }
 

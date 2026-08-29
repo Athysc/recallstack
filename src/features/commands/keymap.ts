@@ -128,6 +128,15 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     description: "Toggle the quick tab switcher.",
     category: "Files & Tabs",
   },
+  {
+    id: "navigation.adjacent-tab",
+    combo: "H / L",
+    label: "Previous / next tab (reading)",
+    description:
+      "While a note's preview is focused and you are not editing, H moves to the tab on the left and L to the tab on the right. Nothing happens at either end. A tab that opens in edit mode is switched to its preview.",
+    category: "Files & Tabs",
+    editorOnly: true,
+  },
 
   // ── Navigation ──────────────────────────────────────────────────────────
   {
@@ -181,6 +190,15 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     label: "Edit / preview",
     description:
       "A note opens in the preview; I (insert) switches to editing and Esc switches back.",
+    category: "Views & Panels",
+    editorOnly: true,
+  },
+  {
+    id: "view.reading-scroll",
+    combo: "J / K",
+    label: "Scroll preview by paragraph",
+    description:
+      "While a note's preview is focused and you are not editing, J scrolls down and K scrolls up one paragraph at a time. The arrow keys still scroll by line.",
     category: "Views & Panels",
     editorOnly: true,
   },
