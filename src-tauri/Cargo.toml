@@ -1,6 +1,6 @@
 [package]
 name = "recallstack"
-version = "0.1.3"
+version = "2.0.0"
 description = "Local-first Markdown workspace"
 authors = ["Sam Chiang <scdev@icloud.com>"]
 license-file = "../LICENSE"

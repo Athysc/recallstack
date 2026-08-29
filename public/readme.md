@@ -2,7 +2,7 @@
 
 A portable Tauri 2 desktop Personal Knowledge Management (PKM) app for notes, tasks, and journaling. Markdown remains in the workspace you select; no installation is required on Windows, Linux, or macOS.
 
-Current application version: **0.1.3**.
+Current application version: **2.0**.
 
 ---
 

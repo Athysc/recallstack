@@ -2,7 +2,13 @@
 
 ---
 
-## Version 0.1.4 — 2026-08-27 (unreleased)
+## Version 2.0 — 2026-08-29
+
+A large cleanup-and-focus release: one editor mode, a rebuilt theme catalog,
+modal-based note/task browsing, an Extra Data Folder, deletes that go to the OS
+trash, and a lot of removed weight — automatic file versioning, the classic
+split editor, the aggregate "All Tasks" view, and several settings toggles are
+gone.
 
 ### Extra Data Folder
 
@@ -25,7 +31,8 @@ archive / delete all work the same (deletes go to the OS trash). Assets in its
 
 The three folder/file panels — **Extra Data Folder**, **Outputs folder**,
 **External theme file** — now share one full width so their controls line up.
-The preference tiles are shorter, with less padding.
+The preference tiles are shorter with less padding, the theme list is less tall,
+and the dialog itself is ~20% taller.
 
 ### Theme catalog rebuilt
 
@@ -81,8 +88,8 @@ straight in editing.
   toggled: the aggregate in-place task list, its status/folder grouping button,
   and the per-workspace grouping preference. The **`Ctrl+T` Task listing modal**
   (and its Nav Row 1 icon) is the task workflow now.
-- The Theme list in Settings is shorter, and the tile grid is tighter now that
-  it holds six tiles instead of nine.
+- A **Remote Images** tile was added (see below). Net: the tile grid holds seven
+  tiles instead of nine.
 
 ### Modal listing windows (Notes / Tasks / Working Tasks)
 
