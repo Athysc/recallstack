@@ -2318,14 +2318,37 @@ type TaskLocation = {
     return /win/i.test(platform);
   }
 
-  // Writes plain text to the clipboard. In the native desktop app this goes through
-  // Tauri's clipboard-manager plugin (X11/Wayland directly) instead of
-  // navigator.clipboard.writeText(), which on Linux routes through WebKitGTK's own
-  // clipboard bridge and logs a harmless-looking but noisy "Gdk-WARNING: Error
-  // writing selection data: Broken pipe" whenever a clipboard-history tool reads it.
+  function isLinuxPlatform() {
+    const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+    return /linux|x11/i.test(platform) && !/android/i.test(platform);
+  }
+
+  // Writes plain text to the clipboard. On Linux the native desktop app routes
+  // through Tauri's clipboard-manager plugin (X11/Wayland directly) instead of
+  // navigator.clipboard.writeText(), which on WebKitGTK logs a harmless-looking
+  // but noisy "Gdk-WARNING: Error writing selection data: Broken pipe" whenever a
+  // clipboard-history tool reads it. On Windows/macOS the webview's own
+  // navigator.clipboard works reliably and the plugin path (arboard) can reject
+  // when the OS clipboard is momentarily locked by another process, so we prefer
+  // navigator.clipboard there and only fall back to the plugin.
   async function copyPlainText(text: any) {
-    if (window.__recallstackNative?.active) return window.__recallstackNative!.writeClipboardText(text);
-    return navigator.clipboard.writeText(text);
+    const value = text == null ? '' : String(text);
+    const native = window.__recallstackNative;
+    const usePluginFirst = native?.active && isLinuxPlatform();
+    if (usePluginFirst) {
+      try {
+        return await native!.writeClipboardText(value);
+      } catch (err) {
+        // fall through to the webview clipboard below
+        console.warn('Native clipboard write failed, falling back to navigator.clipboard', err);
+      }
+    }
+    try {
+      return await navigator.clipboard.writeText(value);
+    } catch (err) {
+      if (!usePluginFirst && native?.active) return native.writeClipboardText(value);
+      throw err;
+    }
   }
 
   function normalizeWorkspaceRootPath(path: any) {
@@ -4794,7 +4817,7 @@ type TaskLocation = {
           btn.textContent = 'Copied!';
           btn.classList.add('copied');
           setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
-        });
+        }).catch((err: any) => toast('Copy failed: ' + (err?.message || err), 'error'));
       });
       pre.appendChild(btn);
     });
@@ -4819,7 +4842,7 @@ type TaskLocation = {
           btn.innerHTML = checkIcon();
           btn.classList.add('copied');
           setTimeout(() => { btn.innerHTML = copyIcon(); btn.classList.remove('copied'); }, 1600);
-        });
+        }).catch((err: any) => toast('Copy failed: ' + (err?.message || err), 'error'));
       });
       wrapper.appendChild(btn);
     });
@@ -4864,7 +4887,7 @@ type TaskLocation = {
           btn.textContent = 'Copied!';
           btn.classList.add('copied');
           setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
-        });
+        }).catch((err: any) => toast('Copy failed: ' + (err?.message || err), 'error'));
       });
       bq.appendChild(btn);
     });
@@ -5918,8 +5941,12 @@ type TaskLocation = {
   });
   btnMakeCopy.addEventListener('click', makeCopy);
   btnCopyMd.addEventListener('click', async () => {
-    await copyPlainText(mdEditor.value);
-    toast('Copied to clipboard');
+    try {
+      await copyPlainText(mdEditor.value);
+      toast('Copied to clipboard');
+    } catch (err: any) {
+      toast('Copy failed: ' + (err?.message || err), 'error');
+    }
   });
   btnCopyHtml.addEventListener('click', async () => {
     const rootCs = getComputedStyle(document.documentElement);
@@ -6021,14 +6048,22 @@ type TaskLocation = {
   btnCopyPath.addEventListener('click', async () => {
     const path = fullPathForCurrentFile();
     if (!path) { toast('Save or open a markdown file first', 'error'); return; }
-    await copyPlainText(`\`${path}\``);
-    toast('Full file path copied as inline code');
+    try {
+      await copyPlainText(`\`${path}\``);
+      toast('Full file path copied as inline code');
+    } catch (err: any) {
+      toast('Copy failed: ' + (err?.message || err), 'error');
+    }
   });
   btnCopyInternalLink.addEventListener('click', async () => {
     const link = internalLinkForCurrentFile();
     if (!link) { toast('Save or open a markdown file first', 'error'); return; }
-    await copyPlainText(link);
-    toast('RecallStack link copied');
+    try {
+      await copyPlainText(link);
+      toast('RecallStack link copied');
+    } catch (err: any) {
+      toast('Copy failed: ' + (err?.message || err), 'error');
+    }
   });
   previewOut.addEventListener('click', (e: any) => {
     const a = e.target instanceof Element ? e.target.closest('a[href^="#recallstack-open="]') : null;
@@ -6240,8 +6275,12 @@ type TaskLocation = {
   // selection data: Broken pipe" a clipboard-history tool triggers. Intercept
   // the copy event and write the selected text through the native plugin
   // instead, same as every other explicit copy action in the app.
+  //
+  // Linux only: on Windows/macOS the webview's native copy works fine and does
+  // not hit the Gdk warning, so intercepting there only risks swallowing the
+  // copy if the plugin path rejects (see copyPlainText).
   mdEditor.addEventListener('copy', (e: any) => {
-    if (!window.__recallstackNative?.active) return;
+    if (!window.__recallstackNative?.active || !isLinuxPlatform()) return;
     const text = mdEditor.value.slice(mdEditor.selectionStart, mdEditor.selectionEnd);
     if (!text) return;
     e.preventDefault();
@@ -8588,7 +8627,12 @@ type TaskLocation = {
             'text/plain': new Blob([plain], { type: 'text/plain' }),
           })]);
         } catch {
-          await copyPlainText(html);
+          try {
+            await copyPlainText(html);
+          } catch (err: any) {
+            toast('Copy failed: ' + (err?.message || err), 'error');
+            return;
+          }
         }
         btn.classList.add('copied');
         btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
