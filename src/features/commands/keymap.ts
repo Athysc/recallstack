@@ -36,9 +36,9 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   {
     id: "global.escape",
     combo: "Esc",
-    label: "Close overlay / go to journal",
+    label: "Close overlay / exit mode",
     description:
-      "Closes any open palette or modal and returns to the current file. With nothing open, saves and jumps to today's Daily Journal.",
+      "Closes any open palette or modal; exits presentation mode; returns from editing to the preview. Otherwise does nothing.",
     category: "Global",
   },
   {

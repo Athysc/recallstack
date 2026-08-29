@@ -30,7 +30,7 @@ workspace-root/
 
 ### Workspace Outputs Folder
 
-The Outputs icon beside workspace refresh opens the configured Outputs folder. Configure the path from **Display & Navigation**. If no path is set, RecallStack defaults to `<workspace path>/openbrain/outputs` using the platform's native path handling and creates the folder automatically when needed. The Outputs folder controls live below the 3×3 Display & Navigation tile grid, while the theme list remains in its right-side panel.
+The Outputs icon beside workspace refresh opens the configured Outputs folder. Configure the path from **Display & Navigation**. If no path is set, RecallStack defaults to `<workspace path>/openbrain/outputs` using the platform's native path handling and creates the folder automatically when needed. The Outputs folder controls live below the Display & Navigation tile grid, while the theme list remains in its right-side panel.
 
 ### Opening a Workspace
 
@@ -281,6 +281,7 @@ Results are written to `performance-results/windows.json` or `performance-result
 | Word wrap icon | Toggle word wrap on/off in the editor; persists globally |
 | Cursor position icon | Toggle where the cursor lands when opening a file — **First Line** (default) or **Last Line**; persists globally |
 | Collapse icon | Toggle whether collapsible preview sections are **expanded** (default) or **collapsed** by default on render; persists globally. Also immediately opens/closes all collapsible sections in the current preview |
+| Remote Images tile | Load `http(s)` images and media in the preview (**on** by default); turn off to block remote media for privacy. Persists globally |
 | Book icon | Markdown syntax reference |
 | Info icon | User guide |
 | Clock icon | What's New — change log for this version of RecallStack |
@@ -715,10 +716,14 @@ full schema.
 
 ## The Escape Key
 
-- With a palette or any modal open, `Esc` closes it and returns you to the
-  note or task you had selected.
-- With nothing open, `Esc` saves the current file and jumps to today's Daily
-  Journal.
+`Esc` only *undoes a mode* — it never navigates:
+
+- With a palette or any modal open, it closes that and returns you to the note
+  or task you had selected.
+- In presentation mode, it exits presentation.
+- While editing a note, it returns to the preview.
+- With nothing to exit, it does nothing. Press `Ctrl+J` to jump to today's
+  Daily Journal.
 
 When no note, task, or working task is open, RecallStack shows the Daily Journal
 rather than an empty file list.
@@ -732,7 +737,7 @@ keys are case-insensitive.
 
 | Shortcut | Action |
 |---|---|
-| `Esc` | Close any open palette or modal and return to the current file. With nothing open, save and jump to today's Daily Journal. |
+| `Esc` | Close any open palette or modal; exit presentation; return from editing to the preview. Otherwise does nothing. |
 | `Ctrl+K` | Open the keyboard-shortcut reference sheet |
 | `Ctrl+P` | Toggle the command palette (command-search `>` mode) |
 | `Ctrl+Shift+T` | Open the theme switcher (live preview; Enter applies) |

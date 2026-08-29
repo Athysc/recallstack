@@ -61,7 +61,7 @@ A note opens showing only the rendered **Preview**. Press **`I`** to edit, **`Es
 
 You almost never need to hit Save — RecallStack autosaves ~1.5 seconds after you stop typing, and immediately on switching files or minimizing the window. Manual **Save (Ctrl+S)** is only required to confirm a title/filename change.
 
-Press **Esc** with nothing open to save and jump to today's Daily Journal; with a palette or modal open it just closes that and returns you to the current file.
+**Esc** only undoes a mode: it closes an open palette or modal, exits presentation, and returns from editing to the preview. With nothing to exit it does nothing — press **Ctrl+J** to jump to today's Daily Journal.
 
 ## Getting Help In-App
 

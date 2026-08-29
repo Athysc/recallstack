@@ -131,12 +131,10 @@ hold many themes; ids that collide with a built-in are skipped. **Use sample
 themes** loads the bundled **Lupine** and **Osaka Jade** themes (from Omarchy
 Quattro).
 
-### Escape and the default view
+### The default view
 
-`Esc` closes any open palette or modal and returns to the current file; with
-nothing open it saves and jumps to today's Daily Journal. When no note, task, or
-working task is open, RecallStack shows the Daily Journal instead of an empty
-file list.
+When no note, task, or working task is open, RecallStack shows the Daily Journal
+instead of an empty file list.
 
 ### Faster saves — automatic file version history removed
 
@@ -179,16 +177,33 @@ contents of the most recent previous journal. A startup ordering bug meant the
 note catalog wasn't ready yet when the new journal was created, so it came up
 blank.
 
-### Closing a note keeps your place
+### The nav keeps your folder selected
 
-Closing the note you are viewing now stays in its top-folder + subfolder, with
-both kept selected in the nav:
+The selected top folder and subfolder no longer get cleared out from under you.
 
-- If another open tab lives in the same folder + subfolder, it becomes active.
-- Otherwise the editor goes blank and that folder's listing shows — the
-  always-open Daily Journal tab no longer takes over and wipes the selection.
-- The Daily Journal is only shown as a fallback when there are genuinely no
-  other tabs open.
+- **Opening the Daily Journal** — via `Ctrl+J`, the calendar, the journal
+  button, or the close-tab fallback — leaves the current folder + subfolder
+  highlighted instead of wiping them. Re-picking them on every journal visit
+  was pure friction.
+- **Closing the note you are viewing** stays in its top folder + subfolder: if
+  another open tab lives in the same folder + subfolder it becomes active,
+  otherwise the editor goes blank with that folder still selected. The Daily
+  Journal is only shown as a fallback when no other tabs are open.
+
+### Escape no longer navigates
+
+**Esc** now only *undoes a mode*: it closes an open palette or modal, exits
+presentation mode, and returns from editing to the preview. On a note or file
+with nothing to exit — including today's Daily Journal — it does nothing (it
+used to save and jump to today's journal; use **Ctrl+J** for that).
+
+### Preview images load by default
+
+The preview no longer hides remote (`http`/`https`) images and media behind a
+"blocked for privacy" placeholder — in a personal notes app the images are your
+own. A new **Settings → Remote Images** tile turns blocking back on if you want
+it. Local `assets/` images whose filename contains spaces (or other
+percent-encoded characters) now resolve too.
 
 ---
 

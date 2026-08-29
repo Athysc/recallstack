@@ -1246,6 +1246,9 @@ type TaskLocation = {
   function saveLastView(mode: any, path: any) {
     if (!activeWorkspace || !l1Active) return;
     if (outputsMode || returnToOutputs) return;
+    // The Daily Journal is always auto-opened on its own; it must not overwrite
+    // the folder's remembered list/file view.
+    if (mode === 'file' && isJournalPath(path)) return;
     const state = {
       l1:   l1Active!.name,
       l2:   l2Active ? l2Active!.name : null,
@@ -1436,6 +1439,24 @@ type TaskLocation = {
   // without triggering a file list reload. Called when opening a file from search.
   async function syncNavToPath(notesRelPath: any) {
     const parts      = notesRelPath.split('/');
+    // The Daily Journal is opened constantly (Ctrl+J, the close-tab fallback,
+    // the calendar, the return-to-journal button). It must NOT clear which top
+    // folder / subfolder the user has selected — re-picking them on every
+    // journal visit is friction. Reset only editor-file state; leave l1Active,
+    // l2Active, their highlights, archive mode, and both nav rows untouched.
+    if (isJournalPath(notesRelPath)) {
+      outputsMode         = false;
+      outputsActiveFolder = null;
+      returnToOutputs     = false;
+      isOutputsFile       = false;
+      currentOutputsFh    = null;
+      currentOutputsDirFh = null;
+      isExternalFile      = false;
+      currentExternalPath = null;
+      currentExternalFileHandle = null;
+      clearOutputsNavActive();
+      return;
+    }
     if (SYSTEM_FOLDER_NAMES.has(String(parts[0] || '').toLowerCase())) {
       l1Active         = null;
       l2Active         = null;
@@ -4779,8 +4800,13 @@ type TaskLocation = {
         img.replaceWith(box);
         return;
       }
-      if (src && (src.startsWith('assets/') || src.startsWith('../assets/')) && assetBlobUrls.has(src)) {
-        img.src = assetBlobUrls.get(src)!;
+      if (src && (src.startsWith('assets/') || src.startsWith('../assets/'))) {
+        // Decode percent-encoding (e.g. %20 → space) so a filename with spaces
+        // still matches the assetBlobUrls key, which is the raw entry name.
+        let decoded;
+        try { decoded = decodeURIComponent(src); } catch { decoded = src; }
+        if (assetBlobUrls.has(decoded)) img.src = assetBlobUrls.get(decoded)!;
+        else if (assetBlobUrls.has(src)) img.src = assetBlobUrls.get(src)!;
       }
 
       // Wrap each image (once) in a relative container and add the open button
@@ -5203,7 +5229,9 @@ type TaskLocation = {
   }
 
   function externalMediaAllowed() {
-    return remoteMediaSessionAllowed || localStorage.getItem('pkm-load-remote-media') === 'on';
+    // Personal notes hold the user's own images — load remote media by default.
+    // The Settings → Remote Images tile writes 'off' to opt back into blocking.
+    return remoteMediaSessionAllowed || localStorage.getItem('pkm-load-remote-media') !== 'off';
   }
 
   // ── Events ────────────────────────────────────────────────────────────────────
@@ -7446,13 +7474,6 @@ type TaskLocation = {
     );
     if (generic) generic.classList.add('hidden');
   }
-  async function handleGlobalEscape() {
-    if (!editorView.classList.contains('hidden')) {
-      try { await autoSaveIfDirty(true); } catch { /* fall through to journal */ }
-    }
-    try { await openTodayJournal(); }
-    catch (error: any) { toast('Could not open journal: ' + (error?.message || error), 'error'); }
-  }
   let escapeOverlayWasOpen = false;
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') escapeOverlayWasOpen = anyOverlayOpen();
@@ -7523,9 +7544,14 @@ type TaskLocation = {
     if (e.key === 'Escape') {
       if (anyOverlayOpen()) { e.preventDefault(); closeTopmostOverlay(); return; }
       if (escapeOverlayWasOpen) return; // an overlay's own handler already closed it
+      // Presentation mode: Escape exits it.
+      if (presentationOn) {
+        e.preventDefault();
+        $id('btn-exit-presentation').click();
+        return;
+      }
       // Escape while editing returns to the preview (and triggers one render).
-      if (readingViewState === 'edit' && !presentationOn
-        && !editorView.classList.contains('hidden')) {
+      if (readingViewState === 'edit' && !editorView.classList.contains('hidden')) {
         e.preventDefault();
         if (currentPath && !isNew) void autoSaveIfDirty(true);
         setReadingView('preview');
@@ -7539,8 +7565,8 @@ type TaskLocation = {
         exitSearchView();
         return;
       }
-      e.preventDefault();
-      void handleGlobalEscape();
+      // Nothing else: Escape does not navigate anywhere (it used to jump to
+      // today's Daily Journal — use Ctrl+J for that).
       return;
     }
 
@@ -8092,6 +8118,29 @@ type TaskLocation = {
       }
     }
     renderWorkspaceSwitcher(activeWorkspace || '');
+  });
+
+  // ── Remote image / media toggle ─────────────────────────────────────────────
+  const REMOTE_MEDIA_KEY = PREFERENCE_KEYS.loadRemoteMedia;
+  const btnRemoteMedia = $id('btn-remote-media');
+  const IMAGE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.35-4.35a2 2 0 0 0-2.83 0L4 20"/></svg>';
+  const IMAGE_OFF_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.35-4.35a2 2 0 0 0-2.83 0L4 20"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
+  let remoteMediaOn = localStorage.getItem(REMOTE_MEDIA_KEY) !== 'off';
+  function applyRemoteMediaBtn() {
+    btnRemoteMedia.querySelector<HTMLElement>('.settings-tile-icon')!.innerHTML = remoteMediaOn ? IMAGE_SVG : IMAGE_OFF_SVG;
+    btnRemoteMedia.setAttribute('aria-pressed', String(remoteMediaOn));
+    btnRemoteMedia.title = remoteMediaOn
+      ? 'Remote images load automatically in the preview'
+      : 'Remote (http/https) images are blocked in the preview';
+    btnRemoteMedia.classList.toggle('active', remoteMediaOn);
+  }
+  applyRemoteMediaBtn();
+  btnRemoteMedia.addEventListener('click', () => {
+    remoteMediaOn = !remoteMediaOn;
+    localStorage.setItem(REMOTE_MEDIA_KEY, remoteMediaOn ? 'on' : 'off');
+    if (!remoteMediaOn) remoteMediaSessionAllowed = false;
+    applyRemoteMediaBtn();
+    if (!editorView.classList.contains('hidden')) renderPreview();
   });
 
   // Set the initial single-pane (preview) layout before any document opens.
