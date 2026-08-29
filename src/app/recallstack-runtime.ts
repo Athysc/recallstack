@@ -2844,6 +2844,19 @@ type TaskLocation = {
     return true;
   }
 
+  // The top-folder / subfolder a tab's file lives in, or null for tabs that
+  // have no place in the folder navigation (tasks, journal, Outputs, external,
+  // unsaved). "archived" is not a subfolder — a file one level into archived/
+  // still belongs to its parent folder.
+  function tabFolderContext(t: EditorTab | null): { l1: string; l2: string | null } | null {
+    if (!t || t.isOutputsFile || t.isExternalFile || !t.path) return null;
+    const parts = t.path.split('/');
+    const l1 = parts[0];
+    if (!l1 || SYSTEM_FOLDER_NAMES.has(l1.toLowerCase())) return null;
+    const maybeL2 = parts.length >= 3 ? parts[1] : null;
+    return { l1, l2: (maybeL2 && maybeL2 !== 'archived') ? maybeL2 : null };
+  }
+
   async function closeTab(tabId: any) {
     const tab = tabs.find(t => t.id === tabId);
     if (!tab) return false;
@@ -2863,7 +2876,35 @@ type TaskLocation = {
     rememberClosedTab(closedTabHistory, tab);
     if (wasActive) {
       activeTabId = null;
-      if (tabs.length) {
+      const closedFolder = tabFolderContext(tab);
+      // Only keep the user "in" the closed file's folder when the nav is
+      // actually on that folder — i.e. they closed the file they were looking
+      // at, not a background tab from some other folder.
+      const onClosedFolder = !!closedFolder
+        && l1Active?.name === closedFolder.l1
+        && (l2Active?.name ?? null) === closedFolder.l2;
+
+      // Another open tab under the same top-folder + subfolder wins first.
+      const sibling = onClosedFolder
+        ? tabs
+            .map((t, i) => ({ t, i }))
+            .filter(({ t }) => {
+              const ctx = tabFolderContext(t);
+              return ctx && ctx.l1 === closedFolder!.l1 && ctx.l2 === closedFolder!.l2;
+            })
+            .sort((a, b) => Math.abs(a.i - idx) - Math.abs(b.i - idx))[0]?.t
+        : null;
+
+      if (sibling) {
+        await activateTab(sibling.id);
+      } else if (onClosedFolder && notesHandle && !isManagedSystemWorkspace()) {
+        // No sibling tab: stay on the closed file's folder + subfolder with the
+        // nav selection intact, nothing open. The Daily Journal tab stays in the
+        // strip but does not take over.
+        showEmptyEditorState();
+        renderTabStrip();
+        return true;
+      } else if (tabs.length) {
         const nextIdx = Math.min(idx, tabs.length - 1);
         await activateTab(tabs[nextIdx].id);
       } else {

@@ -179,6 +179,17 @@ contents of the most recent previous journal. A startup ordering bug meant the
 note catalog wasn't ready yet when the new journal was created, so it came up
 blank.
 
+### Closing a note keeps your place
+
+Closing the note you are viewing now stays in its top-folder + subfolder, with
+both kept selected in the nav:
+
+- If another open tab lives in the same folder + subfolder, it becomes active.
+- Otherwise the editor goes blank and that folder's listing shows — the
+  always-open Daily Journal tab no longer takes over and wipes the selection.
+- The Daily Journal is only shown as a fallback when there are genuinely no
+  other tabs open.
+
 ---
 
 ## Version 0.1.3 — 2026-08-12
