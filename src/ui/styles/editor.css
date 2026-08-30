@@ -70,6 +70,15 @@
   }
   .tab-strip-item.pinned.active .tab-title { color: var(--theme-accent-readable, var(--text)); }
 
+  /* Pinned tab kept in the strip after a workspace switch — its file lives in
+     another workspace. Activating it switches back to that workspace. */
+  .tab-strip-item.from-other-workspace:not(.active) { color: var(--subtext0); }
+  .tab-strip-item.from-other-workspace .tab-title {
+    font-style: italic;
+    text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+    text-underline-offset: 3px;
+  }
+
   .tab-kind-icon {
     display: flex;
     align-items: center;

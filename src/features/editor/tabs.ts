@@ -24,6 +24,15 @@ export interface EditorTab {
   // document without Ctrl retargets that same tab instead of adding a new
   // one, matching a preview-tab UX rather than accumulating tabs per click.
   pinned: boolean;
+  // Name of the workspace folder this tab's file lives in, captured when the
+  // tab is opened. `path` is workspace-relative, so the same relative path can
+  // exist in more than one workspace — this disambiguates. Pinned tabs stay in
+  // the strip across workspace switches; activating one whose `workspace`
+  // differs from the active workspace realigns the workspace/top-folder/
+  // subfolder selection back to the tab's file. Null only for tabs opened
+  // before any workspace was selected; outputs/external tabs set it too but it
+  // is unused for them (they are not workspace-scoped).
+  workspace: string | null;
 }
 
 export interface EditorDocumentSnapshot {

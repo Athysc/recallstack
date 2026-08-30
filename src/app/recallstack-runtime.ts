@@ -30,7 +30,6 @@ import { assetMarkdownLink, isScreenshotItem, joinDroppedAssetLinks } from "../f
 import { nativeDraftPath as resolveNativeDraftPath, rewriteAssetLinks, runBestEffort, toggleMarkdownCheckbox } from "../features/editor/lifecycle";
 import {
   activeTab as findActiveTab,
-  findTabByPath as findTabForPath,
   relativeTab,
   rememberClosedTab,
   remapTabPaths as remapOpenTabPaths,
@@ -1199,9 +1198,20 @@ type TaskLocation = {
   async function switchWorkspace(ws: WorkspaceDirectory, options: NavigationOptions = {}) {
     if (!await checkUnsavedNewNote()) return;
     const changingWorkspace = !!currentWorkspace && currentWorkspace !== ws;
+    let carriedPinnedTabs: EditorTab[] = [];
     if (changingWorkspace) {
       if (!await autoSaveIfDirty(true)) return;
+      // Opened pinned tabs stay visible after a workspace switch. The protected
+      // daily journal is per-workspace (recreated below) and the single unpinned
+      // "dynamic" tab is scratch, so both are dropped; outputs/external tabs
+      // aren't workspace-scoped and keep their existing switch behavior.
+      carriedPinnedTabs = tabs.filter(tab =>
+        tab.pinned && !isProtectedDailyJournalTab(tab) && !tab.isOutputsFile && !tab.isExternalFile);
       resetWorkspaceSessionState();
+      if (carriedPinnedTabs.length) {
+        tabs = carriedPinnedTabs;
+        renderTabStrip();
+      }
     }
     currentWorkspace = ws;
     activeWorkspace = ws.name;
@@ -2522,8 +2532,24 @@ type TaskLocation = {
   // today's single-document flow), a *background* tab is always left in a clean,
   // saved-or-discarded state — so only the active tab can ever be "dirty".
 
-  function findTabByPath(path: any) {
-    return findTabForPath(tabs, path);
+  // Pinned tabs survive a workspace switch, so `tabs` can hold entries whose
+  // file lives in a different workspace than the active one. This is true for a
+  // regular note tab only while it belongs to the active workspace (or predates
+  // any workspace selection); outputs/external tabs are not workspace-scoped.
+  function tabBelongsToActiveWorkspace(tab: EditorTab): boolean {
+    if (tab.isOutputsFile || tab.isExternalFile) return true;
+    return tab.workspace == null || tab.workspace === activeWorkspace;
+  }
+
+  // A tab's `path` is workspace-relative, so a plain path match can land on a
+  // carried-over tab from another workspace that happens to share the relative
+  // path. Restrict regular-note matches to the active workspace; outputs and
+  // external tabs are keyed by a globally unique path/handle key, so they match
+  // regardless.
+  function findTabByPath(path: any): EditorTab | null {
+    if (path == null) return null;
+    return tabs.find(tab => tab.path === path
+      && (tab.isOutputsFile || tab.isExternalFile || tabBelongsToActiveWorkspace(tab))) || null;
   }
 
   function activeTabRecord() {
@@ -2589,7 +2615,10 @@ type TaskLocation = {
   // exists. Workspace file paths only — outputs tabs are keyed by handle, not
   // by a workspace-relative path, so they're left untouched.
   function remapTabPaths(oldPrefix: any, newPrefix: any) {
-    remapOpenTabPaths(tabs, oldPrefix, newPrefix, tabTitleForPath);
+    // A folder rename/move only touches the workspace it happened in — never a
+    // pinned tab carried over from a different workspace that shares a top
+    // folder name.
+    remapOpenTabPaths(tabs.filter(tabBelongsToActiveWorkspace), oldPrefix, newPrefix, tabTitleForPath);
   }
 
   function tabTitleForPath(path: any, isOutputsFileFlag = false) {
@@ -2681,7 +2710,13 @@ type TaskLocation = {
       item.tabIndex = 0;
       const protectedDailyJournal = isProtectedDailyJournalTab(tab);
       item.classList.toggle('protected-daily-journal', protectedDailyJournal);
-      item.title = (tab.path || 'Untitled') + (protectedDailyJournal ? ' (today journal, pinned)' : tab.pinned ? ' (pinned)' : '');
+      // A pinned tab whose file lives in another workspace stays in the strip;
+      // flag it so it reads as "elsewhere" and note the workspace in the tooltip.
+      const fromOtherWorkspace = !tabBelongsToActiveWorkspace(tab);
+      item.classList.toggle('from-other-workspace', fromOtherWorkspace);
+      item.title = (tab.path || 'Untitled')
+        + (protectedDailyJournal ? ' (today journal, pinned)' : tab.pinned ? ' (pinned)' : '')
+        + (fromOtherWorkspace ? ` — in ${tab.workspace}` : '');
       item.draggable = isReorderableTab(tab);
       const kindMarkup = tabKindIconMarkup(tab);
       const kindIcon = document.createElement('span');
@@ -2881,18 +2916,18 @@ type TaskLocation = {
   // Shared by openFileInTab()/openOutputsFileInTab(): a pinned open always
   // adds a new tab. An unpinned open reuses the existing dynamic tab (there
   // is at most one) instead of creating another one.
-  function claimTabSlot(pinned: boolean, fields: Omit<EditorTab, 'id' | 'pinned'>) {
+  function claimTabSlot(pinned: boolean, fields: Omit<EditorTab, 'id' | 'pinned' | 'workspace'>) {
     const previousActiveId = activeTabId;
     if (!pinned) {
       const dynamicTab = tabs.find(t => !t.pinned);
       if (dynamicTab) {
-        Object.assign(dynamicTab, fields);
+        Object.assign(dynamicTab, fields, { workspace: activeWorkspace });
         activeTabId = dynamicTab.id;
         enforceTabOrder();
         return { tab: dynamicTab, previousActiveId, isNewTab: false };
       }
     }
-    const tab: EditorTab = { id: nextTabId++, pinned, ...fields };
+    const tab: EditorTab = { id: nextTabId++, pinned, workspace: activeWorkspace, ...fields };
     tabs.push(tab);
     activeTabId = tab.id;
     enforceTabOrder();
@@ -2949,6 +2984,18 @@ type TaskLocation = {
     if (!await checkUnsavedNewNote()) return false;
     if (!await autoSaveIfDirty()) return false;
     syncActiveTabFromState();
+    // A pinned tab kept from a different workspace realigns the active
+    // workspace (and, via loadFileIntoEditor -> syncNavToPath below, the top
+    // folder + subfolder) back to the file it points at.
+    if (!target.isOutputsFile && !target.isExternalFile
+        && target.workspace && target.workspace !== activeWorkspace) {
+      const targetWs = workspaces.find(w => w.name === target.workspace);
+      if (!targetWs) {
+        toast(`Workspace “${target.workspace}” is no longer available`, 'error');
+        return false;
+      }
+      await switchWorkspace(targetWs, { restoreView: false });
+    }
     activeTabId = tabId;
     const ok = target.isOutputsFile
       ? await loadOutputsFileIntoEditor(target)
@@ -4032,8 +4079,11 @@ type TaskLocation = {
   // instead of the file list — there is no "dynamic" file to show.
   async function ensureJournalWhenEmpty() {
     if (!notesHandle || isNotesOnlyWorkspace()) return;
-    const hasDynamicTab = tabs.some(tab => !tab.pinned);
-    const hasOtherPinned = tabs.some(tab => tab.pinned && !isProtectedDailyJournalTab(tab));
+    // Pinned tabs carried over from another workspace don't count — the newly
+    // entered workspace still has "nothing of its own open" and should land on
+    // its daily journal.
+    const hasDynamicTab = tabs.some(tab => !tab.pinned && tabBelongsToActiveWorkspace(tab));
+    const hasOtherPinned = tabs.some(tab => tab.pinned && !isProtectedDailyJournalTab(tab) && tabBelongsToActiveWorkspace(tab));
     if (hasDynamicTab || hasOtherPinned) return;
     const showingFile = !editorView.classList.contains('hidden');
     if (showingFile) return; // already on the journal (the only non-dynamic file)

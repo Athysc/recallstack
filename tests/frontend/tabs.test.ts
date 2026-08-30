@@ -16,6 +16,7 @@ function tab(id: number, path: string, outputs = false, external = false): Edito
     id, path, title: path, isNew: false, dirty: false, isOutputsFile: outputs,
     outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false,
     isExternalFile: external, externalPath: external ? path : null, externalFileHandle: null, pinned: false,
+    workspace: null,
   };
 }
 
