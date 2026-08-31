@@ -377,6 +377,10 @@ type TaskLocation = {
   const taskInputPriority  = $id('task-input-priority');
   const taskInputStatus    = $id('task-input-status');
   const taskMetaSummary = $id('task-meta-summary');
+  // Mirror of the task meta summary shown in the preview pane's label row, so the
+  // Start / Completed / Due dates and Priority stay visible in preview mode (the
+  // editor pane, and its copy of this summary, are display:none while reading).
+  const taskMetaSummaryPreview = $id('task-meta-summary-preview');
   const taskKindIndicator = $id('task-kind-indicator');
   const taskEditorLayout = $id('task-editor-layout');
   const taskEditorTop = $id('task-editor-top');
@@ -3967,7 +3971,9 @@ type TaskLocation = {
   }
 
   function updateTaskMetaSummary(meta: any) {
-    taskMetaSummary.innerHTML = taskMetaSummaryHtml(meta, normalizeTaskPriority, taskPriorityLabel, esc);
+    const html = taskMetaSummaryHtml(meta, normalizeTaskPriority, taskPriorityLabel, esc);
+    taskMetaSummary.innerHTML = html;
+    taskMetaSummaryPreview.innerHTML = html;
   }
 
   function taskKindIndicatorMarkup(working: any, journal = false) {
@@ -3990,6 +3996,7 @@ type TaskLocation = {
     if (isTasksEditor()) {
       taskDateBar.classList.remove('hidden');
       taskMetaSummary.classList.remove('hidden');
+      taskMetaSummaryPreview.classList.remove('hidden');
       syncDateInputsFromEditor();
       syncStatusInputFromFilename();
       updateTaskKindIndicator();
@@ -4001,12 +4008,14 @@ type TaskLocation = {
       taskEditorLayout.classList.add('is-task-editor');
       updateTaskKindIndicator();
       taskMetaSummary.classList.add('hidden');
+      taskMetaSummaryPreview.classList.add('hidden');
     } else {
       taskDateBar.classList.add('hidden');
       taskEditorLayout.classList.remove('is-task-editor');
       taskEditorTop.style.flex = '1';
       taskKindIndicator.classList.add('hidden');
       taskMetaSummary.classList.add('hidden');
+      taskMetaSummaryPreview.classList.add('hidden');
     }
   }
 
