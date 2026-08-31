@@ -3802,7 +3802,9 @@ type TaskLocation = {
 
     let tasksHandle;
     try {
-      tasksHandle = await l1Active!.handle.getDirectoryHandle('tasks', { create: true });
+      // The workspace has a single top-level tasks folder (tasks/<file>.md),
+      // shared across every note folder — not a per-subfolder tasks/ dir.
+      tasksHandle = await dirHandleForParts([TASKS_ROOT], true);
     } catch (e: any) {
       toast('Could not access tasks folder: ' + e.message, 'error');
       return;
@@ -3820,20 +3822,22 @@ type TaskLocation = {
     const finalFilename = await fileExistsInDir(tasksHandle, desiredFilename)
       ? await nextDuplicateFilename(desiredFilename, candidate => fileExistsInDir(tasksHandle, candidate))
       : desiredFilename;
-    const finalRelPath = l1Active!.name + '/tasks/' + finalFilename;
+    const finalRelPath = TASKS_ROOT + '/' + finalFilename;
 
     const newContent  = removeLegacyTaskHeader(mdEditor.value);
 
     await writeMdFile(finalRelPath, newContent);
-    await moveAssetsWithFile(sourcePath, [l1Active!.name, 'tasks'], newContent);
+    await moveAssetsWithFile(sourcePath, [TASKS_ROOT], newContent);
     await removeMdFile(sourcePath);
     removeFromSearchIndex(sourcePath);
     updateSearchIndex(finalRelPath, newContent);
 
-    l2Active     = { name: 'tasks', handle: tasksHandle };
     currentPath  = finalRelPath;
     isNew        = false;
     savedContent = newContent;
+    // tasks/ is a system folder: this clears l1Active/l2Active and the nav-row
+    // highlights, matching how a task opened from the listing or quick-open looks.
+    await syncNavToPath(finalRelPath);
     syncActiveTabFromState();
     renderTabStrip();
 
@@ -3856,7 +3860,6 @@ type TaskLocation = {
     updateConvertToTaskBtn();
     updateConvertToNoteBtn();
     showTaskDateBar();
-    setActive(navRow2, 'tasks');
     refreshCalendarIfVisible();
     toast('Converted to task ✓');
   }
