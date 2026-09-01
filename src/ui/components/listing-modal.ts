@@ -38,6 +38,7 @@ export interface ListingModalElements {
   filterClearBtn: HTMLButtonElement;
   sortBtn: HTMLButtonElement;
   archivedBtn: HTMLButtonElement;
+  createBtn: HTMLButtonElement;
   results: HTMLElement;
   typed: HTMLElement;
 }
@@ -52,6 +53,9 @@ export interface ListingModalOptions {
   onSortChange(sort: ListingSort): Promise<ListingSection[]>;
   onArchivedToggle?(next: boolean): Promise<ListingSection[]>;
   onRowAction?(id: number): Promise<ListingSection[] | null>;
+  /** Provide to show the "New" button (and enable Ctrl+N) in the header. The
+   *  modal closes before this runs, so it owns whatever workflow follows. */
+  onCreate?(): void | Promise<void>;
 }
 
 interface FlatRow extends ListingRow {
@@ -88,6 +92,7 @@ export class ListingModalController {
     els.overlay.addEventListener("keydown", event => this.handleKeydown(event));
     els.sortBtn.addEventListener("click", () => void this.toggleSort());
     els.archivedBtn.addEventListener("click", () => void this.toggleArchived());
+    els.createBtn.addEventListener("click", () => void this.triggerCreate());
     els.filterInput.addEventListener("input", () => this.setFilter(els.filterInput.value));
     els.filterInput.addEventListener("keydown", event => this.handleFilterKeydown(event));
     els.filterClearBtn.addEventListener("click", () => this.clearFilter(true));
@@ -109,6 +114,7 @@ export class ListingModalController {
     this.resetFilter();
     this.els.titleEl.textContent = options.title;
     this.els.archivedBtn.classList.toggle("hidden", !options.onArchivedToggle);
+    this.els.createBtn.classList.toggle("hidden", !options.onCreate);
     this.els.overlay.classList.remove("hidden");
     this.render();
     requestAnimationFrame(() => this.els.results.focus());
@@ -305,6 +311,12 @@ export class ListingModalController {
       void this.choose(this.selected, true);
       return;
     }
+    if (this.options?.onCreate && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "n") {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.triggerCreate();
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && (event.key === " " || event.code === "Space")) {
       event.preventDefault();
       event.stopPropagation();
@@ -392,6 +404,14 @@ export class ListingModalController {
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Close the modal, then hand off to the host's "create new item" workflow. */
+  private async triggerCreate(): Promise<void> {
+    const onCreate = this.options?.onCreate;
+    if (!onCreate || this.busy) return;
+    this.close();
+    await onCreate();
   }
 
   private async runRowAction(id: number): Promise<void> {

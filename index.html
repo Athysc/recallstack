@@ -162,8 +162,16 @@
           </svg>
         </button>
         <button class="btn btn-ghost"         id="btn-cancel">Cancel</button>
-        <button class="btn btn-primary"       id="btn-new-from-editor">+ New</button>
-        <button class="btn btn-ghost"         id="btn-presentation" title="Toggle presentation mode">Presentation</button>
+        <button class="btn-icon new-file toolbar-accent-new-file" id="btn-new-from-editor" title="New file" aria-label="New file">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/>
+          </svg>
+        </button>
+        <button class="btn-icon presentation toolbar-accent-presentation" id="btn-presentation" title="Toggle presentation mode" aria-label="Toggle presentation mode">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="m10 8 4 2.5L10 13z" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
       </div>
       <div id="tab-strip" class="tab-strip hidden" role="tablist" aria-label="Open files"></div>
       <div id="presentation-exit-bar" class="hidden">

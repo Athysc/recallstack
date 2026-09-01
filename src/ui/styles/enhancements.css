@@ -404,7 +404,8 @@ html.app-booting body { visibility: hidden; }
 .listing-search-clear:hover { background: var(--surface1); color: var(--text); }
 .listing-empty { margin: 16px 8px; color: var(--subtext0); font-size: 12px; text-align: center; }
 .listing-sort-btn,
-.listing-archived-btn {
+.listing-archived-btn,
+.listing-new-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -425,7 +426,18 @@ html.app-booting body { visibility: hidden; }
   color: var(--peach);
 }
 .listing-sort-btn svg,
-.listing-archived-btn svg { width: 13px; height: 13px; }
+.listing-archived-btn svg,
+.listing-new-btn svg { width: 13px; height: 13px; }
+/* Sits at the end of the header, past "Show archived" — the create affordance. */
+.listing-new-btn {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--surface2));
+  color: color-mix(in srgb, var(--green) 72%, var(--subtext1));
+}
+.listing-new-btn:hover {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 60%, var(--surface1));
+  background: color-mix(in srgb, var(--green) 12%, var(--mantle));
+}
 .listing-modal-results { flex: 1; overflow-y: auto; padding: 7px; outline: none; }
 .listing-section-title {
   margin: 10px 6px 3px;

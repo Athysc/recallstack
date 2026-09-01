@@ -109,9 +109,10 @@
   /* Per-button color overrides — active in Special themes */
   #btn-save { background: var(--btn-save-bg, var(--mauve)); color: var(--btn-save-color, var(--crust)); }
   #btn-cancel { background: var(--btn-cancel-bg, var(--surface1)); color: var(--btn-cancel-color, var(--text)); }
-  #btn-new-from-editor, #btn-new { background: var(--btn-new-bg, var(--mauve)); color: var(--btn-new-color, var(--crust)); }
-  #btn-presentation { background: var(--btn-presentation-bg, var(--surface1)); color: var(--btn-presentation-color, var(--text)); }
+  #btn-new { background: var(--btn-new-bg, var(--mauve)); color: var(--btn-new-color, var(--crust)); }
   /* Muted, theme-derived accents for editor toolbar icon actions. */
+  .editor-toolbar .toolbar-accent-new-file { color: color-mix(in srgb, var(--mauve) 62%, var(--overlay1)); }
+  .editor-toolbar .toolbar-accent-presentation { color: color-mix(in srgb, var(--lavender) 62%, var(--overlay1)); }
   .editor-toolbar .toolbar-accent-copy-md { color: color-mix(in srgb, var(--sapphire) 62%, var(--overlay1)); }
   .editor-toolbar .toolbar-accent-copy-html { color: color-mix(in srgb, var(--blue) 62%, var(--overlay1)); }
   .editor-toolbar .toolbar-accent-copy-path { color: color-mix(in srgb, var(--lavender) 62%, var(--overlay1)); }

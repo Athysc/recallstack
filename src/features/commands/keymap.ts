@@ -82,7 +82,7 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     id: "file.new",
     combo: "Ctrl+N",
     label: "New file",
-    description: "Open the new-file picker: Note, Task, or Working Task.",
+    description: "Open the new-file picker: Note, Task, or Working Task. Inside a listing modal it creates that list's kind directly.",
     category: "Files & Tabs",
   },
   {

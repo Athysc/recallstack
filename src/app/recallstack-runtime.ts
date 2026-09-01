@@ -5131,8 +5131,7 @@ type TaskLocation = {
         // Show the presentation-only exit bar and populate the title
         presentationTitle.textContent = (titleInput.value || '').trim().replace(/\.md$/, '');
         presentationExitBar.classList.remove('hidden');
-        btnPresentation.classList.add('btn-primary');
-        btnPresentation.classList.remove('btn-ghost');
+        btnPresentation.classList.add('is-active');
       } else {
         editorPane.style.display  = '';
         editorPane.style.flex     = '1';
@@ -5146,8 +5145,7 @@ type TaskLocation = {
         taskDateBar.style.display = '';
         // Hide the presentation-only exit bar
         presentationExitBar.classList.add('hidden');
-        btnPresentation.classList.remove('btn-primary');
-        btnPresentation.classList.add('btn-ghost');
+        btnPresentation.classList.remove('is-active');
         // Hand the layout back to the preview / edit sub-state.
         applyEditorLayout();
       }
@@ -7210,6 +7208,7 @@ type TaskLocation = {
 
   // ── Grouped listing modals (Task / Working Task / Notes) ────────────────────
   const ARCHIVE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4"/><path d="M5 8v12h14V8M10 12h4"/></svg>';
+  const NEW_ITEM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 
   function mkListingModal(id: string, title: string) {
     const overlay = document.createElement('div');
@@ -7225,9 +7224,10 @@ type TaskLocation = {
       + `<span id="${id}-typed" class="listing-modal-typed" aria-live="polite"></span>`
       + `<button type="button" id="${id}-sort" class="listing-sort-btn" title="Toggle sort order"><span>Sort</span></button>`
       + `<button type="button" id="${id}-archived" class="listing-archived-btn hidden" title="Show archived files">${ARCHIVE_SVG}<span>Show archived</span></button>`
+      + `<button type="button" id="${id}-new" class="listing-new-btn hidden" title="Create new (Ctrl+N)" aria-label="Create new" aria-keyshortcuts="Control+N">${NEW_ITEM_SVG}<span>New</span></button>`
       + `</div>`
       + `<div id="${id}-results" class="listing-modal-results" role="listbox" aria-label="${esc(title)}" tabindex="0"></div>`
-      + `<div class="listing-modal-footer"><span>Type to filter</span><span>↓/J ↑/K move</span><span>Enter open</span><span>Ctrl+Enter pin</span><span>letter code jump</span><span>Esc close</span></div>`
+      + `<div class="listing-modal-footer"><span>Type to filter</span><span>↓/J ↑/K move</span><span>Enter open</span><span>Ctrl+Enter pin</span><span>Ctrl+N new</span><span>letter code jump</span><span>Esc close</span></div>`
       + `</div>`;
     document.body.appendChild(overlay);
     return new ListingModalController({
@@ -7238,6 +7238,7 @@ type TaskLocation = {
       filterClearBtn: $id<HTMLButtonElement>(`${id}-filter-clear`),
       sortBtn: $id<HTMLButtonElement>(`${id}-sort`),
       archivedBtn: $id<HTMLButtonElement>(`${id}-archived`),
+      createBtn: $id<HTMLButtonElement>(`${id}-new`),
       results: $id(`${id}-results`),
       typed: $id(`${id}-typed`),
     });
@@ -7424,6 +7425,7 @@ type TaskLocation = {
       onSortChange: async next => { sort = next; localStorage.setItem(TASK_LISTING_SORT_KEY, next); return rebuild(); },
       onArchivedToggle: async next => { archived = next; return rebuild(); },
       onRowAction: listingRowAction(rebuild),
+      onCreate: () => createFileOfKind('task'),
     });
   }
 
@@ -7439,6 +7441,7 @@ type TaskLocation = {
       onActivate: activateListingRow,
       onSortChange: async next => { sort = next; localStorage.setItem(WORKING_LISTING_SORT_KEY, next); return rebuild(); },
       onRowAction: listingRowAction(rebuild),
+      onCreate: () => createFileOfKind('working'),
     });
   }
 
@@ -7459,6 +7462,7 @@ type TaskLocation = {
       onSortChange: async next => { sort = next; localStorage.setItem(NOTES_LISTING_SORT_KEY, next); return rebuild(); },
       onArchivedToggle: async next => { archived = next; return rebuild(); },
       onRowAction: listingRowAction(rebuild),
+      onCreate: () => createFileOfKind('note'),
     });
   }
 

@@ -43,6 +43,9 @@
   .btn-icon.move:hover    { background: var(--surface0); color: var(--blue); }
   .btn-icon.convert-to-task:hover { background: var(--surface0); color: var(--peach); }
   .btn-icon.make-copy:hover       { background: var(--surface0); color: var(--sapphire); }
+  .btn-icon.new-file:hover        { background: var(--surface0); color: var(--mauve); }
+  .btn-icon.presentation:hover    { background: var(--surface0); color: var(--lavender); }
+  .btn-icon.presentation.is-active { background: var(--surface0); color: var(--lavender); }
 
   /* ── Nav row-2 archive-mode toggle ───────────────────────────────────────── */
   .nav-archive-toggle {
