@@ -598,6 +598,110 @@ pub fn external_fs_read(path: String) -> Result<Vec<u8>, String> {
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardImage {
+    /// "encoded" when `bytes` is a ready-to-write image file (PNG/etc.);
+    /// "rgba" when `bytes` is raw RGBA that needs `width`/`height`.
+    format: String,
+    width: u32,
+    height: u32,
+    bytes: Vec<u8>,
+}
+
+// Reads an image off the OS clipboard, or Ok(None) when there is none. The
+// webview does not surface pasted images through the DOM `paste` event on
+// WebKitGTK, and arboard's Wayland image support is unreliable — so on Linux
+// this shells out to wl-clipboard / xclip (the de-facto standard tools) first,
+// then falls back to arboard for Windows / macOS / X11.
+#[tauri::command(async)]
+pub fn read_clipboard_image() -> Result<Option<ClipboardImage>, String> {
+    logged("read_clipboard_image", || {
+        #[cfg(target_os = "linux")]
+        if let Some(bytes) = linux_clipboard_image_bytes() {
+            return Ok(Some(ClipboardImage {
+                format: "encoded".into(),
+                width: 0,
+                height: 0,
+                bytes,
+            }));
+        }
+        match arboard_clipboard_rgba() {
+            Some((width, height, bytes)) => Ok(Some(ClipboardImage {
+                format: "rgba".into(),
+                width,
+                height,
+                bytes,
+            })),
+            None => Ok(None),
+        }
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_clipboard_image_bytes() -> Option<Vec<u8>> {
+    use std::process::Command;
+
+    fn pick_image_mime(listing: &str) -> Option<String> {
+        let mut mimes: Vec<&str> = listing
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("image/"))
+            .collect();
+        mimes.sort_by_key(|mime| if *mime == "image/png" { 0 } else { 1 });
+        mimes.first().map(|mime| (*mime).to_string())
+    }
+
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Ok(types) = Command::new("wl-paste").arg("--list-types").output() {
+            if types.status.success() {
+                if let Some(mime) = pick_image_mime(&String::from_utf8_lossy(&types.stdout)) {
+                    if let Ok(out) = Command::new("wl-paste")
+                        .args(["--no-newline", "--type", &mime])
+                        .output()
+                    {
+                        if out.status.success() && !out.stdout.is_empty() {
+                            return Some(out.stdout);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if std::env::var_os("DISPLAY").is_some() {
+        if let Ok(targets) = Command::new("xclip")
+            .args(["-selection", "clipboard", "-t", "TARGETS", "-o"])
+            .output()
+        {
+            if targets.status.success() {
+                if let Some(mime) = pick_image_mime(&String::from_utf8_lossy(&targets.stdout)) {
+                    if let Ok(out) = Command::new("xclip")
+                        .args(["-selection", "clipboard", "-t", &mime, "-o"])
+                        .output()
+                    {
+                        if out.status.success() && !out.stdout.is_empty() {
+                            return Some(out.stdout);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn arboard_clipboard_rgba() -> Option<(u32, u32, Vec<u8>)> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    let image = clipboard.get_image().ok()?;
+    Some((
+        image.width as u32,
+        image.height as u32,
+        image.bytes.into_owned(),
+    ))
+}
+
 // Like validate_external_file, but the target itself may not exist yet (a new
 // note being created in the Extra Data Folder). The parent directory must be a
 // real directory, and neither the parent nor an existing target may be a

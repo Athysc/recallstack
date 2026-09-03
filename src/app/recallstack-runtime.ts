@@ -6746,22 +6746,69 @@ type TaskLocation = {
       return;
     }
 
-    // 3. WebKitGTK image paste: a pasted screenshot is invisible to the DOM
-    //    (no file item, no image type in clipboardData). If there's no plain
-    //    text either, read the image straight off the OS clipboard via the
-    //    native plugin. No preventDefault — a screenshot paste inserts nothing
-    //    into the editor on its own, so there's nothing to suppress.
-    if (!window.__recallstackNative?.active || text) return;
+    // 3. Image paste. A pasted screenshot is invisible to the DOM on WebKitGTK
+    //    (no file item, no image type in clipboardData), so pull it off the OS
+    //    clipboard directly. When there's no text to lose, suppress the native
+    //    paste up front; a text paste is left alone and only probed for an image
+    //    that some screenshot tools attach alongside the filename.
+    if (!text && window.__recallstackNative?.active) e.preventDefault();
+    void tryPasteClipboardImage(!text);
+  });
+
+  // Pull an image off the OS clipboard (via the Rust command) and insert it as
+  // an asset. `loud` surfaces real errors as toasts; kept quiet when a plain
+  // text paste is also in flight so an ordinary paste stays silent.
+  async function tryPasteClipboardImage(loud: boolean): Promise<boolean> {
+    if (!window.__recallstackNative?.active) {
+      // Browser mode: the async Clipboard API is the only option.
+      try {
+        const clip = (navigator as any).clipboard;
+        const items = clip?.read ? await clip.read() : [];
+        for (const item of items) {
+          const type: string | undefined = (item.types || []).find((t: string) => t.startsWith('image/'));
+          if (!type) continue;
+          const blob: Blob = await item.getType(type);
+          const filename = clipFilename();
+          const relPath  = await saveAsset(filename, await blob.arrayBuffer(), type);
+          insertAtCursor(assetMarkdownLink(filename, relPath, true));
+          toast(`Asset saved: ${filename}`);
+          return true;
+        }
+      } catch (err) { console.warn('[RS paste] navigator.clipboard.read() failed', err); }
+      return false;
+    }
+
+    let img: Awaited<ReturnType<NonNullable<typeof window.__recallstackNative>['readClipboardImage']>>;
     try {
-      const { rgba, width, height } = await window.__recallstackNative.readClipboardImage();
-      if (!width || !height) return;
-      const pngBuf   = await rgbaToPngBytes(rgba, width, height);
+      img = await window.__recallstackNative.readClipboardImage();
+    } catch (err: any) {
+      console.warn('[RS paste] read_clipboard_image failed', err);
+      if (loud) toast('Could not read image from clipboard: ' + (err?.message || err), 'error');
+      return false;
+    }
+    if (!img || !img.bytes || !img.bytes.length) {
+      // No image on the clipboard. When this was clearly an image-intent paste
+      // (no text to fall back to), say so rather than doing nothing.
+      if (loud) toast('No image found on the clipboard', 'error');
+      return false;
+    }
+
+    try {
+      const raw = new Uint8Array(img.bytes);
+      const data: ArrayBuffer | Uint8Array = img.format === 'rgba'
+        ? await rgbaToPngBytes(raw, img.width, img.height)
+        : raw;
       const filename = clipFilename();
-      const relPath  = await saveAsset(filename, pngBuf, 'image/png');
+      const relPath  = await saveAsset(filename, data, 'image/png');
       insertAtCursor(assetMarkdownLink(filename, relPath, true));
       toast(`Asset saved: ${filename}`);
-    } catch { /* nothing usable on the clipboard */ }
-  });
+      return true;
+    } catch (err: any) {
+      console.error('[RS paste] failed to save pasted image', err);
+      toast('Failed to save pasted image: ' + (err?.message || err), 'error');
+      return false;
+    }
+  }
 
   // A plain Ctrl+C / right-click-Copy inside the editor is handled by the webview
   // itself. On Linux that routes through WebKitGTK's clipboard bridge, which can
@@ -7535,6 +7582,8 @@ type TaskLocation = {
         // secondary signal — WebKitGTK's reported drop coordinates can't always
         // be trusted, so "the editor is showing" is the primary condition.
         void insertNativeDroppedAssets(payload.paths);
+      } else if (payload.paths?.length) {
+        toast('Open a note first to drop files into it', 'error');
       }
     }).catch(err => console.warn('Could not attach native drag-and-drop listener', err));
   }

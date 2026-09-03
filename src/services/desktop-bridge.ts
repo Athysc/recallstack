@@ -418,14 +418,15 @@ import { assertPortableName } from "./portable-names";
     // images through the DOM `paste` event's clipboardData. Returns RGBA bytes
     // plus dimensions; the caller re-encodes to PNG. Rejects when the clipboard
     // holds no image.
-    async readClipboardImage() {
-      const rid = await invoke<number>('plugin:clipboard-manager|read_image');
-      const [rgba, size] = await Promise.all([
-        invoke<number[] | ArrayBuffer | Uint8Array>('plugin:image|rgba', { rid }),
-        invoke<{ width: number; height: number }>('plugin:image|size', { rid }),
-      ]);
-      // Tauri returns Vec<u8> as an ArrayBuffer or a number[] depending on IPC.
-      return { rgba: new Uint8Array(rgba as ArrayBuffer), width: size.width, height: size.height };
+    // Reads an image off the OS clipboard through the Rust command, which shells
+    // out to wl-clipboard / xclip on Linux (arboard's Wayland image support is
+    // unreliable) and uses arboard on Windows/macOS. Returns null when the
+    // clipboard has no image. `format: "encoded"` => `bytes` is a ready PNG;
+    // `format: "rgba"` => raw RGBA needing `width`/`height`.
+    readClipboardImage() {
+      return invoke('read_clipboard_image') as Promise<
+        { format: 'encoded' | 'rgba'; width: number; height: number; bytes: number[] } | null
+      >;
     },
     search(query, prefix = '') { return invoke('search_notes', { query, prefix }); },
     recentWorkspaces() { return invoke('recent_workspaces'); },

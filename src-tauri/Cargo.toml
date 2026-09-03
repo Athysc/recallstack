@@ -17,6 +17,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Direct use for read_clipboard_image (Windows/macOS/X11 fallback). Already in
+# the tree transitively via tauri-plugin-clipboard-manager.
+arboard = "3"
 chrono = { version = "0.4", features = ["serde"] }
 notify = "8"
 parking_lot = "0.12"

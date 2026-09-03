@@ -8,7 +8,7 @@ interface RecallStackNativeBridge {
   openWorkspacePath(path: string): Promise<FileSystemDirectoryHandle>;
   workspaceRootPath(): string | null;
   writeClipboardText(text: string): Promise<void>;
-  readClipboardImage(): Promise<{ rgba: Uint8Array; width: number; height: number }>;
+  readClipboardImage(): Promise<{ format: 'encoded' | 'rgba'; width: number; height: number; bytes: number[] } | null>;
   revealPath(path?: string | null): Promise<void>;
   revealWorkspace(): Promise<void>;
   knowledgeSearch(query: string, prefix?: string, limit?: number, offset?: number): Promise<{ results: Array<Record<string, any>>; total: number; offset: number; hasMore: boolean }>;

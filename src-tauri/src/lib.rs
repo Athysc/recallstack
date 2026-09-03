@@ -406,6 +406,7 @@ pub fn run() {
             bridge::external_fs_entry,
             bridge::external_fs_read_text,
             bridge::external_fs_read,
+            bridge::read_clipboard_image,
             bridge::external_fs_write_text,
             bridge::external_fs_create_dir,
             bridge::external_fs_rename,
