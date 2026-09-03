@@ -601,3 +601,37 @@ html.app-booting body { visibility: hidden; }
 }
 .nav-journal-btn--vivid:hover { background: color-mix(in srgb, var(--mauve) 26%, transparent); }
 .nav-working-tasks-btn.nav-icon-task-btn:hover { background: color-mix(in srgb, var(--green) 22%, transparent); }
+
+/* Daily Journal / Task / Working Task shortcuts now live in the app bar, right
+   of the Outputs icon. Give all three a consistent icon-button box (the
+   .nav-working-tasks-btn class carries no base style of its own); the .app-bar's
+   own flex gap handles spacing. */
+.app-bar .appbar-tasks-btn {
+  flex: 0 0 auto;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 29px;
+  height: 27px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--overlay1);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.app-bar .appbar-tasks-btn svg { display: block; pointer-events: none; }
+.app-bar .appbar-tasks-btn:hover { background: var(--surface0); color: var(--text); }
+.app-bar .appbar-tasks-btn:disabled { opacity: 0.3; cursor: default; }
+/* Keep the vivid Journal tint and the green Working-Task hover from the shared
+   nav-button rules above, just scoped into the app bar. */
+.app-bar #btn-return-to-tab { background: color-mix(in srgb, var(--mauve) 14%, transparent); }
+.app-bar #btn-return-to-tab:hover { background: color-mix(in srgb, var(--mauve) 26%, transparent); color: var(--mauve); }
+.app-bar #btn-return-to-tab.active {
+  color: var(--mauve);
+  background: color-mix(in srgb, var(--mauve) 16%, transparent);
+  border-color: color-mix(in srgb, var(--mauve) 34%, transparent);
+}
+.app-bar #btn-working-tasks:hover { background: color-mix(in srgb, var(--green) 22%, transparent); }

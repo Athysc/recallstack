@@ -11,28 +11,36 @@ export interface WorkspaceDirectory extends NamedDirectory {
   extraPath?: string;
 }
 
+// The global tasks / dailylogs roots. They live directly under `Data/`, as
+// siblings of the workspace folders, and are shared by every workspace — never
+// surfaced as workspaces of their own.
+export const GLOBAL_TASKS_DIRS: ReadonlySet<string> = new Set(["tasks", "dailylogs"]);
+
+// Creates the global `Data/tasks` and `Data/dailylogs` roots if missing.
+export async function ensureGlobalTasksRoots(dataHandle: FileSystemDirectoryHandle): Promise<void> {
+  for (const name of GLOBAL_TASKS_DIRS) {
+    try {
+      await dataHandle.getDirectoryHandle(name, { create: true });
+    } catch (error) {
+      // Unit-test directory mocks may not implement the create option. Real
+      // FileSystemDirectoryHandle implementations create the folder here.
+      if (!error || typeof error !== "object" || !("name" in error) || error.name !== "NotFoundError") throw error;
+    }
+  }
+}
+
 export async function discoverWorkspaces(root: FileSystemDirectoryHandle): Promise<{
   workspaces: WorkspaceDirectory[];
   dataHandle: FileSystemDirectoryHandle | null;
 }> {
   const workspaces: WorkspaceDirectory[] = [];
   let dataHandle: FileSystemDirectoryHandle | null = null;
-  async function ensureTaskRoots(handle: FileSystemDirectoryHandle): Promise<void> {
-    for (const name of ["tasks", "dailylogs"]) {
-      try {
-        await handle.getDirectoryHandle(name, { create: true });
-      } catch (error) {
-        // Unit-test directory mocks may not implement the create option. Real
-        // FileSystemDirectoryHandle implementations create the folder here.
-        if (!error || typeof error !== "object" || !("name" in error) || error.name !== "NotFoundError") throw error;
-      }
-    }
-  }
   try {
     dataHandle = await getDirHandle(root, ["Data"]);
+    await ensureGlobalTasksRoots(dataHandle);
     const dataWorkspaces = await listDirs(dataHandle);
     for (const workspace of dataWorkspaces) {
-      await ensureTaskRoots(workspace.handle);
+      if (GLOBAL_TASKS_DIRS.has(workspace.name.toLowerCase())) continue;
       workspaces.push({
         ...workspace,
         dbPrefix: `Data/${workspace.name}/`,

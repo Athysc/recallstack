@@ -39,8 +39,9 @@ export async function ensureWorkspaceStructure(root: FileSystemDirectoryHandle):
     const notesWorkspace = await dataDir.getDirectoryHandle("notes", { create: true });
     const mynotes = await notesWorkspace.getDirectoryHandle("mynotes", { create: true });
     await mynotes.getDirectoryHandle("notes", { create: true });
-    await notesWorkspace.getDirectoryHandle("tasks", { create: true });
-    await notesWorkspace.getDirectoryHandle("dailylogs", { create: true });
+    // tasks/ and dailylogs/ are global roots, siblings of the workspace folders.
+    await dataDir.getDirectoryHandle("tasks", { create: true });
+    await dataDir.getDirectoryHandle("dailylogs", { create: true });
   }
   const dbDir = await root.getDirectoryHandle("DB", { create: true });
   await dbDir.getFileHandle("index.db", { create: true });
@@ -111,7 +112,10 @@ export async function uniqueFilenameInDir(
 
 export interface MarkdownFilesystemOptions {
   notesHandle: () => FileSystemDirectoryHandle;
-  dbPrefix: () => string;
+  // Native path prefix for a workspace-relative path. Path-aware because the
+  // global tasks/dailylogs roots live at `Data/` while normal notes live at
+  // `Data/<workspace>/`.
+  dbPrefix: (path: string) => string;
   nativeVersions: Map<string, string>;
   // True when a workspace-relative path lives outside the workspace Data/ tree
   // (the Extra Data Folder). Such paths skip the native readText/writeText
@@ -130,7 +134,7 @@ export function createMarkdownFilesystem(options: MarkdownFilesystemOptions) {
 
   async function read(path: string): Promise<string> {
     if (window.__recallstackNative?.active && !options.isExternalPath?.(path)) {
-      const nativePath = options.dbPrefix() + path;
+      const nativePath = options.dbPrefix(path) + path;
       const result = await window.__recallstackNative.readText(nativePath);
       options.nativeVersions.set(nativePath, result.version);
       return result.text;
@@ -142,7 +146,7 @@ export function createMarkdownFilesystem(options: MarkdownFilesystemOptions) {
 
   async function write(path: string, content: string): Promise<void> {
     if (window.__recallstackNative?.active && !options.isExternalPath?.(path)) {
-      const nativePath = options.dbPrefix() + path;
+      const nativePath = options.dbPrefix(path) + path;
       const version = await window.__recallstackNative.writeText(
         nativePath,
         content,
@@ -165,7 +169,7 @@ export function createMarkdownFilesystem(options: MarkdownFilesystemOptions) {
     const parts = path.split("/");
     const dir = await resolveDir(parts.slice(0, -1));
     await dir.removeEntry(parts.at(-1)!);
-    options.nativeVersions.delete(options.dbPrefix() + path);
+    options.nativeVersions.delete(options.dbPrefix(path) + path);
   }
 
   async function uniquePath(folderParts: string[], filename: string): Promise<string> {

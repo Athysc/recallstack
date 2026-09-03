@@ -21,3 +21,8 @@ test("native search mapping strips literal prefixes and preserves the raw filena
   assert.equal(result.matchInName, true);
   assert.equal(highlightMatch("A <needle>", "needle", value => value.replaceAll("<", "&lt;").replaceAll(">", "&gt;")), "A &lt;<mark>needle</mark>&gt;");
 });
+
+test("an empty prefix leaves global tasks/dailylogs keys untouched", () => {
+  assert.equal(stripWorkspacePrefix("tasks/Ship.md", ""), "tasks/Ship.md");
+  assert.equal(mapNativeIndex([{ path: "dailylogs/2026/09/journal-20260901.md", name: "journal-20260901.md" }], "")[0].notesRelPath, "dailylogs/2026/09/journal-20260901.md");
+});

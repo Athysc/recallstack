@@ -39,6 +39,13 @@ test("watcher batches route workspace-level dailylogs to calendar invalidations"
   assert.deepEqual([...invalidationScopes(value)].sort(), ["calendar", "notes", "search"]);
 });
 
+test("watcher batches route global tasks/dailylogs roots to task + calendar invalidations", () => {
+  const tasks = batch(1, [{ kind: "modify", path: "Data/tasks/new.md", entity: "markdown", internal: false }]);
+  assert.deepEqual([...invalidationScopes(tasks)].sort(), ["calendar", "notes", "search", "tasks"]);
+  const logs = batch(2, [{ kind: "modify", path: "Data/dailylogs/2026/08/journal-20260812.md", entity: "markdown", internal: false }]);
+  assert.deepEqual([...invalidationScopes(logs)].sort(), ["calendar", "notes", "search"]);
+});
+
 test("overflow invalidates every derived frontend scope", () => {
   const value = batch(1);
   value.overflowed = true;

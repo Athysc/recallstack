@@ -126,12 +126,17 @@ export function invalidationScopes(batch: WorkspaceChangeBatch): Set<Invalidatio
       scopes.add("notes");
       scopes.add("search");
       const segments = path.split("/");
+      // A per-workspace note path is `Data/<ws>/<folder>/...`; a global
+      // tasks/journal path is `Data/tasks/...` or `Data/dailylogs/...` with no
+      // workspace segment. Check both shapes.
       const workspaceSegments = segments[0] === "Data" && segments.length >= 3 ? segments.slice(2) : segments;
-      if (workspaceSegments[0]?.toLowerCase() === "tasks") {
+      const globalSegments = segments[0] === "Data" ? segments.slice(1) : segments;
+      const first = (root: string) => workspaceSegments[0]?.toLowerCase() === root || globalSegments[0]?.toLowerCase() === root;
+      if (first("tasks")) {
         scopes.add("tasks");
         scopes.add("calendar");
       }
-      if (workspaceSegments[0]?.toLowerCase() === "dailylogs") {
+      if (first("dailylogs")) {
         scopes.add("calendar");
       }
     }

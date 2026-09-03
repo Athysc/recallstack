@@ -19,7 +19,7 @@ import {
   themeRuntimeState,
 } from "../features/themes/runtime";
 import { calendarMonth, localIsoDate } from "../features/tasks/date-picker";
-import { DAILYLOGS_ROOT, TASKS_ROOT, isJournalPath, isWorkspaceTaskPath, isWorkspaceWorkingTaskPath, journalLocationForDate, journalTitleFromPath, latestJournalPathBefore } from "../features/tasks/paths";
+import { DAILYLOGS_ROOT, TASKS_ROOT, isGlobalTasksPath, isJournalPath, isWorkspaceTaskPath, isWorkspaceWorkingTaskPath, journalLocationForDate, journalTitleFromPath, latestJournalPathBefore } from "../features/tasks/paths";
 import { preserveExtraBlankLines } from "../services/markdown-spacing";
 import { CommandRegistry } from "../features/commands/registry";
 import { paletteMode, rankCommands } from "../features/commands/ranking";
@@ -60,6 +60,7 @@ import {
 import { createCurrentViewStore, listReloadMode, parseLastFolderView, serializeLastFolderView } from "../features/navigation/view-state";
 import {
   discoverWorkspaces,
+  ensureGlobalTasksRoots,
   readWorkspaceNavigationPreferences,
   selectInitialWorkspace,
   type WorkspaceDirectory,
@@ -198,7 +199,7 @@ type TaskLocation = {
   });
   const markdownFilesystem = createMarkdownFilesystem({
     notesHandle: () => notesHandle!,
-    dbPrefix: () => DB_WS_PREFIX,
+    dbPrefix: (path: string) => nativePathBaseFor(path),
     nativeVersions: nativeFileVersions,
     isExternalPath: (path: string) => isExtraDataPath(path),
     resolveDir: (parts: string[], create?: boolean) => dirHandleForParts(parts, create),
@@ -315,6 +316,9 @@ type TaskLocation = {
   const btnSearchClear = $id('btn-search-clear');
   const btnRefreshWorkspace = $id('btn-refresh-workspace');
   const btnOutputsTop = $id('btn-outputs-top');
+  const btnReturnToTab = $id('btn-return-to-tab');
+  const btnTaskListing = $id('btn-task-listing');
+  const btnWorkingTasks = $id('btn-working-tasks');
   const btnOpenImport = $id('btn-open-import');
   const btnSafetyTools = $id('btn-safety-tools');
   const editorView    = $id('editor-view');
@@ -609,13 +613,39 @@ type TaskLocation = {
   function isExtraDataWorkspace(): boolean {
     return !!currentWorkspace?.isExtraData;
   }
-  // Kept for the markdownFilesystem hook — any path is "external" when the
-  // Extra Data Folder is the active workspace.
-  function isExtraDataPath(_path?: string | null): boolean {
-    return isExtraDataWorkspace();
+  // markdownFilesystem hook: a path routes through the external FS bridge when
+  // the Extra Data Folder is active — except the global tasks/dailylogs roots,
+  // which always live in the workspace Data/ tree regardless of active workspace.
+  function isExtraDataPath(path?: string | null): boolean {
+    return isExtraDataWorkspace() && !isGlobalTasksPath(path);
+  }
+
+  // Native path prefix for a workspace-relative path. The global tasks/dailylogs
+  // roots live at `Data/`; everything else lives under the active workspace's
+  // `Data/<ws>/` (or the Extra Data Folder's own base). `Data/tasks/foo.md`
+  // resolves at the bridge exactly like `DB_WS_PREFIX + rel` — safe_path joins
+  // it onto the workspace root.
+  function nativePathBaseFor(relPath: string | null | undefined): string {
+    if (window.__recallstackNative?.active && isGlobalTasksPath(relPath)) {
+      return 'Data/';
+    }
+    return DB_WS_PREFIX;
+  }
+
+  // DB-key prefix (path relative to Data/) for a workspace-relative path: '' for
+  // the global tasks/dailylogs roots, '<ws>/' for a normal workspace note.
+  function dbKeyPrefixFor(relPath: string | null | undefined): string {
+    const base = nativePathBaseFor(relPath);
+    return base.startsWith('Data/') ? base.slice(5) : base;
   }
 
   async function dirHandleForParts(parts: string[], create = false): Promise<FileSystemDirectoryHandle> {
+    // The global tasks/dailylogs roots resolve against Data/ itself, not the
+    // active workspace folder, so they are shared by every workspace (including
+    // managed-system workspaces and the Extra Data Folder).
+    if (dataHandle && isGlobalTasksPath(parts[0])) {
+      return getDirHandle(dataHandle, parts, create);
+    }
     return getDirHandle(notesHandle!, parts, create);
   }
 
@@ -632,7 +662,10 @@ type TaskLocation = {
       await window.__recallstackNative!.externalRename(extraAbsPath(oldRel), extraAbsPath(newRel));
       return;
     }
-    await window.__recallstackNative!.renamePath(`${DB_WS_PREFIX}${oldRel}`, `${DB_WS_PREFIX}${newRel}`);
+    await window.__recallstackNative!.renamePath(
+      `${nativePathBaseFor(oldRel)}${oldRel}`,
+      `${nativePathBaseFor(newRel)}${newRel}`,
+    );
   }
 
   function baseNameOf(p: string): string {
@@ -795,7 +828,13 @@ type TaskLocation = {
   // Returns { parentHandle, prefix } for asset operations, accounting for archived/ files.
   // Files inside an archived/ subfolder use '../assets/' links; normal files use 'assets/'.
   async function getAssetsDirInfo() {
-    const location = assetLocation(currentPath, activeFolderPath());
+    // assetLocation() derives the folder from currentPath and only needs the
+    // fallback when there is no open file. Evaluate activeFolderPath() lazily —
+    // it throws when l1Active is null, which is the case for every task/journal
+    // file (syncNavToPath clears l1Active for the global roots).
+    const fallbackFolder = currentPath ? '' : (l1Active ? activeFolderPath() : '');
+    if (!currentPath && !fallbackFolder) throw new Error('Open a note or select a folder first');
+    const location = assetLocation(currentPath, fallbackFolder);
     const parentHandle = await dirHandleForParts(location.parentParts);
     const prefix = location.prefix;
     return { parentHandle, prefix };
@@ -1154,6 +1193,8 @@ type TaskLocation = {
       await ensureConfiguredExtraDataWorkspace();
       workspaces  = await buildWorkspaceList(rootHandle);
       await loadWorkspaceThemes();
+      // One-time: lift per-workspace tasks/ + dailylogs/ up to the global roots.
+      await migrateGlobalTasksOnce();
 
       outputsHandle = await ensureConfiguredOutputsHandle();
       outputsAvailable = !!outputsHandle;
@@ -1205,13 +1246,16 @@ type TaskLocation = {
     let carriedPinnedTabs: EditorTab[] = [];
     if (changingWorkspace) {
       if (!await autoSaveIfDirty(true)) return;
-      // Opened pinned tabs stay visible after a workspace switch. The protected
-      // daily journal is per-workspace (recreated below) and the single unpinned
-      // "dynamic" tab is scratch, so both are dropped; outputs/external tabs
-      // aren't workspace-scoped and keep their existing switch behavior.
+      // Opened pinned tabs stay visible after a workspace switch. The single
+      // unpinned "dynamic" tab is scratch and is dropped; outputs/external and
+      // global task/journal tabs aren't workspace-scoped, so the daily journal
+      // and any pinned task tabs are carried across (one global file, one tab).
+      const carryDailyJournal = tabs.some(tab =>
+        isProtectedDailyJournalTab(tab) && isGlobalTasksPath(tab.path));
       carriedPinnedTabs = tabs.filter(tab =>
-        tab.pinned && !isProtectedDailyJournalTab(tab) && !tab.isOutputsFile && !tab.isExternalFile);
+        tab.pinned && !tab.isOutputsFile && !tab.isExternalFile);
       resetWorkspaceSessionState();
+      if (carryDailyJournal) protectedDailyJournalPath = todaysDailyJournalPath();
       if (carriedPinnedTabs.length) {
         tabs = carriedPinnedTabs;
         renderTabStrip();
@@ -1294,13 +1338,161 @@ type TaskLocation = {
 
   async function ensureWorkspaceSystemFolders() {
     if (!notesHandle || isManagedSystemWorkspace()) return;
-    // The Extra Data Folder is the user's own arbitrary directory — don't
-    // create tasks/ or dailylogs/ inside it.
+    // The Extra Data Folder is the user's own arbitrary directory — nothing to
+    // seed there.
     if (isExtraDataWorkspace()) return;
-    await notesHandle.getDirectoryHandle(TASKS_ROOT, { create: true });
-    await notesHandle.getDirectoryHandle(DAILYLOGS_ROOT, { create: true });
+    // tasks/ and dailylogs/ are global roots under Data/, shared by every
+    // workspace — created once, not per workspace.
+    if (dataHandle) await ensureGlobalTasksRoots(dataHandle);
     if (currentWorkspace?.topLevelDirs) {
       currentWorkspace.topLevelDirs = await listDirs(notesHandle);
+    }
+  }
+
+  // ── One-time migration: per-workspace tasks/ + dailylogs/ → global roots ────
+  // Older installs kept a tasks/ and dailylogs/ folder inside every workspace
+  // (Data/<ws>/tasks, Data/<ws>/dailylogs). Tasks and journals are now a single
+  // shared space at Data/tasks and Data/dailylogs, so move every per-workspace
+  // copy up one level. Same-name task files from different workspaces get a
+  // " (from <ws>)" suffix; same-date journals are merged with a divider. Guarded
+  // by a per-root localStorage marker and preceded by a full backup.
+  async function migrateGlobalTasksOnce() {
+    if (!window.__recallstackNative?.active || !dataHandle) return;
+    const rootPath = normalizeWorkspaceRootPath(window.__recallstackNative.workspaceRootPath() || rootHandle?.name || '');
+    const markerKey = 'pkm-global-tasks-migrated-v1:' + rootPath;
+    if (localStorage.getItem(markerKey)) return;
+
+    const ROOTS = ['tasks', 'dailylogs'] as const;
+
+    async function collectRelFiles(dir: FileSystemDirectoryHandle, prefix: string, out: string[]): Promise<void> {
+      for await (const entry of (dir as any).values() as AsyncIterable<any>) {
+        if (entry.name.startsWith('.')) continue;
+        if (entry.kind === 'directory') {
+          await collectRelFiles(entry as FileSystemDirectoryHandle, prefix + entry.name + '/', out);
+        } else {
+          out.push(prefix + entry.name);
+        }
+      }
+    }
+    async function writeFile(dir: FileSystemDirectoryHandle, name: string, data: ArrayBuffer | Uint8Array | string): Promise<void> {
+      const fh = await dir.getFileHandle(name, { create: true });
+      const w = await (fh as any).createWritable();
+      try { await w.write(data); } finally { await w.close(); }
+    }
+    async function hasEntry(dir: FileSystemDirectoryHandle, name: string): Promise<boolean> {
+      try { await dir.getFileHandle(name); return true; } catch { return false; }
+    }
+
+    try {
+      const wsDirs = (await listDirs(dataHandle))
+        .filter(d => !(ROOTS as readonly string[]).includes(d.name.toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      type Item = { ws: NamedDirectory; root: 'tasks' | 'dailylogs'; tail: string };
+      const items: Item[] = [];
+      for (const ws of wsDirs) {
+        for (const root of ROOTS) {
+          let srcRoot: FileSystemDirectoryHandle;
+          try { srcRoot = await ws.handle.getDirectoryHandle(root); } catch { continue; }
+          const rels: string[] = [];
+          await collectRelFiles(srcRoot, '', rels);
+          for (const tail of rels) items.push({ ws, root, tail });
+        }
+      }
+      if (!items.length) { localStorage.setItem(markerKey, '1'); return; }
+
+      try {
+        const backup = await window.__recallstackNative.backup(null, false);
+        console.info('[global-tasks-migration] pre-migration backup', backup);
+      } catch (err) {
+        console.error('[global-tasks-migration] backup failed — deferring migration', err);
+        toast('Task/journal migration deferred: pre-migration backup failed', 'error');
+        return;
+      }
+
+      await ensureGlobalTasksRoots(dataHandle);
+      const destRoots: Record<'tasks' | 'dailylogs', FileSystemDirectoryHandle> = {
+        tasks: await dataHandle.getDirectoryHandle('tasks', { create: true }),
+        dailylogs: await dataHandle.getDirectoryHandle('dailylogs', { create: true }),
+      };
+
+      let moved = 0;
+      const mergedJournals: string[] = [];
+      const assetRenames = new Map<string, string>();   // `${ws}|${oldName}` -> newName
+      const migratedMd: Array<{ ws: string; dir: FileSystemDirectoryHandle; name: string }> = [];
+
+      for (const item of items) {
+        const parts = item.tail.split('/');
+        const name = parts.at(-1)!;
+        const dirParts = parts.slice(0, -1);
+        const srcRoot = await (await dataHandle.getDirectoryHandle(item.ws.name)).getDirectoryHandle(item.root);
+        const srcDir = await getDirHandle(srcRoot, dirParts);
+        const bytes = await (await (await srcDir.getFileHandle(name)).getFile()).arrayBuffer();
+        const destDir = await getDirHandle(destRoots[item.root], dirParts, true);
+        const isJournalFile = item.root === 'dailylogs' && /^journal-\d{8}\.md$/i.test(name);
+
+        if (isJournalFile && await hasEntry(destDir, name)) {
+          const base = await (await (await destDir.getFileHandle(name)).getFile()).text();
+          const add = new TextDecoder().decode(bytes);
+          if (!base.includes(add.trim())) {
+            await writeFile(destDir, name, base.replace(/\s*$/, '') + '\n\n---\n\n' + add.replace(/^\s*/, ''));
+            mergedJournals.push(`${item.root}/${item.tail} (+ ${item.ws.name})`);
+          }
+          await srcDir.removeEntry(name);
+          moved++;
+          continue;
+        }
+
+        let destName = name;
+        if (await hasEntry(destDir, name)) {
+          const dot = name.lastIndexOf('.');
+          const stem = dot > 0 ? name.slice(0, dot) : name;
+          const ext = dot > 0 ? name.slice(dot) : '';
+          destName = `${stem} (from ${item.ws.name})${ext}`;
+          for (let n = 2; await hasEntry(destDir, destName); n++) destName = `${stem} (from ${item.ws.name}) ${n}${ext}`;
+          if (dirParts.at(-1) === 'assets') assetRenames.set(`${item.ws.name}|${name}`, destName);
+        }
+        await writeFile(destDir, destName, bytes);
+        await srcDir.removeEntry(name);
+        moved++;
+        if (destName.toLowerCase().endsWith('.md')) migratedMd.push({ ws: item.ws.name, dir: destDir, name: destName });
+      }
+
+      // Rewrite asset links in migrated markdown for any assets that were renamed.
+      if (assetRenames.size) {
+        for (const md of migratedMd) {
+          const renames = [...assetRenames].filter(([key]) => key.startsWith(md.ws + '|'));
+          if (!renames.length) continue;
+          try {
+            let text = await (await (await md.dir.getFileHandle(md.name)).getFile()).text();
+            let changed = false;
+            for (const [key, newName] of renames) {
+              const oldName = key.slice(md.ws.length + 1);
+              const next = rewriteAssetLinks(rewriteAssetLinks(text, `assets/${oldName}`, `assets/${newName}`), `../assets/${oldName}`, `../assets/${newName}`);
+              if (next !== text) { text = next; changed = true; }
+            }
+            if (changed) await writeFile(md.dir, md.name, text);
+          } catch (err) { console.warn('[global-tasks-migration] asset-link rewrite failed for', md.name, err); }
+        }
+      }
+
+      // Drop the now-empty per-workspace roots.
+      for (const ws of wsDirs) {
+        for (const root of ROOTS) {
+          try {
+            const left = await window.__recallstackNative.listFilesRecursive(`Data/${ws.name}/${root}`);
+            if (!left.length) await ws.handle.removeEntry(root, { recursive: true });
+          } catch { /* already gone */ }
+        }
+      }
+
+      localStorage.setItem(markerKey, '1');
+      console.info('[global-tasks-migration] complete', { moved, mergedJournals, assetRenames: [...assetRenames] });
+      toast(`Moved task & journal files into shared Data/tasks and Data/dailylogs (${moved} file${moved === 1 ? '' : 's'}${mergedJournals.length ? `, ${mergedJournals.length} journal${mergedJournals.length === 1 ? '' : 's'} merged` : ''})`);
+      try { await window.__recallstackNative.rebuildIndex(); } catch { /* watcher reconcile will catch up */ }
+    } catch (err) {
+      console.error('[global-tasks-migration] incomplete — will retry next launch', err);
+      toast('Task/journal migration incomplete — will retry next launch', 'error');
     }
   }
 
@@ -1386,16 +1578,10 @@ type TaskLocation = {
     navRow1.innerHTML = '';
     navRow1.appendChild(mkNavNewBtn(1));
     navRow1.appendChild(mkNavRenameBtn(1));
-    // The Outputs entry lives in the app header as an icon button (btnOutputsTop) —
-    // not duplicated here as a text button in the top-level folder navigation.
-    // Keep the Journal and Tasks icon shortcuts beside each other before folder tabs.
-    // The Extra Data Folder has no journal/tasks, so those icons are omitted there.
-    if (!isExtraDataWorkspace()) {
-      navRow1.appendChild(mkReturnToTabBtn());
-      navRow1.appendChild(mkNavTaskListingBtn());
-      navRow1.appendChild(mkNavWorkingTasksBtn());
-    }
+    // Outputs, Daily Journal, and the Task / Working Task listings all live in
+    // the app header as icon buttons now — not duplicated in this folder nav row.
     syncOutputsTopButton();
+    syncTasksAppbarButtons();
     navRow1.appendChild(mkNavSeparator());
     if (!folders.length) {
       const span = document.createElement('span');
@@ -1662,62 +1848,41 @@ type TaskLocation = {
     return btn;
   }
 
-  function mkNavTaskListingBtn() {
-    const btn = document.createElement('button');
-    btn.id        = 'btn-task-listing';
-    btn.className = 'nav-task-listing-btn nav-icon-task-btn';
-    btn.title = withShortcutHint('Task listing', 'tasks.list');
-    btn.setAttribute('aria-label', 'Task listing');
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8h6M9 13h6M9 18h4"/><path d="m6.5 8 1 1 2-2" stroke="var(--green)"/><path d="m6.5 13 1 1 2-2" stroke="var(--yellow)"/></svg>`;
-    btn.disabled  = isManagedSystemWorkspace();
-    btn.addEventListener('click', () => void openTaskListing().catch(e => toast('Could not load tasks: ' + (e?.message || e), 'error')));
-    return btn;
-  }
-
-  function mkNavWorkingTasksBtn() {
-    const btn = document.createElement('button');
-    btn.id        = 'btn-working-tasks';
-    btn.className = 'nav-working-tasks-btn nav-icon-task-btn';
-    btn.title = withShortcutHint('Working Task listing', 'tasks.working-list');
-    btn.setAttribute('aria-label', 'Working Task listing');
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v13H4z" fill="var(--surface1)"/><path d="M4 7h16v13H4z"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" stroke="var(--peach)"/><circle cx="12" cy="13" r="2.4" fill="var(--green)" stroke="none"/><path d="M4 12h5m6 0h5" stroke="var(--yellow)"/></svg>`;
-    btn.disabled  = isManagedSystemWorkspace();
-    btn.addEventListener('click', () => void openWorkingListing().catch(e => toast('Could not load working tasks: ' + (e?.message || e), 'error')));
-    return btn;
-  }
-
+  // The Daily Journal / Task listing / Working Task listing buttons live in the
+  // app bar (index.html, right of Outputs). Tasks and journals are global roots
+  // shared by every workspace, so these are enabled whenever a Data/ folder is
+  // available — including managed-system workspaces and the Extra Data Folder.
   function syncReturnToTabButton() {
-    const btn = $maybe('btn-return-to-tab');
-    if (!btn) return;
     const dailyPath = currentDailyJournalPath();
     const target = dailyPath ? findTabByPath(dailyPath) : null;
-    btn.disabled = !notesHandle;
-    btn.classList.toggle('active', !!target && target.id === activeTabId && !editorView.classList.contains('hidden'));
-    btn.title = withShortcutHint('Daily Journal', 'navigation.today');
-    btn.setAttribute('aria-label', 'Daily Journal');
-    btn.setAttribute('aria-keyshortcuts', comboFor('navigation.today') || '');
+    btnReturnToTab.disabled = !dataHandle;
+    btnReturnToTab.classList.toggle('active', !!target && target.id === activeTabId && !editorView.classList.contains('hidden'));
+    btnReturnToTab.title = withShortcutHint('Daily Journal', 'navigation.today');
+    btnReturnToTab.setAttribute('aria-label', 'Daily Journal');
+    btnReturnToTab.setAttribute('aria-keyshortcuts', comboFor('navigation.today') || '');
+  }
+
+  function syncTasksAppbarButtons() {
+    const off = !dataHandle;
+    btnTaskListing.disabled = off;
+    btnTaskListing.title = withShortcutHint('Task listing', 'tasks.list');
+    btnTaskListing.setAttribute('aria-keyshortcuts', comboFor('tasks.list') || '');
+    btnWorkingTasks.disabled = off;
+    btnWorkingTasks.title = withShortcutHint('Working Task listing', 'tasks.working-list');
+    btnWorkingTasks.setAttribute('aria-keyshortcuts', comboFor('tasks.working-list') || '');
+    syncReturnToTabButton();
   }
 
   async function returnToLastSelectedTab() {
     await openTodayJournal();
   }
 
-  function mkReturnToTabBtn() {
-    const btn = document.createElement('button');
-    btn.id = 'btn-return-to-tab';
-    btn.type = 'button';
-    btn.className = 'nav-return-tab-btn nav-journal-btn--vivid';
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="17" rx="2.25" fill="var(--surface1)"/>
-      <rect x="3" y="4" width="18" height="17" rx="2.25"/>
-      <path d="M3 9h18" stroke="var(--peach)"/>
-      <path d="M8 2.5v3M16 2.5v3" stroke="var(--red)"/>
-      <path d="m9 14 2 2 4-4" stroke="var(--green)"/>
-    </svg>`;
-    btn.addEventListener('click', () => void returnToLastSelectedTab());
-    requestAnimationFrame(syncReturnToTabButton);
-    return btn;
-  }
+  btnReturnToTab.addEventListener('click', () =>
+    void returnToLastSelectedTab().catch(e => toast('Could not open journal: ' + (e?.message || e), 'error')));
+  btnTaskListing.addEventListener('click', () =>
+    void openTaskListing().catch(e => toast('Could not load tasks: ' + (e?.message || e), 'error')));
+  btnWorkingTasks.addEventListener('click', () =>
+    void openWorkingListing().catch(e => toast('Could not load working tasks: ' + (e?.message || e), 'error')));
 
   // The header icon button (btnOutputsTop) is the only Outputs nav control now
   // that Outputs-Shared is gone, and syncOutputsTopButton() already keeps its
@@ -2421,7 +2586,7 @@ type TaskLocation = {
   function appLocalPathForCurrentFile() {
     if (!currentPath || isNew) return '';
     if (isOutputsFile || isExternalFile) return normalizeAppPath(currentPath);
-    return normalizeAppPath((DB_WS_PREFIX || '') + currentPath);
+    return normalizeAppPath((nativePathBaseFor(currentPath) || '') + currentPath);
   }
 
   function fullPathForCurrentFile() {
@@ -2463,6 +2628,14 @@ type TaskLocation = {
     const parts = appPath.split('/').filter(Boolean);
     let wsName = '';
     let relPath = '';
+    // Global tasks / dailylogs roots — no workspace segment, no workspace switch.
+    if (isGlobalTasksPath(parts[0]) || (parts[0] === 'Data' && isGlobalTasksPath(parts[1]))) {
+      const globalRel = (parts[0] === 'Data' ? parts.slice(1) : parts).join('/');
+      if (!await checkUnsavedNewNote()) return;
+      if (!await autoSaveIfDirty()) return;
+      await openFile(globalRel.split('/').at(-1)!, globalRel, { pinned });
+      return;
+    }
     if (parts[0] === 'Data' && parts.length >= 3) {
       wsName = parts[1];
       relPath = parts.slice(2).join('/');
@@ -2536,12 +2709,20 @@ type TaskLocation = {
   // today's single-document flow), a *background* tab is always left in a clean,
   // saved-or-discarded state — so only the active tab can ever be "dirty".
 
+  // A task/journal tab points at a file in the global Data/tasks or
+  // Data/dailylogs roots — shared by every workspace, so (like outputs/external
+  // tabs) it is not tied to whichever workspace was active when it opened.
+  function isGlobalTasksTab(tab: EditorTab | null | undefined): boolean {
+    return !!tab && !tab.isOutputsFile && !tab.isExternalFile && isGlobalTasksPath(tab.path);
+  }
+
   // Pinned tabs survive a workspace switch, so `tabs` can hold entries whose
   // file lives in a different workspace than the active one. This is true for a
   // regular note tab only while it belongs to the active workspace (or predates
-  // any workspace selection); outputs/external tabs are not workspace-scoped.
+  // any workspace selection); outputs/external and global task/journal tabs are
+  // not workspace-scoped.
   function tabBelongsToActiveWorkspace(tab: EditorTab): boolean {
-    if (tab.isOutputsFile || tab.isExternalFile) return true;
+    if (tab.isOutputsFile || tab.isExternalFile || isGlobalTasksTab(tab)) return true;
     return tab.workspace == null || tab.workspace === activeWorkspace;
   }
 
@@ -2922,19 +3103,22 @@ type TaskLocation = {
   // is at most one) instead of creating another one.
   function claimTabSlot(pinned: boolean, fields: Omit<EditorTab, 'id' | 'pinned' | 'workspace'>) {
     const previousActiveId = activeTabId;
+    // Global task/journal tabs aren't workspace-scoped, so don't stamp them with
+    // whichever workspace happens to be active.
+    const tabWorkspace = isGlobalTasksPath(fields.path) ? null : activeWorkspace;
     if (!pinned) {
       const dynamicTab = tabs.find(t => !t.pinned);
       if (dynamicTab) {
         // The dynamic tab is being repointed at a different file — drop the
         // previous file's remembered mode so enterReadingModeForOpenDoc() falls
         // back to the open-time heuristic for the new one.
-        Object.assign(dynamicTab, fields, { workspace: activeWorkspace, readingView: undefined });
+        Object.assign(dynamicTab, fields, { workspace: tabWorkspace, readingView: undefined });
         activeTabId = dynamicTab.id;
         enforceTabOrder();
         return { tab: dynamicTab, previousActiveId, isNewTab: false };
       }
     }
-    const tab: EditorTab = { id: nextTabId++, pinned, workspace: activeWorkspace, ...fields };
+    const tab: EditorTab = { id: nextTabId++, pinned, workspace: tabWorkspace, ...fields };
     tabs.push(tab);
     activeTabId = tab.id;
     enforceTabOrder();
@@ -2993,8 +3177,9 @@ type TaskLocation = {
     syncActiveTabFromState();
     // A pinned tab kept from a different workspace realigns the active
     // workspace (and, via loadFileIntoEditor -> syncNavToPath below, the top
-    // folder + subfolder) back to the file it points at.
-    if (!target.isOutputsFile && !target.isExternalFile
+    // folder + subfolder) back to the file it points at. Global task/journal
+    // tabs are workspace-independent, so they never realign.
+    if (!target.isOutputsFile && !target.isExternalFile && !isGlobalTasksPath(target.path)
         && target.workspace && target.workspace !== activeWorkspace) {
       const targetWs = workspaces.find(w => w.name === target.workspace);
       if (!targetWs) {
@@ -4201,8 +4386,6 @@ type TaskLocation = {
         navRow1.innerHTML = '';
         navRow1.appendChild(mkNavNewBtn(1));
         navRow1.appendChild(mkNavRenameBtn(1));
-        navRow1.appendChild(mkNavTaskListingBtn());
-        navRow1.appendChild(mkNavWorkingTasksBtn());
         navRow1.appendChild(mkNavSeparator());
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
@@ -4316,8 +4499,6 @@ type TaskLocation = {
         navRow1.innerHTML = '';
         navRow1.appendChild(mkNavNewBtn(1));
         navRow1.appendChild(mkNavRenameBtn(1));
-        navRow1.appendChild(mkNavTaskListingBtn());
-        navRow1.appendChild(mkNavWorkingTasksBtn());
         navRow1.appendChild(mkNavSeparator());
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
@@ -4502,11 +4683,13 @@ type TaskLocation = {
   }
 
   function draftKey(path: any) {
-    const ws = activeWorkspace || '__no_workspace__';
+    // Global tasks/journals are workspace-independent, so their drafts must not
+    // be keyed to whichever workspace happened to be active.
+    const ws = isGlobalTasksPath(path) ? '__global_tasks__' : (activeWorkspace || '__no_workspace__');
     return 'pkm-draft:' + ws + ':' + (path || '__new__');
   }
   function nativeDraftPath(path: any) {
-    return resolveNativeDraftPath(path, DB_WS_PREFIX);
+    return resolveNativeDraftPath(path, nativePathBaseFor(path));
   }
   let _nativeDraftTimer: ReturnType<typeof setTimeout> | undefined;
   let _localDraftTimer: ReturnType<typeof setTimeout> | undefined;
@@ -4815,7 +4998,7 @@ type TaskLocation = {
     if (!window.__recallstackNative?.active || !currentPath || isOutputsFile || isExternalFile) return;
     const generation = workspaceSessionGeneration;
     const path = currentPath;
-    const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
+    const prefix = dbKeyPrefixFor(path);
     try {
       const backlinks = await window.__recallstackNative!.backlinks((prefix + path).replace(/\/{2,}/g, '/'));
       if (generation === workspaceSessionGeneration && path === currentPath) currentBacklinks = backlinks;
@@ -4825,7 +5008,7 @@ type TaskLocation = {
 
   function appendBacklinks() {
     if (!currentBacklinks.length || previewOut.querySelector('.preview-backlinks')) return;
-    const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
+    const prefix = dbKeyPrefixFor(currentPath);
     const prefixPattern = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?');
     const section = document.createElement('section'); section.className = 'preview-backlinks';
     const heading = document.createElement('h3'); heading.textContent = `Backlinks (${currentBacklinks.length})`; section.appendChild(heading);
@@ -5190,10 +5373,20 @@ type TaskLocation = {
     // wikilink completion.
     if (isExtraDataWorkspace()) { searchIndex = []; return; }
     if (window.__recallstackNative?.active) {
-      const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
-      const notes = await window.__recallstackNative!.indexedNotes(prefix);
+      const prefix = dbKeyPrefixFor('');
+      // The global tasks/dailylogs roots are shared by every workspace, so pull
+      // them in regardless of which workspace's notes we're indexing. Their DB
+      // keys already start `tasks/` / `dailylogs/` (no workspace prefix).
+      const [notes, gTasks, gLogs] = await Promise.all([
+        window.__recallstackNative!.indexedNotes(prefix),
+        window.__recallstackNative!.indexedNotes(TASKS_ROOT + '/'),
+        window.__recallstackNative!.indexedNotes(DAILYLOGS_ROOT + '/'),
+      ]);
       if (generation !== workspaceSessionGeneration) return;
-      searchIndex = mapNativeIndex(notes, prefix);
+      const merged = new Map<string, SearchIndexEntry>();
+      for (const entry of mapNativeIndex(notes, prefix)) merged.set(entry.notesRelPath, entry);
+      for (const entry of [...mapNativeIndex(gTasks, ''), ...mapNativeIndex(gLogs, '')]) merged.set(entry.notesRelPath, entry);
+      searchIndex = [...merged.values()];
       return;
     }
     const isCurrent = () => generation === workspaceSessionGeneration;
@@ -5202,10 +5395,18 @@ type TaskLocation = {
       for (const dir of topDirs) {
         await indexMarkdownDirectory(dir.handle, dir.name + '/', isCurrent, nextIndex);
       }
-      if (generation === workspaceSessionGeneration) searchIndex = nextIndex;
-      return;
+    } else {
+      await indexMarkdownDirectory(notesHandle!, '', isCurrent, nextIndex);
     }
-    await indexMarkdownDirectory(notesHandle!, '', isCurrent, nextIndex);
+    // Browser fallback: the global roots live under Data/, not the workspace.
+    if (dataHandle && !isExtraDataWorkspace()) {
+      for (const name of [TASKS_ROOT, DAILYLOGS_ROOT]) {
+        try {
+          const handle = await dataHandle.getDirectoryHandle(name);
+          await indexMarkdownDirectory(handle, name + '/', isCurrent, nextIndex);
+        } catch { /* root not created yet */ }
+      }
+    }
     if (generation === workspaceSessionGeneration) searchIndex = nextIndex;
   }
 
@@ -5221,9 +5422,19 @@ type TaskLocation = {
 
   async function runSearch(query: any) {
     if (window.__recallstackNative?.active) {
-      const prefix = DB_WS_PREFIX.startsWith('Data/') ? DB_WS_PREFIX.slice(5) : DB_WS_PREFIX;
-      const page = await window.__recallstackNative!.knowledgeSearch(query, prefix, 80, 0);
-      return mapNativeSearchResults(page.results as NativeSearchResult[], prefix, query);
+      const prefix = dbKeyPrefixFor('');
+      // Also search the shared global tasks/dailylogs roots (see buildSearchIndex).
+      const [main, gTasks, gLogs] = await Promise.all([
+        window.__recallstackNative!.knowledgeSearch(query, prefix, 80, 0),
+        window.__recallstackNative!.knowledgeSearch(query, TASKS_ROOT + '/', 80, 0),
+        window.__recallstackNative!.knowledgeSearch(query, DAILYLOGS_ROOT + '/', 80, 0),
+      ]);
+      const seen = new Set<string>();
+      return [
+        ...mapNativeSearchResults(main.results as NativeSearchResult[], prefix, query),
+        ...mapNativeSearchResults(gTasks.results as NativeSearchResult[], '', query),
+        ...mapNativeSearchResults(gLogs.results as NativeSearchResult[], '', query),
+      ].filter(result => !seen.has(result.notesRelPath) && seen.add(result.notesRelPath));
     }
     return searchLocalIndex(searchIndex, query);
   }
@@ -5577,7 +5788,7 @@ type TaskLocation = {
 
   async function handleExternalEditorChange(change: any, precomputedNativePath?: string) {
     if (!currentPath || change.internal || change.entity !== 'markdown') return;
-    const currentNativePath = precomputedNativePath ?? normalizeAppPath(DB_WS_PREFIX + currentPath);
+    const currentNativePath = precomputedNativePath ?? normalizeAppPath(nativePathBaseFor(currentPath) + currentPath);
     const changedPath = normalizeAppPath(change.path);
     const priorPath = change.previousPath ? normalizeAppPath(change.previousPath) : '';
     if (changedPath !== currentNativePath && priorPath !== currentNativePath) return;
@@ -5590,7 +5801,7 @@ type TaskLocation = {
 
     let nativePath = changedPath;
     if (change.kind === 'rename' && priorPath === currentNativePath) {
-      const prefix = normalizeAppPath(DB_WS_PREFIX).replace(/\/+$/, '') + '/';
+      const prefix = normalizeAppPath(nativePathBaseFor(currentPath)).replace(/\/+$/, '') + '/';
       currentPath = changedPath.startsWith(prefix) ? changedPath.slice(prefix.length) : currentPath;
       syncActiveTabFromState();
       renderTabStrip();
@@ -5620,6 +5831,9 @@ type TaskLocation = {
 
   function changeAffectsActiveList(change: any) {
     const path = normalizeAppPath(change?.path);
+    // This only concerns the active folder list (a normal workspace folder,
+    // guarded by `!l1Active` below). Global tasks/dailylogs changes never affect
+    // it, so the active-workspace DB_WS_PREFIX is the right base here.
     const workspacePrefix = normalizeAppPath(DB_WS_PREFIX).replace(/\/+$/, '');
     if (!path || !workspacePrefix || !path.startsWith(workspacePrefix + '/')) return false;
     if (!l1Active) return false;
@@ -5677,7 +5891,7 @@ type TaskLocation = {
     let themeChanged = false;
     let affectsActiveList = false;
     let hasMarkdown = false;
-    const currentNativePath = currentPath ? normalizeAppPath(DB_WS_PREFIX + currentPath) : null;
+    const currentNativePath = currentPath ? normalizeAppPath(nativePathBaseFor(currentPath) + currentPath) : null;
     for (const change of changes) {
       if (change.entity === 'markdown') hasMarkdown = true;
       if (!change.internal && change.path === 'Apps/theme.json') themeChanged = true;
@@ -5843,6 +6057,9 @@ type TaskLocation = {
     reportError(error: any, command: any) { toast(`${command.title} failed: ${error?.message || error}`, 'error'); },
   });
   const needsWorkspace = (state: any) => state.workspaceOpen;
+  // Tasks and journals are global (Data/tasks, Data/dailylogs), so they only
+  // need a Data/ folder — available in every workspace, system ones included.
+  const needsGlobalTasks = () => !!dataHandle;
   const needsEditor = (state: any) => state.editorOpen;
   const desktopOnly = (state: any) => state.nativeDesktop && state.workspaceOpen;
   const registerCommand = (command: any) => commandRegistry.register(command);
@@ -5858,13 +6075,13 @@ type TaskLocation = {
     { id:'tabs.close-others', title:'Close Other Tabs', category:'File', keywords:['tab'], isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => closeOtherTabs() },
     { id:'tabs.reopen-closed', title:'Reopen Closed Tab', category:'File', keywords:['tab', 'undo'], isEnabled:()=>closedTabHistory.length > 0, disabledReason:()=>'No recently closed tabs', run:reopenClosedTab },
     { id:'navigation.search', title:'Search Notes', category:'Navigation', keywords:['find'], shortcut:'Ctrl+/', isEnabled:needsWorkspace, run:() => searchInput.focus() },
-    { id:'navigation.today', title:'Open Today Journal', category:'Navigation', keywords:['journal daily'], shortcut:'Ctrl+J', isEnabled:needsWorkspace, run:openTodayJournal },
+    { id:'navigation.today', title:'Open Today Journal', category:'Navigation', keywords:['journal daily'], shortcut:'Ctrl+J', isEnabled:needsGlobalTasks, run:openTodayJournal },
     { id:'navigation.next-tab', title:'Next Tab', category:'Navigation', keywords:['tab'], shortcut:'Ctrl+Tab', isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => switchToRelativeTab(1) },
     { id:'navigation.previous-tab', title:'Previous Tab', category:'Navigation', keywords:['tab'], shortcut:'Ctrl+Shift+Tab', isEnabled:()=>tabs.length > 1, disabledReason:()=>'Only one tab open', run:() => switchToRelativeTab(-1) },
-    { id:'tasks.new-working', title:'Create Working Task', category:'Tasks', isEnabled:needsWorkspace, run:createWorkingTask },
-    { id:'tasks.quick-open', title:'Open Task', category:'Tasks', keywords:['tasks quick'], isEnabled:needsWorkspace, run:openQuickTaskSwitcher },
-    { id:'tasks.list', title:'Show Task Listing', category:'Tasks', keywords:['tasks all list'], shortcut:'Ctrl+T', isEnabled:needsWorkspace, run:openTaskListing },
-    { id:'tasks.working-list', title:'Show Working Task Listing', category:'Tasks', keywords:['working tasks list'], shortcut:'Ctrl+W', isEnabled:needsWorkspace, run:openWorkingListing },
+    { id:'tasks.new-working', title:'Create Working Task', category:'Tasks', isEnabled:needsGlobalTasks, run:createWorkingTask },
+    { id:'tasks.quick-open', title:'Open Task', category:'Tasks', keywords:['tasks quick'], isEnabled:needsGlobalTasks, run:openQuickTaskSwitcher },
+    { id:'tasks.list', title:'Show Task Listing', category:'Tasks', keywords:['tasks all list'], shortcut:'Ctrl+T', isEnabled:needsGlobalTasks, run:openTaskListing },
+    { id:'tasks.working-list', title:'Show Working Task Listing', category:'Tasks', keywords:['working tasks list'], shortcut:'Ctrl+W', isEnabled:needsGlobalTasks, run:openWorkingListing },
     { id:'navigation.notes-list', title:'Show Notes Listing', category:'Navigation', keywords:['notes folder list'], shortcut:'Ctrl+L', isEnabled:needsWorkspace, run:openNotesListing },
     { id:'view.theme-switcher', title:'Open Theme Switcher', category:'View', keywords:['appearance color preview'], shortcut:'Ctrl+Shift+T', isEnabled:needsWorkspace, run:openThemeSwitcher },
     { id:'view.presentation', title:'Toggle Presentation Mode', category:'View', shortcut:'F12', isEnabled:needsEditor, run:() => $id('btn-presentation').click() },
@@ -8300,8 +8517,6 @@ type TaskLocation = {
       navRow1.innerHTML = '';
       navRow1.appendChild(mkNavNewBtn(1));
       navRow1.appendChild(mkNavRenameBtn(1));
-      navRow1.appendChild(mkNavTaskListingBtn());
-      navRow1.appendChild(mkNavWorkingTasksBtn());
       navRow1.appendChild(mkNavSeparator());
       if (folders.length) {
         if (navRow1Mode === 'combo') {

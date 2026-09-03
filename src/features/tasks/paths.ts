@@ -1,6 +1,15 @@
 export const TASKS_ROOT = "tasks";
 export const DAILYLOGS_ROOT = "dailylogs";
 
+// True when a workspace-relative path belongs to the global tasks / dailylogs
+// roots (`Data/tasks/**`, `Data/dailylogs/**`) rather than a normal workspace
+// folder. Those roots are shared across every workspace, so file IO, the native
+// DB prefix, and tab ownership all key off this instead of the active workspace.
+export function isGlobalTasksPath(path: string | null | undefined): boolean {
+  const first = (path ?? "").split("/")[0];
+  return first === TASKS_ROOT || first === DAILYLOGS_ROOT;
+}
+
 export function isWorkspaceTaskPath(path: string | null | undefined): boolean {
   const parts = path?.split("/") ?? [];
   return parts[0] === TASKS_ROOT && parts[1] !== "archived" && parts[1] !== undefined && !isJournalPath(path);

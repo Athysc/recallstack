@@ -673,9 +673,10 @@ fn prepare_workspace(root: &Path) -> Result<(), String> {
     if create_starter_tree {
         fs::create_dir_all(data_path(root).join("notes/mynotes/notes"))
             .map_err(|e| format!("Could not prepare the starter notes directory: {e}"))?;
-        fs::create_dir_all(data_path(root).join("notes/tasks"))
+        // tasks/ and dailylogs/ are global roots, siblings of the workspace folders.
+        fs::create_dir_all(data_path(root).join("tasks"))
             .map_err(|e| format!("Could not prepare the starter tasks directory: {e}"))?;
-        fs::create_dir_all(data_path(root).join("notes/dailylogs"))
+        fs::create_dir_all(data_path(root).join("dailylogs"))
             .map_err(|e| format!("Could not prepare the starter dailylogs directory: {e}"))?;
     }
     fs::create_dir_all(root.join("Apps"))
@@ -2076,8 +2077,8 @@ mod tests {
 
         assert!(root.join("Data").is_dir());
         assert!(root.join("Data/notes/mynotes/notes").is_dir());
-        assert!(root.join("Data/notes/tasks").is_dir());
-        assert!(root.join("Data/notes/dailylogs").is_dir());
+        assert!(root.join("Data/tasks").is_dir());
+        assert!(root.join("Data/dailylogs").is_dir());
         assert!(root.join("DB").is_dir());
         assert!(root.join("DB/index.db").is_file());
         let db = Connection::open(root.join("DB/index.db")).expect("open prepared index");
