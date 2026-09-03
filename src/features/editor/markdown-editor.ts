@@ -219,6 +219,16 @@ export class MarkdownEditorAdapter {
     const [safeAnchor, safeHead] = clampEditorSelection(anchor, head, length);
     this.view.dispatch({ selection: EditorSelection.single(safeAnchor, safeHead) });
   }
+  /** Place the caret at the start of the given 1-based source line and scroll it into view. */
+  moveCursorToLine(line: number): void {
+    const doc = this.view.state.doc;
+    const n = Math.max(1, Math.min(Math.floor(line) || 1, doc.lines));
+    const pos = doc.line(n).from;
+    this.view.dispatch({
+      selection: EditorSelection.cursor(pos),
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+    });
+  }
   focus(): void { this.view.focus(); }
   addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: AddEventListenerOptions | boolean): void {
     const target = type === "scroll" ? this.view.scrollDOM : this.view.dom;

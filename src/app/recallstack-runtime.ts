@@ -26,6 +26,7 @@ import { paletteMode, rankCommands } from "../features/commands/ranking";
 import { createLazyMarkdownEditor } from "../features/editor/lazy-markdown-editor";
 import { PreviewScheduler } from "../features/editor/preview-scheduler";
 import { contentZoomScale, nextContentZoom, normalizeContentZoom, scaledMediaWidth } from "../features/editor/content-zoom";
+import { clampLine, codeBlockLine, newlinesBefore, sourceBlocksFromPreprocessed } from "../features/editor/preview-source-map";
 import { assetMarkdownLink, isScreenshotItem, joinDroppedAssetLinks } from "../features/editor/assets";
 import { nativeDraftPath as resolveNativeDraftPath, rewriteAssetLinks, runBestEffort, toggleMarkdownCheckbox } from "../features/editor/lifecycle";
 import {
@@ -238,6 +239,9 @@ type TaskLocation = {
   // CodeMirror's own incremental parse. `I` (when focus is not in a text field)
   // enters edit mode; `Escape` while editing returns to preview.
   let readingViewState: 'preview' | 'edit' = 'preview';
+  // Source line (1-based, into mdEditor.value) recorded from the last preview
+  // click; consumed once when edit mode is next entered, then cleared.
+  let pendingEditCursorLine: number | null = null;
   let presentationOn = false;
   let navRow1Mode: "buttons" | "combo" = 'buttons';
   let navRow2Mode: "buttons" | "combo" = 'buttons';
@@ -4820,8 +4824,16 @@ type TaskLocation = {
       postProcessPreview();
       if (isTasksEditor()) syncDateInputsFromEditor();
       if (opts.focus !== false) setTimeout(() => { try { previewOut.focus({ preventScroll: true }); } catch { /* not focusable */ } }, 0);
-    } else if (opts.focus !== false) {
-      setTimeout(() => mdEditor.focus(), 0);
+    } else {
+      // Runs after applyEditorLayout() has revealed the editor pane and after
+      // focus() triggers CodeMirror's lazy load/measure, so scrollIntoView lands.
+      setTimeout(() => {
+        if (opts.focus !== false) mdEditor.focus();
+        if (pendingEditCursorLine != null) {
+          mdEditor.moveCursorToLine(pendingEditCursorLine);
+          pendingEditCursorLine = null;
+        }
+      }, 0);
     }
   }
 
@@ -4839,6 +4851,7 @@ type TaskLocation = {
   // with content opens in preview; an empty note opens ready to type. The
   // preview itself has already been rendered once by the caller.
   function enterReadingModeForOpenDoc() {
+    pendingEditCursorLine = null; // a fresh document invalidates any recorded preview click
     const remembered = activeTabRecord()?.readingView;
     readingViewState = remembered ?? (!/\S/.test(mdEditor.value) ? 'edit' : 'preview');
     rememberActiveTabReadingView();
@@ -4884,6 +4897,105 @@ type TaskLocation = {
       target = [...offsets].reverse().find(top => top < current - EPSILON) ?? 0;
     }
     previewOut.scrollTop = Math.max(0, Math.min(maxTop, target));
+  }
+
+  // ── Preview click → source line (for placing the caret when entering edit) ──
+
+  // Top-level preview blocks in document order, matching the token order from
+  // sourceBlocksFromPreprocessed(). `details.md-collapsible` is transparent (its
+  // <summary> is the heading block, its other children are the nested blocks);
+  // the blank-line spacer and the appended backlinks section are skipped.
+  function collectPreviewBlockEls(surface: Element): Element[] {
+    const out: Element[] = [];
+    const push = (node: Element) => {
+      if (node.classList.contains('md-extra-blank-lines') || node.classList.contains('preview-backlinks')) return;
+      if (node.tagName === 'DETAILS' && node.classList.contains('md-collapsible')) {
+        const summary = node.querySelector(':scope > summary');
+        if (summary) out.push(summary);
+        for (const child of Array.from(node.children)) if (child !== summary) push(child);
+        return;
+      }
+      out.push(node);
+    };
+    for (const child of Array.from(surface.children)) push(child);
+    return out;
+  }
+
+  function caretFromPoint(x: number, y: number): { node: Node; offset: number } | null {
+    const d = document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    };
+    if (typeof d.caretRangeFromPoint === 'function') {
+      const r = d.caretRangeFromPoint(x, y);
+      return r ? { node: r.startContainer, offset: r.startOffset } : null;
+    }
+    if (typeof d.caretPositionFromPoint === 'function') {
+      const p = d.caretPositionFromPoint(x, y);
+      return p ? { node: p.offsetNode, offset: p.offset } : null;
+    }
+    return null;
+  }
+
+  // Character offset of (caretNode, caretOffset) within `root`'s text, or 0 when
+  // the caret isn't inside `root` (e.g. the click landed on a code block's
+  // language label rather than the code).
+  function offsetInElement(root: Element, caretNode: Node, caretOffset: number): number {
+    if (root !== caretNode && !root.contains(caretNode)) return 0;
+    let acc = 0;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n === caretNode) return acc + Math.min(caretOffset, (n.textContent || '').length);
+      acc += (n.textContent || '').length;
+    }
+    return acc;
+  }
+
+  // Line offset within a prose block: one per <br> before the caret (breaks:true
+  // turns source newlines into <br>) and one per list-item / table-row that ends
+  // before the caret, plus one for a table's separator row.
+  function proseLineOffset(hit: Element, caretNode: Node): number {
+    let brs = 0;
+    let items = 0;
+    const walker = document.createTreeWalker(hit, NodeFilter.SHOW_ELEMENT);
+    for (let el = walker.nextNode() as Element | null; el; el = walker.nextNode() as Element | null) {
+      const tag = el.tagName;
+      if (tag !== 'BR' && tag !== 'LI' && tag !== 'TR') continue;
+      const rel = el.compareDocumentPosition(caretNode);
+      if (rel & Node.DOCUMENT_POSITION_CONTAINED_BY) continue;       // caret sits inside this item — that's the base line
+      if (!(rel & Node.DOCUMENT_POSITION_FOLLOWING)) break;          // this element is at/after the caret
+      if (tag === 'BR') brs++; else items++;
+    }
+    const inTable = hit.tagName === 'TABLE' || !!hit.closest('table');
+    return brs + items + (inTable && items >= 1 ? 1 : 0);
+  }
+
+  function resolvePreviewClickLine(target: Element, clientX: number, clientY: number): number | null {
+    const surface = previewOut.querySelector('.preview-zoom-surface') || previewOut;
+    if (!surface.contains(target)) return null;
+    const blockEls = collectPreviewBlockEls(surface);
+    const hit = blockEls.find(b => b === target || b.contains(target));
+    if (!hit) return null;
+
+    const value = String(mdEditor.value).replace(/\r\n?/g, '\n');
+    const totalLines = value.split('\n').length;
+    const blocks = sourceBlocksFromPreprocessed(preprocessMarkdown(value));
+    const base = blocks[blockEls.indexOf(hit)] ?? blocks[blocks.length - 1];
+    if (!base) return 1;
+    let line = base.startLine;
+
+    const caret = caretFromPoint(clientX, clientY);
+    if (caret) {
+      const pre = hit.closest('pre');
+      if (pre) {
+        const code = pre.querySelector(':scope > code') || pre;
+        const nl = newlinesBefore(code.textContent || '', offsetInElement(code, caret.node, caret.offset));
+        line = codeBlockLine(base.startLine, value.split('\n')[base.startLine - 1] || '', nl);
+      } else {
+        line = base.startLine + proseLineOffset(hit, caret.node);
+      }
+    }
+    return clampLine(line, totalLines);
   }
 
   // Move to the tab immediately left (-1) or right (+1) of the active one. Unlike
@@ -6401,6 +6513,17 @@ type TaskLocation = {
       toast('Could not open RecallStack link: ' + (err.message || err), 'error');
     });
   });
+
+  // Clicking anywhere in the rendered preview records the source line so that the
+  // caret lands there when edit mode is next entered. Purely passive — no
+  // preventDefault/stopPropagation, so links, <details> toggles, checkboxes and
+  // text selection are untouched.
+  previewOut.addEventListener('click', (e: any) => {
+    if (readingViewState !== 'preview' || presentationOn) return;
+    const t = e.target;
+    if (!(t instanceof Element) || t.closest('a, button, input')) return;
+    pendingEditCursorLine = resolvePreviewClickLine(t, e.clientX, e.clientY);
+  });
   btnConvertToTask.addEventListener('click', convertNoteToTask);
   btnConvertToNote.addEventListener('click', openConvertTaskToNoteModal);
   btnMove.addEventListener('click', () => executeCommand('file.move'));
@@ -6409,6 +6532,7 @@ type TaskLocation = {
   btnCancel.addEventListener('click', cancelEdit);
   btnNewFromEditor.addEventListener('click', () => executeCommand('file.new'));
   mdEditor.addEventListener('input', () => {
+    pendingEditCursorLine = null;
     renderPreview();
     lsDraftSave();
     updateActiveTabDirtyState();

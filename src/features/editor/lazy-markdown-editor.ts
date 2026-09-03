@@ -109,6 +109,17 @@ export class LazyMarkdownEditorAdapter {
       this.#selectionEnd = Math.max(0, Math.min(head, this.#value.length));
     }
   }
+  moveCursorToLine(line: number): void {
+    if (this.#adapter) { this.#adapter.moveCursorToLine(line); return; }
+    // Editor not loaded yet: resolve the line to an offset against the pending
+    // value; ready() applies it (without the scroll centering — acceptable, this
+    // path is only hit before the first document loads).
+    const lines = this.#value.split("\n");
+    const n = Math.max(1, Math.min(Math.floor(line) || 1, lines.length));
+    let pos = 0;
+    for (let i = 0; i < n - 1; i++) pos += lines[i].length + 1;
+    this.#selectionStart = this.#selectionEnd = Math.min(pos, this.#value.length);
+  }
   focus(): void {
     if (this.#adapter) this.#adapter.focus();
     else void this.ready().then(adapter => adapter.focus());
