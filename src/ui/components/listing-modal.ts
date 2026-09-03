@@ -327,11 +327,11 @@ export class ListingModalController {
     // buttons; only treat list-navigation keys as ours when the list is focused.
     if (event.key === "Tab") return;
     if (document.activeElement !== this.els.results) return;
-    if (event.ctrlKey || event.metaKey || event.altKey) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
+    // Modifier chords (Ctrl+T / Ctrl+W to switch listings, Ctrl+L, Ctrl+K, …)
+    // belong to the global keydown handler. Don't consume them here — just bail
+    // out so they aren't mistaken for a jump-code letter below and still reach
+    // the document.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     const key = event.key.toLowerCase();
     if (event.key === "ArrowDown" || key === "j") { event.preventDefault(); event.stopPropagation(); this.move(1); return; }
     if (event.key === "ArrowUp" || key === "k") { event.preventDefault(); event.stopPropagation(); this.move(-1); return; }
