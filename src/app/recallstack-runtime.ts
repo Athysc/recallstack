@@ -2925,7 +2925,10 @@ type TaskLocation = {
     if (!pinned) {
       const dynamicTab = tabs.find(t => !t.pinned);
       if (dynamicTab) {
-        Object.assign(dynamicTab, fields, { workspace: activeWorkspace });
+        // The dynamic tab is being repointed at a different file — drop the
+        // previous file's remembered mode so enterReadingModeForOpenDoc() falls
+        // back to the open-time heuristic for the new one.
+        Object.assign(dynamicTab, fields, { workspace: activeWorkspace, readingView: undefined });
         activeTabId = dynamicTab.id;
         enforceTabOrder();
         return { tab: dynamicTab, previousActiveId, isNewTab: false };
@@ -4592,6 +4595,7 @@ type TaskLocation = {
   // Switch between the preview and edit sub-states.
   function setReadingView(state: 'preview' | 'edit', opts: { focus?: boolean } = {}) {
     readingViewState = state;
+    rememberActiveTabReadingView();
     applyEditorLayout();
     if (state === 'preview') {
       previewScheduler.cancel();
@@ -4604,11 +4608,23 @@ type TaskLocation = {
     }
   }
 
-  // Called by every "document just loaded into the editor" path. A note with
-  // content opens in preview; an empty note opens ready to type. The preview
-  // itself has already been rendered once by the caller.
+  // Writes the live edit/preview sub-state onto the active tab so it can be
+  // restored when the user switches back to it later. `readingViewState` only
+  // ever changes through setReadingView() and enterReadingModeForOpenDoc(), and
+  // both call this, so the active tab's `readingView` always mirrors it.
+  function rememberActiveTabReadingView() {
+    const tab = activeTabRecord();
+    if (tab) tab.readingView = readingViewState;
+  }
+
+  // Called by every "document just loaded into the editor" path. If this tab was
+  // shown before, it reopens in whatever mode it was left in. Otherwise: a note
+  // with content opens in preview; an empty note opens ready to type. The
+  // preview itself has already been rendered once by the caller.
   function enterReadingModeForOpenDoc() {
-    readingViewState = !/\S/.test(mdEditor.value) ? 'edit' : 'preview';
+    const remembered = activeTabRecord()?.readingView;
+    readingViewState = remembered ?? (!/\S/.test(mdEditor.value) ? 'edit' : 'preview');
+    rememberActiveTabReadingView();
     applyEditorLayout();
     if (readingViewState === 'edit') setTimeout(() => mdEditor.focus(), 0);
     else setTimeout(() => { try { previewOut.focus({ preventScroll: true }); } catch { /* not focusable */ } }, 0);
@@ -4654,17 +4670,15 @@ type TaskLocation = {
   }
 
   // Move to the tab immediately left (-1) or right (+1) of the active one. Unlike
-  // switchToRelativeTab this does not wrap: at either end nothing happens. A tab
-  // that comes up in edit mode (an empty note) is switched to its preview.
+  // switchToRelativeTab this does not wrap: at either end nothing happens. The
+  // target tab reopens in its own remembered edit/preview mode (activateTab ->
+  // enterReadingModeForOpenDoc), same as any other way of switching to it.
   async function focusAdjacentTab(direction: 1 | -1): Promise<void> {
     const index = tabs.findIndex(tab => tab.id === activeTabId);
     if (index < 0) return;
     const next = tabs[index + direction];
     if (!next || next.id === activeTabId) return;
     await activateTab(next.id);
-    if (readingViewState === 'edit' && !editorView.classList.contains('hidden')) {
-      setReadingView('preview');
-    }
   }
 
   // ── Block-level render caching ────────────────────────────────────────────────
@@ -5765,7 +5779,9 @@ type TaskLocation = {
       activeId: activeTabId,
       async activate(tabId) {
         const activated = await activateTab(tabId);
-        if (activated) mdEditor.focus();
+        // Respect the tab's restored mode: only pull focus into the editor when
+        // it actually reopened in edit mode.
+        if (activated && readingViewState === 'edit') mdEditor.focus();
         return activated;
       },
       async closeItem(tabId) {

@@ -33,6 +33,13 @@ export interface EditorTab {
   // before any workspace was selected; outputs/external tabs set it too but it
   // is unused for them (they are not workspace-scoped).
   workspace: string | null;
+  // Which editor sub-state (edit vs preview) this tab was last showing. Stamped
+  // on every setReadingView()/enterReadingModeForOpenDoc() call while the tab is
+  // active, and restored when it is re-activated — so switching to another tab
+  // (or any other view) and coming back leaves the mode untouched. Undefined
+  // until the tab has been shown once, in which case the open-time heuristic
+  // (empty note -> edit, note with content -> preview) picks the initial mode.
+  readingView?: 'preview' | 'edit';
 }
 
 export interface EditorDocumentSnapshot {
