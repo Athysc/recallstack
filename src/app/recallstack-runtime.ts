@@ -402,6 +402,10 @@ type TaskLocation = {
   // Start / Completed / Due dates and Priority stay visible in preview mode (the
   // editor pane, and its copy of this summary, are display:none while reading).
   const taskMetaSummaryPreview = $id('task-meta-summary-preview');
+  // Left-aligned counterpart to taskMetaSummaryPreview in the same preview-pane
+  // label row: pinned state + document type (Task / Working Task / Note), shown
+  // for any open file in preview mode — not just tasks.
+  const previewDocInfo = $id('preview-doc-info');
   const taskKindIndicator = $id('task-kind-indicator');
   const taskEditorLayout = $id('task-editor-layout');
   const taskEditorTop = $id('task-editor-top');
@@ -2923,6 +2927,23 @@ type TaskLocation = {
     const pinnable = !!tab && !tab.pinned && !isProtectedDailyJournalTab(tab);
     btnPinCurrentFile.classList.toggle('hidden', !pinnable);
     btnPinCurrentFilePreview?.classList.toggle('hidden', !pinnable);
+    updatePreviewDocInfo();
+  }
+
+  // Pinned state + document type ("Task" / "Working Task" / "Note") for the
+  // currently open file, shown left-aligned in the preview pane's label row
+  // (mirrors the "Task"/"Working Task" split used by quickTabKind()).
+  function currentDocKindLabel(): 'Working Task' | 'Task' | 'Note' {
+    if (currentPath?.split('/').includes('working')) return 'Working Task';
+    if (isCurrentTaskPath(currentPath)) return 'Task';
+    return 'Note';
+  }
+
+  function updatePreviewDocInfo() {
+    const pinned = !!activeTabRecord()?.pinned;
+    previewDocInfo.innerHTML =
+      `<span class="pin-state${pinned ? ' is-pinned' : ''}">${pinned ? 'Pinned' : 'Not Pinned'}</span>` +
+      `<span class="kind">${esc(currentDocKindLabel())}</span>`;
   }
 
   function pinCurrentFile() {
@@ -4236,6 +4257,7 @@ type TaskLocation = {
   }
 
   function showTaskDateBar() {
+    updatePreviewDocInfo();
     if (isTasksEditor()) {
       taskDateBar.classList.remove('hidden');
       taskMetaSummary.classList.remove('hidden');
