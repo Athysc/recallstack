@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capability for the RecallStack main window.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "opener:default", "clipboard-manager:allow-write-text"]
+  "permissions": ["core:default", "dialog:default", "opener:default", "clipboard-manager:allow-write-text", "clipboard-manager:allow-read-image"]
 }

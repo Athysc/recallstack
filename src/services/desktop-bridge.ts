@@ -413,6 +413,20 @@ import { assertPortableName } from "./portable-names";
     // clipboard-history tool (clipman, CopyQ, Klipper, ...) reads the selection —
     // the native plugin writes via X11/Wayland directly and sidesteps that path.
     writeClipboardText(text) { return invoke('plugin:clipboard-manager|write_text', { text }); },
+    // Reads a raster image from the OS clipboard via the native plugin, bypassing
+    // the webview entirely — WebKitGTK (Tauri on Linux) does not expose pasted
+    // images through the DOM `paste` event's clipboardData. Returns RGBA bytes
+    // plus dimensions; the caller re-encodes to PNG. Rejects when the clipboard
+    // holds no image.
+    async readClipboardImage() {
+      const rid = await invoke<number>('plugin:clipboard-manager|read_image');
+      const [rgba, size] = await Promise.all([
+        invoke<number[] | ArrayBuffer | Uint8Array>('plugin:image|rgba', { rid }),
+        invoke<{ width: number; height: number }>('plugin:image|size', { rid }),
+      ]);
+      // Tauri returns Vec<u8> as an ArrayBuffer or a number[] depending on IPC.
+      return { rgba: new Uint8Array(rgba as ArrayBuffer), width: size.width, height: size.height };
+    },
     search(query, prefix = '') { return invoke('search_notes', { query, prefix }); },
     recentWorkspaces() { return invoke('recent_workspaces'); },
     removeRecentWorkspace(path) { return invoke('remove_recent_workspace', { path }); },

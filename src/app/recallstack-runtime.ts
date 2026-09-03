@@ -1290,7 +1290,7 @@ type TaskLocation = {
     // Build the note catalog first: a new day's daily journal is seeded from the
     // most recent prior journal, and that lookup reads the catalog.
     await buildSearchIndex();
-    await ensureJournalWhenEmpty();
+    await ensureDailyJournalTab();
     if (window.__recallstackNative?.active) renderSavedSearches().catch(error => console.warn('Could not load saved searches', error));
     performance.mark('recallstack:workspace-ui-ready');
     if (performance.getEntriesByName('recallstack:workspace-native-ready').length) {
@@ -1618,7 +1618,7 @@ type TaskLocation = {
     }
 
     if (!restoreView || !await restoreLastView(folders)) {
-      // Land on a folder for nav context; ensureJournalWhenEmpty() then shows
+      // Land on a folder for nav context; ensureDailyJournalTab() then shows
       // today's journal when nothing else is open.
       if (folders.length) await selectL1(folders[0]);
     }
@@ -3277,7 +3277,7 @@ type TaskLocation = {
       }
     }
     renderTabStrip();
-    await ensureJournalWhenEmpty();
+    await ensureDailyJournalTab();
     return true;
   }
 
@@ -4275,19 +4275,53 @@ type TaskLocation = {
     renderTabStrip();
   }
 
-  // When nothing but the (protected) daily journal is open, land on the journal
-  // instead of the file list — there is no "dynamic" file to show.
-  async function ensureJournalWhenEmpty() {
-    if (!notesHandle || isNotesOnlyWorkspace()) return;
-    // Pinned tabs carried over from another workspace don't count — the newly
-    // entered workspace still has "nothing of its own open" and should land on
-    // its daily journal.
-    const hasDynamicTab = tabs.some(tab => !tab.pinned && tabBelongsToActiveWorkspace(tab));
-    const hasOtherPinned = tabs.some(tab => tab.pinned && !isProtectedDailyJournalTab(tab) && tabBelongsToActiveWorkspace(tab));
+  // The daily journal is a global file (Data/dailylogs/...) and its tab is a
+  // permanent fixture: always present, pinned, first, non-closeable, carried
+  // across every workspace switch. This guarantees it exists (seeding today's
+  // file on a new day) and adds it as a background tab if missing. In a normal
+  // workspace with nothing else open it also becomes the active document, the
+  // way the old "land on the journal" behaviour did.
+  async function ensureDailyJournalTab() {
+    if (!dataHandle) return;
+    const path = todaysDailyJournalPath();
+    if (!path) return;
+    protectedDailyJournalPath = path;
+
+    let tab = tabs.find(t => !t.isOutputsFile && !t.isExternalFile && t.path === path) || null;
+    if (tab) {
+      tab.pinned = true;
+      tab.workspace = null;
+    } else {
+      // Seed today's file on a brand-new day (clone the most recent prior one).
+      try {
+        await readMdFile(path);
+      } catch {
+        if (!searchIndex.length) { try { await buildSearchIndex(); } catch { /* best effort */ } }
+        const priorPath = latestJournalPathBefore(searchIndex.map(entry => entry.notesRelPath), [], localTodayDateString());
+        let content = '';
+        if (priorPath) { try { content = await readMdFile(priorPath); } catch { /* start blank */ } }
+        try { await writeMdFile(path, content); updateSearchIndex(path, content); }
+        catch (error) { console.warn('Could not create daily journal', error); return; }
+      }
+      tab = {
+        id: nextTabId++, path, title: tabTitleForPath(path), isNew: false, dirty: false,
+        isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false,
+        isExternalFile: false, externalPath: null, externalFileHandle: null,
+        pinned: true, workspace: null,
+      };
+      tabs.unshift(tab);
+    }
+    enforceTabOrder();
+    renderTabStrip();
+
+    // Notes-only workspaces (managed system / Extra Data Folder) keep the tab in
+    // the strip but don't let it take over their default view.
+    if (isNotesOnlyWorkspace()) return;
+    const hasDynamicTab  = tabs.some(t => !t.pinned && tabBelongsToActiveWorkspace(t));
+    const hasOtherPinned = tabs.some(t => t.pinned && !isProtectedDailyJournalTab(t) && tabBelongsToActiveWorkspace(t));
     if (hasDynamicTab || hasOtherPinned) return;
-    const showingFile = !editorView.classList.contains('hidden');
-    if (showingFile) return; // already on the journal (the only non-dynamic file)
-    try { await openTodayJournal(); }
+    if (!editorView.classList.contains('hidden')) return; // a document is already showing
+    try { await activateTab(tab.id); }
     catch (error) { console.warn('Could not open journal', error); }
   }
 
@@ -6536,48 +6570,87 @@ type TaskLocation = {
 
   // ── Asset paste / drop into editor ───────────────────────────────────────────
 
-  mdEditor.addEventListener('paste', async (e: any) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    // Only intercept if at least one file item is present
-    let hasFile = false;
-    for (const item of items) { if (item.kind === 'file') { hasFile = true; break; } }
-    if (!hasFile) return;
-    e.preventDefault();
-    for (const item of items) {
-      if (item.kind !== 'file') continue;
-      const file = item.getAsFile();
-      if (!file) continue;
-      try {
-        const buf      = await file.arrayBuffer();
-        const isImage  = file.type.startsWith('image/');
-        const filename = isImage && isScreenshotItem(file) ? clipFilename() : (file.name || clipFilename());
-        const relPath  = await saveAsset(filename, buf, file.type || undefined);
-        insertAtCursor(assetMarkdownLink(filename, relPath, isImage));
-        toast(`Asset saved: ${filename}`);
-      } catch (err: any) {
-        toast('Failed to save asset: ' + err.message, 'error');
-      }
+  async function saveDataTransferFile(file: File): Promise<void> {
+    try {
+      const buf      = await file.arrayBuffer();
+      const isImage  = file.type.startsWith('image/');
+      const filename = isImage && isScreenshotItem(file) ? clipFilename() : (file.name || clipFilename());
+      const relPath  = await saveAsset(filename, buf, file.type || undefined);
+      insertAtCursor(assetMarkdownLink(filename, relPath, isImage));
+      toast(`Asset saved: ${filename}`);
+    } catch (err: any) {
+      toast('Failed to save asset: ' + (err?.message || err), 'error');
     }
+  }
+
+  // Re-encode raw RGBA (from the native clipboard plugin) to PNG bytes.
+  async function rgbaToPngBytes(rgba: Uint8Array, width: number, height: number): Promise<ArrayBuffer> {
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context unavailable');
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.byteLength), width, height), 0, 0);
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('PNG encode failed');
+    return blob.arrayBuffer();
+  }
+
+  mdEditor.addEventListener('paste', async (e: any) => {
+    const cd: DataTransfer | undefined = e.clipboardData;
+    const text = cd?.getData('text/plain') || '';
+
+    // 1. Standard file items (Chromium; occasionally WebKit).
+    const fileItems: File[] = [];
+    if (cd?.items) for (const item of Array.from(cd.items) as any[]) {
+      if (item.kind === 'file') { const f = item.getAsFile(); if (f) fileItems.push(f); }
+    }
+    if (fileItems.length) {
+      e.preventDefault();
+      for (const file of fileItems) await saveDataTransferFile(file);
+      return;
+    }
+
+    // 2. file:// URIs — a file copied from a file manager (WebKitGTK exposes
+    //    these as text even when it drops the File objects).
+    const filePaths = [cd?.getData('text/uri-list') || '', text].join('\n')
+      .split(/\r?\n/).map(s => s.trim()).filter(s => /^file:\/\//i.test(s))
+      .map(u => { try { return decodeURIComponent(new URL(u).pathname); } catch { return ''; } })
+      .filter(Boolean);
+    if (filePaths.length && window.__recallstackNative?.active) {
+      e.preventDefault();
+      await insertNativeDroppedAssets(filePaths);
+      return;
+    }
+
+    // 3. WebKitGTK image paste: a pasted screenshot is invisible to the DOM
+    //    (no file item, no image type in clipboardData). If there's no plain
+    //    text either, read the image straight off the OS clipboard via the
+    //    native plugin. No preventDefault — a screenshot paste inserts nothing
+    //    into the editor on its own, so there's nothing to suppress.
+    if (!window.__recallstackNative?.active || text) return;
+    try {
+      const { rgba, width, height } = await window.__recallstackNative.readClipboardImage();
+      if (!width || !height) return;
+      const pngBuf   = await rgbaToPngBytes(rgba, width, height);
+      const filename = clipFilename();
+      const relPath  = await saveAsset(filename, pngBuf, 'image/png');
+      insertAtCursor(assetMarkdownLink(filename, relPath, true));
+      toast(`Asset saved: ${filename}`);
+    } catch { /* nothing usable on the clipboard */ }
   });
 
-  // A plain Ctrl+C/right-click-Copy text selection inside the editor is
-  // handled entirely natively by the webview (never touches copyPlainText()
-  // above) — on Linux that means it still routes through WebKitGTK's own
-  // clipboard bridge and can log the same "Gdk-WARNING: Error writing
-  // selection data: Broken pipe" a clipboard-history tool triggers. Intercept
-  // the copy event and write the selected text through the native plugin
-  // instead, same as every other explicit copy action in the app.
-  //
-  // Linux only: on Windows/macOS the webview's native copy works fine and does
-  // not hit the Gdk warning, so intercepting there only risks swallowing the
-  // copy if the plugin path rejects (see copyPlainText).
-  mdEditor.addEventListener('copy', (e: any) => {
+  // A plain Ctrl+C / right-click-Copy inside the editor is handled by the webview
+  // itself. On Linux that routes through WebKitGTK's clipboard bridge, which can
+  // log a noisy "Gdk-WARNING: Error writing selection data: Broken pipe" when a
+  // clipboard-history tool reads the selection. Mirror the copy through the
+  // native plugin (which writes via X11/Wayland directly) as well — but do NOT
+  // preventDefault: a previous version suppressed the webview copy and, if the
+  // plugin write ever rejected, left nothing on the clipboard to paste.
+  mdEditor.addEventListener('copy', () => {
     if (!window.__recallstackNative?.active || !isLinuxPlatform()) return;
     const text = mdEditor.value.slice(mdEditor.selectionStart, mdEditor.selectionEnd);
     if (!text) return;
-    e.preventDefault();
-    void copyPlainText(text);
+    void window.__recallstackNative.writeClipboardText(text).catch(() => { /* webview copy stands */ });
   });
 
   // Browser (non-Tauri) mode only: real OS files dragged into a Tauri desktop
@@ -7331,11 +7404,12 @@ type TaskLocation = {
           browserHandle: null,
         }));
         void openHeaderDroppedFiles(entries);
-      } else if (!modalOpen && pointInRect(editorPane.getBoundingClientRect(), point)) {
-        // editorPane (not mdEditor itself) — mdEditor is a LazyMarkdownEditorAdapter
-        // wrapping either a plain div or CodeMirror once loaded, and exposes no
-        // getBoundingClientRect() of its own; editorPane is the DOM element that
-        // actually bounds the editor's drop target area (excludes previewPane).
+      } else if (!modalOpen && (!editorView.classList.contains('hidden')
+                 || pointInRect(editorPane.getBoundingClientRect(), point))) {
+        // Any OS file drop that isn't on the import modal or the header goes into
+        // the editor when it's the visible view. The rect check is kept as a
+        // secondary signal — WebKitGTK's reported drop coordinates can't always
+        // be trusted, so "the editor is showing" is the primary condition.
         void insertNativeDroppedAssets(payload.paths);
       }
     }).catch(err => console.warn('Could not attach native drag-and-drop listener', err));
