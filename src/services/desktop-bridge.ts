@@ -517,6 +517,12 @@ import { assertPortableName } from "./portable-names";
       if (!value) return null;
       return typeof value === 'string' ? value : value.path || String(value);
     },
+    async chooseSystemFolder() {
+      if (typeof window.__TAURI__?.dialog?.open !== 'function') return null;
+      const value = await window.__TAURI__.dialog.open({ title: 'Choose System Folder', directory: true, multiple: false });
+      if (!value) return null;
+      return typeof value === 'string' ? value : value.path || String(value);
+    },
     externalRename(from, to) { return invoke('external_fs_rename', { from, to }); },
     rebuildIndex() { return invoke('rebuild_index'); },
     cancelIndex() { return invoke('cancel_index'); },

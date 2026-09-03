@@ -321,6 +321,7 @@
       </button>
     </div>
     <div class="settings-content">
+      <div class="settings-left">
       <div class="settings-grid">
       <button class="btn-icon settings-tile nav-mode-btn" id="btn-nav1-mode" title="Folder nav: toggle buttons ↔ dropdown">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="8" height="10" rx="2"/><rect x="14" y="7" width="8" height="10" rx="2"/><line x1="2" y1="4" x2="22" y2="4"/></svg>
@@ -342,16 +343,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="14" y2="18"/><polyline points="17 9 21 12 17 15"/></svg>
         <span class="settings-tile-title">Preview Headings</span><span class="settings-tile-description">Start expanded or collapsed</span>
       </button>
-      <button class="btn-icon settings-tile" id="btn-toggle-system-folders" title="Show system folders (ai-team, openbrain, shared, openbrain-shared)"><span class="settings-tile-icon" aria-hidden="true"></span><span class="settings-tile-title">System Folders</span><span class="settings-tile-description">Show hidden workspaces</span></button>
       <button class="btn-icon settings-tile" id="btn-remote-media" title="Load remote images and media in the preview"><span class="settings-tile-icon" aria-hidden="true"></span><span class="settings-tile-title">Remote Images</span><span class="settings-tile-description">Load http(s) images in preview</span></button>
       </div>
-      <section class="settings-theme-panel" aria-labelledby="settings-theme-title">
-        <div class="settings-theme-heading">
-          <span class="settings-theme-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c-2.5-2.2-2.5-15.8 0-18Z"/></svg></span>
-          <div><label id="settings-theme-title" for="theme-select">Theme</label><span>Choose the app colors</span></div>
-        </div>
-        <select id="theme-select" class="settings-theme-list" size="10" title="Switch theme" aria-label="Theme"><option value="catppuccin">Catppuccin</option></select>
-      </section>
       <section class="settings-output-panel settings-path-panel" aria-labelledby="settings-extra-data-title">
         <label id="settings-extra-data-title" for="settings-extra-data-path">Extra Data Folder</label>
         <div class="settings-path-row">
@@ -378,6 +371,23 @@
           <button class="btn btn-ghost" id="btn-clear-external-theme" type="button" title="Stop using an external theme file">Clear</button>
         </div>
         <p class="settings-help-text">A JSON file of extra themes, merged with the built-ins and remembered across restarts. Multiple themes per file are supported.</p>
+      </section>
+      <section class="settings-output-panel settings-path-panel" aria-labelledby="settings-system-folder-title">
+        <label id="settings-system-folder-title" for="settings-system-folder-path">System folder</label>
+        <div class="settings-path-row">
+          <input id="settings-system-folder-path" class="modal-input" type="text" value="" placeholder="Not set" spellcheck="false" autocomplete="off" readonly />
+          <button class="btn btn-primary" id="btn-browse-system-folder" type="button" title="Choose the folder that holds the system folders">Browse…</button>
+          <button class="btn btn-ghost" id="btn-clear-system-folder" type="button" title="Use the workspace root for system folders">Clear</button>
+        </div>
+        <p class="settings-help-text">The folder that contains the <code>ai-team</code>, <code>openbrain</code>, <code>ai-team-shared</code> and <code>openbrain-shared</code> folders. When set, a <code>sys</code> workspace appears last in the switcher; clicking it lists those folders as its top-level folders. Files there route through the external FS bridge like the Extra Data Folder — full browse / edit, but not in search, the calendar, or backlinks.</p>
+      </section>
+      </div>
+      <section class="settings-theme-panel" aria-labelledby="settings-theme-title">
+        <div class="settings-theme-heading">
+          <span class="settings-theme-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c-2.5-2.2-2.5-15.8 0-18Z"/></svg></span>
+          <div><label id="settings-theme-title" for="theme-select">Theme</label><span>Choose the app colors</span></div>
+        </div>
+        <select id="theme-select" class="settings-theme-list" size="10" title="Switch theme" aria-label="Theme"><option value="catppuccin">Catppuccin</option></select>
       </section>
     </div>
   </div>

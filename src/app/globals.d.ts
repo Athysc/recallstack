@@ -39,6 +39,7 @@ interface RecallStackNativeBridge {
   externalRename(from: string, to: string): Promise<void>;
   chooseOutputsFolder(): Promise<string | null>;
   chooseExtraDataFolder(): Promise<string | null>;
+  chooseSystemFolder(): Promise<string | null>;
   externalFileHandle(path: string, metadata?: Record<string, unknown>): FileSystemFileHandle;
   externalDirectoryHandle(path: string): FileSystemDirectoryHandle;
   listExternalFilesRecursive(path: string): Promise<Array<{ name: string; path: string; isDir: boolean; size: number; modifiedAt: number; version: string }>>;

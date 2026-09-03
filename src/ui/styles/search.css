@@ -57,8 +57,10 @@
   }
   .settings-dialog {
     width: min(1060px, 96vw);
-    max-height: min(936px, 96vh);
-    overflow-y: auto;
+    height: min(936px, 96vh);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     background: var(--mantle);
     border: 1px solid var(--surface1);
     border-radius: 18px;
@@ -114,26 +116,39 @@
     outline: none;
   }
   .settings-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 250px;
     align-items: stretch;
     gap: 16px;
     padding: 20px 22px 24px;
   }
+  /* Left column: the tile grid plus the four path panels, stacked from the top.
+     Whatever height is left over is empty space — the theme listbox on the
+     right owns the modal's full height. */
+  .settings-left {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
   .settings-grid {
+    flex: 0 0 auto;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
   }
+  /* Theme picker: right column, stretched to the full height of the dialog so
+     the listbox is as tall as the modal. */
   .settings-theme-panel {
-    grid-column: 2;
-    grid-row: 1 / span 2;
+    align-self: stretch;
   }
-  /* The path panels (Extra Data Folder, Outputs folder, External theme file)
-     all span the full width so their controls line up. */
+  /* The path panels (Extra Data Folder, Outputs folder, External theme file,
+     System folder) stack compactly and never grow. */
   .settings-path-panel {
-    grid-column: 1 / -1;
-    grid-row: auto;
+    flex: 0 0 auto;
   }
   .settings-tile.btn-icon {
     box-sizing: border-box;
@@ -261,14 +276,28 @@
     background: var(--mauve);
     color: var(--crust);
   }
-  .settings-path-row { display:flex; gap:8px; align-items:center; }
-  .settings-path-row input { flex:1; min-width:0; }
+  .settings-path-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .settings-path-row input { flex:1 1 180px; min-width:0; }
   .settings-help-text { margin:0; color:var(--overlay1); font-size:11px; line-height:1.4; }
+
+  /* Compact treatment for the four path panels so the theme listbox can own the
+     modal's height. */
+  .settings-path-panel {
+    gap: 7px;
+    padding: 10px 12px;
+    border-radius: 10px;
+  }
+  .settings-path-panel label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .settings-path-panel .settings-help-text { font-size: 10px; line-height: 1.35; }
+  .settings-path-panel .btn { padding-block: 4px; font-size: 12px; }
+
   @media (max-width: 860px) {
     .settings-content { grid-template-columns: 1fr; }
-    .settings-theme-panel,
-    .settings-output-panel { grid-column: auto; grid-row: auto; }
-    .settings-theme-panel { min-height: 260px; }
+    .settings-theme-panel { min-height: 260px; align-self: auto; }
   }
   @media (max-width: 680px) {
     .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

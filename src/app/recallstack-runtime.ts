@@ -64,6 +64,8 @@ import {
   ensureGlobalTasksRoots,
   readWorkspaceNavigationPreferences,
   selectInitialWorkspace,
+  SYS_WORKSPACE_NAME,
+  SYSTEM_FOLDER_DIR_NAMES,
   type WorkspaceDirectory,
 } from "../features/workspaces/catalog";
 import {
@@ -168,6 +170,7 @@ type TaskLocation = {
   const WORKSPACE_ROOT_PATH_KEY = PREFERENCE_KEYS.workspaceRootPath;
   const OUTPUTS_FOLDER_PATH_KEY = PREFERENCE_KEYS.outputsFolderPath;
   const EXTRA_DATA_FOLDER_PATH_KEY = PREFERENCE_KEYS.extraDataFolderPath;
+  const SYSTEM_FOLDER_PATH_KEY = PREFERENCE_KEYS.systemFolderPath;
   const SYSTEM_FOLDER_NAMES = new Set([TASKS_ROOT, DAILYLOGS_ROOT]);
   let   DB_WS_PREFIX = 'Data/';            // updated each time the workspace switches
 
@@ -190,9 +193,19 @@ type TaskLocation = {
   let l2Active: NamedDirectory | null = null;
   let currentPath: string | null = null;
   // The user-configured "Extra Data Folder": an arbitrary directory on disk,
-  // outside the workspace Data/ tree, surfaced as the first workspace in the
-  // switcher. null when unset. Persisted in EXTRA_DATA_FOLDER_PATH_KEY.
+  // outside the workspace Data/ tree, surfaced as a workspace switcher entry
+  // after the Data/ workspaces (just before "sys"). null when unset. Persisted
+  // in EXTRA_DATA_FOLDER_PATH_KEY.
   let extraDataWorkspace: WorkspaceDirectory | null = null;
+  // The user-configured "System folder": a parent directory that holds the
+  // managed system folders (ai-team / openbrain / ai-team-shared /
+  // openbrain-shared). When set, it is surfaced as the last workspace switcher
+  // entry, named "sys". null/unset otherwise. Persisted in
+  // SYSTEM_FOLDER_PATH_KEY; native mode only (directory handles aren't
+  // persistable in the browser).
+  let systemFolderRootHandle: FileSystemDirectoryHandle | null = null;
+  let systemFolderRootPath: string | null = null;
+  let systemFolderWorkspace: WorkspaceDirectory | null = null;
   const nativeFileVersions = new Map<string, string>();
   const currentView = createCurrentViewStore();
   currentView.subscribe(state => {
@@ -598,22 +611,31 @@ type TaskLocation = {
   // ── File System helpers ───────────────────────────────────────────────────────
 
   async function buildWorkspaceList(root: any) {
+    await ensureConfiguredSystemFolder();
     const discovered = await discoverWorkspaces(root);
     dataHandle = discovered.dataHandle;
-    // The Extra Data Folder is always the first workspace, before the Data/ ones.
-    return extraDataWorkspace ? [extraDataWorkspace, ...discovered.workspaces] : discovered.workspaces;
+    // The Data/ workspaces come first; the two synthetic workspaces are grouped
+    // at the end — the Extra Data Folder, then the "sys" workspace last.
+    const list = [...discovered.workspaces];
+    if (extraDataWorkspace) list.push(extraDataWorkspace);
+    if (systemFolderWorkspace) list.push(systemFolderWorkspace);
+    return list;
   }
 
   async function listWorkspaceTopDirs() {
     const dirs = currentWorkspace?.topLevelDirs || await listDirs(notesHandle!);
+    // The "sys" workspace only exposes the managed system folders that exist.
+    if (activeWorkspace === SYS_WORKSPACE_NAME) {
+      return dirs.filter(dir => SYSTEM_FOLDER_DIR_NAMES.includes(String(dir.name).toLowerCase()));
+    }
     return dirs.filter(dir => !SYSTEM_FOLDER_NAMES.has(String(dir.name).toLowerCase()));
   }
 
-  // ── Extra Data Folder (a synthetic first workspace) ────────────────────────
-  // The Extra Data Folder is surfaced as the first entry in the workspace
-  // switcher, left of the Data/ workspaces. It lives outside Data/, so while it
-  // is active every read/write routes through the external FS bridge and its
-  // notes are left out of the search index.
+  // ── Extra Data Folder (a synthetic workspace) ─────────────────────────────
+  // The Extra Data Folder is surfaced near the end of the workspace switcher,
+  // after the Data/ workspaces and immediately before the "sys" workspace. It
+  // lives outside Data/, so while it is active every read/write routes through
+  // the external FS bridge and its notes are left out of the search index.
   function isExtraDataWorkspace(): boolean {
     return !!currentWorkspace?.isExtraData;
   }
@@ -693,12 +715,38 @@ type TaskLocation = {
     }
   }
 
-  function isManagedSystemWorkspace() {
-    return activeWorkspace != null && SYSTEM_WORKSPACES.has(activeWorkspace);
+  // Rebuilds the "sys" workspace from SYSTEM_FOLDER_PATH_KEY (native mode). A
+  // listing probe confirms the configured folder is still reachable; on success
+  // `systemFolderWorkspace` is a synthetic external workspace whose top-level
+  // folders are the managed system folders, on failure/unset it is null.
+  async function ensureConfiguredSystemFolder(): Promise<void> {
+    if (!window.__recallstackNative?.active) return; // browser: keep in-memory handle
+    const path = (localStorage.getItem(SYSTEM_FOLDER_PATH_KEY) || '').trim();
+    const clear = () => { systemFolderRootHandle = null; systemFolderRootPath = null; systemFolderWorkspace = null; };
+    if (!path) { clear(); return; }
+    const handle = window.__recallstackNative!.externalDirectoryHandle(path);
+    try {
+      await listDirs(handle);
+      systemFolderRootHandle = handle;
+      systemFolderRootPath = path.replace(/[\\/]+$/, '');
+      systemFolderWorkspace = {
+        name: SYS_WORKSPACE_NAME,
+        handle,
+        dbPrefix: '',
+        isExtraData: true,
+        extraPath: systemFolderRootPath,
+      };
+    } catch {
+      clear();
+    }
   }
 
-  // Workspaces with no tasks/ or dailylogs/ semantics: the managed system
-  // workspaces and the Extra Data Folder. Folder create/rename still work.
+  function isManagedSystemWorkspace() {
+    return activeWorkspace === SYS_WORKSPACE_NAME;
+  }
+
+  // Workspaces with no tasks/ or dailylogs/ semantics: the "sys" workspace and
+  // the Extra Data Folder. Folder create/rename still work.
   function isNotesOnlyWorkspace() {
     return isManagedSystemWorkspace() || isExtraDataWorkspace();
   }
@@ -1204,7 +1252,7 @@ type TaskLocation = {
       outputsAvailable = !!outputsHandle;
 
       if (!workspaces.length) {
-        toast('No workspace folders found — create a Data/ subfolder or add system workspaces.', 'error');
+        toast('No workspace folders found — create a Data/ subfolder.', 'error');
         return;
       }
 
@@ -1214,7 +1262,7 @@ type TaskLocation = {
       // Pick the last-used workspace, or fall back to the first one
       const savedWsName = options.preferredWorkspaceName
         ?? (freshRoot ? null : localStorage.getItem('pkm-active-workspace'));
-      const ws = selectInitialWorkspace(workspaces, savedWsName, showSystemFolders, SYSTEM_WORKSPACES);
+      const ws = selectInitialWorkspace(workspaces, savedWsName, SYS_WORKSPACE_NAME);
       if (!ws) return false;
       await switchWorkspace(ws, { restoreView: !freshRoot });
       return true;
@@ -1306,8 +1354,7 @@ type TaskLocation = {
     const container = $id('workspace-switcher');
     if (!container) return;
     container.innerHTML = '';
-    const visible = workspaces.filter(ws => showSystemFolders || !SYSTEM_WORKSPACES.has(ws.name));
-    visible.forEach((ws, i) => {
+    workspaces.forEach((ws, i) => {
       if (i > 0) {
         const sep = document.createElement('span');
         sep.className   = 'workspace-sep';
@@ -1333,7 +1380,7 @@ type TaskLocation = {
     workspaces = await buildWorkspaceList(rootHandle);
     let workspace = workspaces.find(item => item.name === workspaceName);
     if (!workspace) {
-      workspace = workspaces.find(item => !SYSTEM_WORKSPACES.has(item.name)) || workspaces[0];
+      workspace = workspaces.find(item => item.name !== SYS_WORKSPACE_NAME) || workspaces[0];
       toast(`“${workspaceName}” is no longer available. Workspace folders were refreshed.`, 'error');
     }
     if (!workspace) return;
@@ -1341,13 +1388,14 @@ type TaskLocation = {
   }
 
   async function ensureWorkspaceSystemFolders() {
-    if (!notesHandle || isManagedSystemWorkspace()) return;
-    // The Extra Data Folder is the user's own arbitrary directory — nothing to
-    // seed there.
-    if (isExtraDataWorkspace()) return;
+    if (!notesHandle) return;
     // tasks/ and dailylogs/ are global roots under Data/, shared by every
-    // workspace — created once, not per workspace.
+    // workspace including the Extra Data Folder and "sys" (the daily journal
+    // tab is available there too) — created once, not per workspace.
     if (dataHandle) await ensureGlobalTasksRoots(dataHandle);
+    // The Extra Data Folder / "sys" are the user's own arbitrary directories —
+    // nothing else to seed inside them.
+    if (isNotesOnlyWorkspace()) return;
     if (currentWorkspace?.topLevelDirs) {
       currentWorkspace.topLevelDirs = await listDirs(notesHandle);
     }
@@ -1586,7 +1634,6 @@ type TaskLocation = {
     // the app header as icon buttons now — not duplicated in this folder nav row.
     syncOutputsTopButton();
     syncTasksAppbarButtons();
-    navRow1.appendChild(mkNavSeparator());
     if (!folders.length) {
       const span = document.createElement('span');
       span.style.cssText = 'color:var(--overlay0);padding:5px 12px;font-size:13px';
@@ -2643,9 +2690,13 @@ type TaskLocation = {
     if (parts[0] === 'Data' && parts.length >= 3) {
       wsName = parts[1];
       relPath = parts.slice(2).join('/');
-    } else if (SYSTEM_WORKSPACES.has(parts[0]) && parts.length >= 2) {
-      wsName = parts[0];
+    } else if (parts[0] === SYS_WORKSPACE_NAME && parts.length >= 2) {
+      wsName = SYS_WORKSPACE_NAME;
       relPath = parts.slice(1).join('/');
+    } else if (SYSTEM_FOLDER_DIR_NAMES.includes(parts[0]) && parts.length >= 2) {
+      // Bare "<system-folder>/…" links resolve inside the sys workspace.
+      wsName = SYS_WORKSPACE_NAME;
+      relPath = parts.join('/');
     } else {
       wsName = activeWorkspace || '';
       relPath = appPath;
@@ -4318,9 +4369,10 @@ type TaskLocation = {
     enforceTabOrder();
     renderTabStrip();
 
-    // Notes-only workspaces (managed system / Extra Data Folder) keep the tab in
-    // the strip but don't let it take over their default view.
-    if (isNotesOnlyWorkspace()) return;
+    // The daily journal tab stays visible and behaves the same in every
+    // workspace, including the Extra Data Folder and the "sys" workspace: it is
+    // pinned in the strip and opens as the landing view when nothing else is
+    // showing.
     const hasDynamicTab  = tabs.some(t => !t.pinned && tabBelongsToActiveWorkspace(t));
     const hasOtherPinned = tabs.some(t => t.pinned && !isProtectedDailyJournalTab(t) && tabBelongsToActiveWorkspace(t));
     if (hasDynamicTab || hasOtherPinned) return;
@@ -4424,7 +4476,6 @@ type TaskLocation = {
         navRow1.innerHTML = '';
         navRow1.appendChild(mkNavNewBtn(1));
         navRow1.appendChild(mkNavRenameBtn(1));
-        navRow1.appendChild(mkNavSeparator());
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
         } else {
@@ -4537,7 +4588,6 @@ type TaskLocation = {
         navRow1.innerHTML = '';
         navRow1.appendChild(mkNavNewBtn(1));
         navRow1.appendChild(mkNavRenameBtn(1));
-        navRow1.appendChild(mkNavSeparator());
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
         } else {
@@ -4825,6 +4875,7 @@ type TaskLocation = {
       if (isTasksEditor()) syncDateInputsFromEditor();
       if (opts.focus !== false) setTimeout(() => { try { previewOut.focus({ preventScroll: true }); } catch { /* not focusable */ } }, 0);
     } else {
+      highlightPreviewBlock(null);
       // Runs after applyEditorLayout() has revealed the editor pane and after
       // focus() triggers CodeMirror's lazy load/measure, so scrollIntoView lands.
       setTimeout(() => {
@@ -4852,6 +4903,7 @@ type TaskLocation = {
   // preview itself has already been rendered once by the caller.
   function enterReadingModeForOpenDoc() {
     pendingEditCursorLine = null; // a fresh document invalidates any recorded preview click
+    highlightPreviewBlock(null);
     const remembered = activeTabRecord()?.readingView;
     readingViewState = remembered ?? (!/\S/.test(mdEditor.value) ? 'edit' : 'preview');
     rememberActiveTabReadingView();
@@ -4970,11 +5022,22 @@ type TaskLocation = {
     return brs + items + (inTable && items >= 1 ? 1 : 0);
   }
 
+  // Paints a soft, theme-aware background on the preview block the caret will
+  // land in when edit mode is entered. Only one block is highlighted at a time;
+  // pass null to clear. The class is transient — every preview re-render rebuilds
+  // the DOM and drops it.
+  function highlightPreviewBlock(el: Element | null) {
+    const surface = previewOut.querySelector('.preview-zoom-surface') || previewOut;
+    surface.querySelectorAll('.rs-preview-active').forEach(n => n.classList.remove('rs-preview-active'));
+    if (el) el.classList.add('rs-preview-active');
+  }
+
   function resolvePreviewClickLine(target: Element, clientX: number, clientY: number): number | null {
     const surface = previewOut.querySelector('.preview-zoom-surface') || previewOut;
-    if (!surface.contains(target)) return null;
+    if (!surface.contains(target)) { highlightPreviewBlock(null); return null; }
     const blockEls = collectPreviewBlockEls(surface);
     const hit = blockEls.find(b => b === target || b.contains(target));
+    highlightPreviewBlock(hit ?? null);
     if (!hit) return null;
 
     const value = String(mdEditor.value).replace(/\r\n?/g, '\n');
@@ -6533,6 +6596,7 @@ type TaskLocation = {
   btnNewFromEditor.addEventListener('click', () => executeCommand('file.new'));
   mdEditor.addEventListener('input', () => {
     pendingEditCursorLine = null;
+    highlightPreviewBlock(null);
     renderPreview();
     lsDraftSave();
     updateActiveTabDirtyState();
@@ -8671,13 +8735,16 @@ type TaskLocation = {
 
   async function clearExtraDataFolder() {
     localStorage.removeItem(EXTRA_DATA_FOLDER_PATH_KEY);
-    const wasActive = isExtraDataWorkspace();
+    // Identity check, not isExtraDataWorkspace(): a relocated system folder also
+    // carries isExtraData, and clearing the Extra Data Folder must not switch
+    // away from one of those.
+    const wasActive = currentWorkspace != null && currentWorkspace === extraDataWorkspace;
     extraDataWorkspace = null;
     syncExtraDataPathInput();
     toast('Extra data folder cleared');
     if (wasActive) {
       workspaces = await buildWorkspaceList(rootHandle);
-      const fallback = workspaces.find(w => !SYSTEM_WORKSPACES.has(w.name)) || workspaces[0];
+      const fallback = workspaces.find(w => w.name !== SYS_WORKSPACE_NAME) || workspaces[0];
       if (fallback) { await switchWorkspace(fallback, { restoreView: false }); return; }
     }
     await refreshWorkspaceSwitcherAfterExtraDataChange(false);
@@ -8746,11 +8813,93 @@ type TaskLocation = {
     setExternalThemeSource('').catch(e => toast('Could not clear external themes: ' + (e?.message || e), 'error'));
   });
 
+  // ── System folder ─────────────────────────────────────────────────────────
+  // The parent directory that holds the managed system folders (ai-team /
+  // openbrain / ai-team-shared / openbrain-shared). Unset ⇒ no "sys" workspace.
+  // Set ⇒ a "sys" workspace is appended last in the switcher; its top-level
+  // folders are those system folders, routed through the external FS bridge
+  // like the Extra Data Folder.
+  const systemFolderPathInput = $id<HTMLInputElement>('settings-system-folder-path');
+  const btnBrowseSystemFolder = $id('btn-browse-system-folder');
+  const btnClearSystemFolder = $id('btn-clear-system-folder');
+
+  function syncSystemFolderPathInput() {
+    systemFolderPathInput.value = window.__recallstackNative?.active
+      ? (localStorage.getItem(SYSTEM_FOLDER_PATH_KEY) || '')
+      : (systemFolderRootPath || '');
+    btnClearSystemFolder.disabled = !(window.__recallstackNative?.active
+      ? localStorage.getItem(SYSTEM_FOLDER_PATH_KEY)
+      : systemFolderRootHandle);
+  }
+
+  async function rebuildAfterSystemFolderChange() {
+    if (!rootHandle) return;
+    const wasInSys = activeWorkspace === SYS_WORKSPACE_NAME;
+    workspaces = await buildWorkspaceList(rootHandle);
+    if (wasInSys) {
+      // The sys workspace was active — re-activate it from the freshly rebuilt
+      // list, or fall back to the first normal workspace if it is gone now.
+      const next = workspaces.find(w => w.name === SYS_WORKSPACE_NAME)
+        || workspaces.find(w => w.name !== SYS_WORKSPACE_NAME)
+        || workspaces[0];
+      if (next) { await switchWorkspace(next, { restoreView: false }); return; }
+    }
+    renderWorkspaceSwitcher(activeWorkspace || '');
+  }
+
+  async function chooseSystemFolder() {
+    if (window.__recallstackNative?.active) {
+      const path = await window.__recallstackNative!.chooseSystemFolder();
+      if (!path) return;
+      localStorage.setItem(SYSTEM_FOLDER_PATH_KEY, path);
+      await ensureConfiguredSystemFolder();
+      if (!systemFolderRootHandle) {
+        toast('Could not open that folder', 'error');
+        localStorage.removeItem(SYSTEM_FOLDER_PATH_KEY);
+      } else {
+        const found = await listDirs(systemFolderRootHandle)
+          .then(dirs => dirs.some(d => SYSTEM_FOLDER_DIR_NAMES.includes(String(d.name).toLowerCase())))
+          .catch(() => false);
+        toast(found ? 'System folder set ✓' : 'No system folders found in that location');
+      }
+    } else {
+      try {
+        const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        systemFolderRootHandle = handle;
+        systemFolderRootPath = handle.name;
+        systemFolderWorkspace = { name: SYS_WORKSPACE_NAME, handle, dbPrefix: '', isExtraData: true, extraPath: handle.name };
+        toast('System folder set ✓');
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') toast('Could not open that folder: ' + e.message, 'error');
+        return;
+      }
+    }
+    syncSystemFolderPathInput();
+    await rebuildAfterSystemFolderChange();
+  }
+
+  async function clearSystemFolder() {
+    localStorage.removeItem(SYSTEM_FOLDER_PATH_KEY);
+    systemFolderRootHandle = null;
+    systemFolderRootPath = null;
+    systemFolderWorkspace = null;
+    syncSystemFolderPathInput();
+    toast('System folder cleared');
+    await rebuildAfterSystemFolderChange();
+  }
+
+  btnBrowseSystemFolder.addEventListener('click', () => {
+    chooseSystemFolder().catch(e => toast('Could not open that folder: ' + (e?.message || e), 'error'));
+  });
+  btnClearSystemFolder.addEventListener('click', () => {
+    clearSystemFolder().catch(e => toast('Could not clear: ' + (e?.message || e), 'error'));
+  });
+
   createModalController({
     overlay: modalSettings,
     closeButton: btnSettingsClose,
     trigger: btnSettings,
-    beforeOpen: () => { syncExtraDataPathInput(); syncOutputsPathInput(); syncExternalThemeInput(); },
+    beforeOpen: () => { syncExtraDataPathInput(); syncOutputsPathInput(); syncExternalThemeInput(); syncSystemFolderPathInput(); },
   });
 
   // ── Nav row mode toggle buttons ───────────────────────────────────────────────
@@ -8764,7 +8913,6 @@ type TaskLocation = {
       navRow1.innerHTML = '';
       navRow1.appendChild(mkNavNewBtn(1));
       navRow1.appendChild(mkNavRenameBtn(1));
-      navRow1.appendChild(mkNavSeparator());
       if (folders.length) {
         if (navRow1Mode === 'combo') {
           navRow1.appendChild(mkNav1Combo(folders));
@@ -8872,40 +9020,6 @@ type TaskLocation = {
       if (collapseDefaultOn) d.removeAttribute('open');
       else d.setAttribute('open', '');
     });
-  });
-
-  // ── System folder visibility toggle ──────────────────────────────────────────
-  const SHOW_SYSTEM_KEY  = PREFERENCE_KEYS.showSystemFolders;
-  const SYSTEM_WORKSPACES = new Set(['ai-team', 'openbrain', 'shared', 'openbrain-shared']);
-  const SYSTEM_WORKSPACES_LABEL = 'ai-team, openbrain, shared, openbrain-shared';
-  const btnToggleSystem  = $id('btn-toggle-system-folders');
-  let   showSystemFolders = localStorage.getItem(SHOW_SYSTEM_KEY) === 'on';
-
-  const EYE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-  const EYE_OFF_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
-
-  function applyToggleSystemBtn() {
-    btnToggleSystem.querySelector<HTMLElement>('.settings-tile-icon')!.innerHTML = showSystemFolders ? EYE_SVG : EYE_OFF_SVG;
-    btnToggleSystem.setAttribute('aria-pressed', String(showSystemFolders));
-    btnToggleSystem.title = showSystemFolders
-      ? `Hide system folders (${SYSTEM_WORKSPACES_LABEL})`
-      : `Show system folders (${SYSTEM_WORKSPACES_LABEL})`;
-    btnToggleSystem.classList.toggle('system-folders-visible', showSystemFolders);
-  }
-  applyToggleSystemBtn();
-
-  btnToggleSystem.addEventListener('click', async () => {
-    showSystemFolders = !showSystemFolders;
-    localStorage.setItem(SHOW_SYSTEM_KEY, showSystemFolders ? 'on' : 'off');
-    applyToggleSystemBtn();
-    if (!showSystemFolders && activeWorkspace && SYSTEM_WORKSPACES.has(activeWorkspace)) {
-      const fallback = workspaces.find(w => !SYSTEM_WORKSPACES.has(w.name));
-      if (fallback) {
-        await switchWorkspace(fallback);
-        return;
-      }
-    }
-    renderWorkspaceSwitcher(activeWorkspace || '');
   });
 
   // ── Remote image / media toggle ─────────────────────────────────────────────

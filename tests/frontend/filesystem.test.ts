@@ -32,8 +32,7 @@ test("directory traversal and workspace discovery preserve expected prefixes", a
   const alpha = directory("alpha");
   const beta = directory("beta");
   const data = directory("Data", { beta, alpha });
-  const openbrain = directory("openbrain");
-  const root = directory("root", { Data: data, openbrain });
+  const root = directory("root", { Data: data });
 
   assert.equal(await getDirHandle(root, ["Data", "alpha"]), alpha);
   const discovered = await discoverWorkspaces(root);
@@ -41,7 +40,6 @@ test("directory traversal and workspace discovery preserve expected prefixes", a
   assert.deepEqual(discovered.workspaces.map(({ name, dbPrefix }) => ({ name, dbPrefix })), [
     { name: "alpha", dbPrefix: "Data/alpha/" },
     { name: "beta", dbPrefix: "Data/beta/" },
-    { name: "openbrain", dbPrefix: "openbrain/" },
   ]);
 });
 
@@ -72,9 +70,12 @@ test("portable names apply the same Windows-compatible policy on every platform"
 
 test("workspace selection and navigation preferences have stable fallbacks", () => {
   const personal = { name: "personal", handle: directory("personal"), dbPrefix: "Data/personal/" };
-  const system = { name: "openbrain", handle: directory("openbrain"), dbPrefix: "openbrain/" };
-  assert.equal(selectInitialWorkspace([system, personal], "openbrain", false, new Set(["openbrain"])), personal);
-  assert.equal(selectInitialWorkspace([system, personal], "personal", true, new Set(["openbrain"])), personal);
+  const sys = { name: "sys", handle: directory("sys"), dbPrefix: "", isExtraData: true, extraPath: "/sys" };
+  // An explicitly saved "sys" preference is still honored.
+  assert.equal(selectInitialWorkspace([sys, personal], "sys", "sys"), sys);
+  // With no saved preference, "sys" is skipped as the first-element fallback.
+  assert.equal(selectInitialWorkspace([sys, personal], null, "sys"), personal);
+  assert.equal(selectInitialWorkspace([sys, personal], "missing", "sys"), personal);
 
   const values = new Map([["pkm-nav1-mode-personal", "combo"]]);
   const preferences = readWorkspaceNavigationPreferences({ getItem: key => values.get(key) || null }, "personal");
