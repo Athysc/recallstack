@@ -30,18 +30,32 @@ workspace-root/
 
 ### Extra Data Folder
 
-**Display & Navigation → Extra Data Folder** points RecallStack at any directory on disk outside the workspace `Data/` tree. It appears as the **first entry in the workspace switcher** — left of the `Data/` workspaces — and works like one: its subfolders are Nav Row 1, its sub-subfolders are Nav Row 2, and browsing, opening, editing, creating, renaming, moving, archiving, and deleting all behave normally (deletes go to the OS trash). Its `assets/` images render in the preview. The choice persists across sessions and workspace switches. **Clear** removes it and switches back to a `Data/` workspace.
+**Settings → Extra Data Folder** points RecallStack at any directory on disk outside the workspace `Data/` tree. It appears in the workspace switcher **after the `Data/` workspaces, immediately before the `sys` workspace** (or last, when no System folder is set), and works like one: its subfolders are Nav Row 1, its sub-subfolders are Nav Row 2, and browsing, opening, editing, creating, renaming, moving, archiving, and deleting all behave normally (deletes go to the OS trash). Its `assets/` images render in the preview. The choice persists across sessions and workspace switches. **Clear** removes it and switches back to a `Data/` workspace.
 
 **Limitations**
 
 - **Not indexed.** Its notes do not appear in workspace search, the calendar, backlinks, or `[[wikilink]]` completion — those stay scoped to the `Data/` workspaces.
-- **No tasks or journal.** The Task, Working Task, and Daily Journal icons are hidden while it is the active workspace; `tasks/` and `dailylogs/` are never created inside your folder.
-- **Name.** The switcher label is the folder's own name. If it matches a `Data/` workspace name, both chips carry that name; the Extra Data Folder is always the first one.
+- **No tasks.** The Task and Working Task icons are hidden while it is the active workspace; `tasks/` is never created inside your folder. The **Daily Journal works normally** — it is the shared journal under `Data/dailylogs/`.
+- **Name.** The switcher label is the folder's own name. If it matches a `Data/` workspace name, both chips carry that name.
 - **Browser build only:** the chosen folder is not remembered across page reloads (the File System Access API can't persist a directory handle) — the same as the Outputs folder. The desktop app remembers it via its path.
+
+### System Folder
+
+**Settings → System folder** points RecallStack at the one directory on disk that contains the managed system folders — `ai-team`, `openbrain`, `ai-team-shared`, and `openbrain-shared`. (This replaces the old **System Folders** show/hide tile; RecallStack no longer looks for those folders in the workspace root.)
+
+When a System folder is set, a **`sys` workspace appears last** in the workspace switcher. Its top-level folders (Nav Row 1) are whichever of the four managed folders actually exist inside it. Like the Extra Data Folder, every read/write routes through the external filesystem bridge, so browse / open / edit / create / rename / move / archive / delete all work.
+
+**Limitations**
+
+- **Not indexed.** Its notes stay out of workspace search, the calendar, backlinks, and `[[wikilink]]` completion.
+- **No tasks.** Task and Working Task icons are hidden; the **Daily Journal works** (the shared `Data/dailylogs/` journal).
+- **Entered by click.** RecallStack never auto-selects `sys` on startup, but it is remembered as your last workspace like any other.
+- **Path persistence.** The desktop app remembers the System folder across restarts; the browser build keeps it only for the current session.
+- A bare `ai-team/…` or `openbrain/…` link in a note resolves inside the `sys` workspace.
 
 ### Workspace Outputs Folder
 
-The Outputs icon beside workspace refresh opens the configured Outputs folder. Configure the path from **Display & Navigation**. If no path is set, RecallStack defaults to `<workspace path>/openbrain/outputs` using the platform's native path handling and creates the folder automatically when needed. The Extra Data Folder, Outputs folder, and External theme file controls all live full-width below the Display & Navigation tile grid, while the theme list remains in its right-side panel.
+The Outputs icon beside workspace refresh opens the configured Outputs folder. Configure the path from **Settings**. If no path is set, RecallStack defaults to `<workspace path>/openbrain/outputs` using the platform's native path handling and creates the folder automatically when needed. The **Settings** dialog is a fixed-height, two-column layout: the tile grid and the four path panels — **Extra Data Folder**, **Outputs folder**, **External theme file**, and **System folder** — stack in the left column, and the **Theme** list fills the full height of the right column.
 
 ### Opening a Workspace
 
@@ -285,7 +299,7 @@ Results are written to `performance-results/windows.json` or `performance-result
 | Outputs icon | Open the configured Outputs folder; the old top-level Outputs text button has been removed |
 | Calendar icon | Toggle calendar view |
 | Search box | Native full-text and structured search; hover for the supported filter list. Search results support `J/K`, arrow keys, `Enter`, `Escape`, and displayed one- or two-letter jump codes |
-| Display & Navigation icon | Opens layout/navigation preferences: the tile grid, theme selector, Extra Data Folder, Outputs folder, and the External theme file picker |
+| Settings icon | Opens layout/navigation preferences: the tile grid, theme selector, and the Extra Data Folder, Outputs folder, External theme file, and System folder path pickers |
 | Theme list | Choose from the built-in themes plus any from an external theme file; also reachable with `Ctrl+Shift+T` as a live-preview switcher |
 | Folder nav mode icon | Toggle Nav Row 1 between **buttons** and **dropdown** display; persists per workspace |
 | Subfolder nav mode icon | Toggle Nav Row 2 between **buttons** and **dropdown** display; persists per workspace |
@@ -503,8 +517,10 @@ Priority and Status controls are borderless until selected; the selected option 
 A note opens showing only the rendered **Preview** (full width). Behind it is a CodeMirror 6 source editor with Markdown highlighting, folding, undo/redo history, line numbers, current-line highlighting, a subtle current-line text glow, a glowing caret, and note/tag completion.
 
 - Press **`I`** (as in *insert*) to switch to editing — the Markdown pane takes over full width.
+- **Click a spot in the preview** before pressing `I` and the caret lands on that source line (scrolled into view). The clicked block gets a soft highlight showing where the caret will go; it clears on the next render, keystroke, or mode switch. Clicks inside a fenced code block map to the line within the fence, and clicks on links, `<details>` toggles, or checkboxes still do their normal thing.
 - Press **`Esc`** while editing to return to the preview; it re-renders once with your latest changes.
 - A new, empty note opens straight in editing so you can start typing.
+- Each tab remembers whether you left it in edit or preview mode and reopens that way; switching tabs no longer forces a tab back to preview.
 - While you are editing, the preview is **not** re-rendered on every keystroke — this keeps typing fast in large notes. It catches up the moment you press `Esc`.
 - Pressing the **Presentation** button while editing first drops you back to a fresh preview, then starts the presentation.
 
@@ -537,7 +553,7 @@ Press **Ctrl+Space** from any main application view to open a list of every curr
 ### Current Limitations
 
 - Tabs are workspace-scoped — closing or switching the workspace closes all tabs. Nothing is lost: the same autosave and unsaved-note protection that guarded a single open file runs first, exactly as it did before tabs existed
-- Undo history and preview rendering are not yet tracked per tab — switching tabs does not preserve that tab's undo/redo stack or a cached render, and the preview is regenerated on activation
+- Each tab preserves its edit/preview mode across switches, but undo history and preview rendering are still not tracked per tab — switching tabs does not preserve that tab's undo/redo stack or a cached render, and the preview is regenerated on activation
 - Tab order and which tabs were open are not restored after restarting the app
 
 ---
@@ -1122,6 +1138,7 @@ Drag and drop or paste files directly into the editor:
 - **Images** are saved and embedded as `![filename](assets/filename.png)`
 - **Other files** are saved and linked as `[filename](assets/filename.pdf)`
 - Files are stored in the `assets/` subfolder next to the note
+- **Pasting an image works on every desktop build, including Linux.** WebKitGTK does not expose pasted images to the web `paste` event, so the Linux build reads the image off the OS clipboard directly (`wl-paste` / `xclip`) and saves it as a PNG in `assets/`
 
 ### Orphan Asset Cleanup
 

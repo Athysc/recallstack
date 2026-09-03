@@ -32,7 +32,7 @@ workspace-root/
 | UI Element | What it does |
 |---|---|
 | **Nav Row 1** (top folder buttons) | Pick a top-level folder in the current workspace — opens its Notes listing modal |
-| **Workspace switcher** (chips, top-left) | Switch workspace. The Extra Data Folder, if set, is the first chip |
+| **Workspace switcher** (chips, top-left) | Switch workspace. The Extra Data Folder, if set, comes after the `Data/` workspaces; the `sys` workspace, if set, is last |
 | **Nav Row 2** (subfolder buttons) | Pick a subfolder — opens its Notes listing modal |
 | **root** button | Shows notes saved directly in the folder (not in any subfolder) |
 | **Ctrl+L** | Notes listing modal for the current folder (sort + archived toggle) |
@@ -54,15 +54,17 @@ workspace-root/
 | **Calendar icon** | Shows tasks by Start/Due/Completed date |
 | **Outputs icon** | Opens a separate configured export/output folder |
 
-## Extra Data Folder
+## Extra Data Folder & System Folder
 
-**Settings → Extra Data Folder** points RecallStack at any folder on disk outside the workspace `Data/` tree. It appears as the **first chip in the workspace switcher** (left of the `Data/` workspaces) and works like one — its subfolders are Nav Row 1, and browse / open / edit / create / rename / move / archive / delete all behave normally. It persists across sessions; **Clear** removes it.
+**Settings → Extra Data Folder** points RecallStack at any folder on disk outside the workspace `Data/` tree. It appears in the workspace switcher **after the `Data/` workspaces** (just before `sys`, if that's set) and works like one — its subfolders are Nav Row 1, and browse / open / edit / create / rename / move / archive / delete all behave normally. It persists across sessions; **Clear** removes it.
 
-Limitations: its notes are **not** in search, the calendar, backlinks, or `[[wikilink]]` completion; it has no Tasks or Daily Journal (those icons are hidden while it's active).
+**Settings → System folder** points at the directory holding `ai-team`, `openbrain`, `ai-team-shared`, and `openbrain-shared`. When set, a **`sys` workspace appears last** in the switcher, with those folders as its top-level folders. (This replaces the old System Folders show/hide toggle.) You switch into `sys` by click — RecallStack never lands there on its own.
+
+Limitations for both: notes are **not** in search, the calendar, backlinks, or `[[wikilink]]` completion, and there are no Tasks. The **Daily Journal works** in both — it's the shared `Data/dailylogs/` journal.
 
 ## The editor
 
-A note opens showing only the rendered **Preview**. Press **`I`** to edit, **`Esc`** to go back to the preview (it re-renders once). Empty notes open ready to type. The preview isn't rebuilt on every keystroke while you edit, which keeps typing fast in big notes; the **Presentation** button flips back to a fresh preview first. Line numbers are always shown.
+A note opens showing only the rendered **Preview**. Press **`I`** to edit, **`Esc`** to go back to the preview (it re-renders once). Empty notes open ready to type. **Click a spot in the preview before pressing `I`** and the caret lands on that line (the block you clicked is briefly highlighted). The preview isn't rebuilt on every keystroke while you edit, which keeps typing fast in big notes; the **Presentation** button flips back to a fresh preview first. Line numbers are always shown. Each tab remembers whether it was in edit or preview mode.
 
 ## Saving
 

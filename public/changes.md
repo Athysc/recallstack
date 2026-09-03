@@ -2,6 +2,101 @@
 
 ---
 
+## 2026-09-03
+
+A post-2.0 working session. A configurable **System folder** replaces the old
+show/hide toggle, the **Daily Journal** now works in every workspace, you can
+**click a spot in the preview to put the cursor there**, and **pasting images
+works on the Linux desktop build**.
+
+### System folder replaces the "System Folders" toggle
+
+The **System Folders** settings tile — the eye button that showed or hid the
+`ai-team`, `openbrain`, `shared`, and `openbrain-shared` folders when they sat
+in the workspace root — is gone, and RecallStack no longer auto-detects those
+folders at the root.
+
+In its place, **Settings → System folder** (a *Browse… / Clear* path panel)
+points RecallStack at the one directory on disk that holds `ai-team`,
+`openbrain`, `ai-team-shared`, and `openbrain-shared`.
+
+- When a System folder is set, a **`sys` workspace appears last** in the
+  workspace switcher. Its top-level folders are whichever of those four managed
+  folders actually exist inside it.
+- `sys` behaves like the Extra Data Folder: every read/write routes through the
+  external filesystem bridge, so browse / open / edit / create / rename / move /
+  archive / delete all work, but its notes are **not** in search, the calendar,
+  backlinks, or `[[wikilink]]` completion.
+- The **Daily Journal works in `sys`** (it is the shared journal under
+  `Data/dailylogs/`). Tasks and Working Tasks do not.
+- RecallStack never *lands* in `sys` on its own — you switch into it by click —
+  but it is remembered as your last workspace like any other.
+- The desktop app remembers the System folder path across restarts; the browser
+  build keeps it only for the session (same limit as the Outputs and Extra Data
+  folders).
+- A bare `ai-team/…` / `openbrain/…` link resolves inside the `sys` workspace.
+
+### Extra Data Folder moved in the switcher
+
+The Extra Data Folder used to be the **first** chip in the workspace switcher.
+It now sits **after** the `Data/` workspaces, immediately **before** `sys`.
+
+### Daily Journal in every workspace
+
+The Extra Data Folder (and now `sys`) used to hide the Daily Journal along with
+Tasks. The **Daily Journal tab is now always present** — pinned in the tab
+strip, opening as the landing view when nothing else is showing — in the Extra
+Data Folder and `sys` as well as the `Data/` workspaces. It is the same shared
+journal under `Data/dailylogs/` everywhere. Tasks and Working Tasks are still
+`Data/`-only.
+
+### Click the preview to place the cursor
+
+Click anywhere in the rendered **Preview** and the next press of **`I`** drops
+the caret on the matching source line and scrolls it into view — no more
+hunting for your place after switching to edit. The block you clicked gets a
+soft, theme-aware highlight so you can see where the caret will land; it clears
+on the next render, keystroke, or mode switch. Clicks inside a fenced code block
+map to the line within the fence. Links, `<details>` toggles, checkboxes, and
+text selection in the preview are unaffected.
+
+### Paste images on the Linux desktop
+
+Pasting an image — a screenshot, or an image copied from a browser or file
+manager — into the editor now works on the Linux build. WebKitGTK does not hand
+pasted images to the web `paste` event, so RecallStack reads the image straight
+off the OS clipboard (`wl-paste` / `xclip`, with an `arboard` fallback), saves
+it as a PNG in the note's `assets/` folder, and embeds it — exactly like a
+drag-and-drop. A plain `Ctrl+C` copy in the editor on Linux is also mirrored
+through the native clipboard to stop clipboard-history tools logging a "Broken
+pipe" warning.
+
+### Tabs remember edit vs preview
+
+Each tab now remembers whether you left it in edit or preview mode and reopens
+in that mode. Switching tabs — `Ctrl+Space`, `Ctrl+Tab`, `Ctrl+1`–`9`, or a
+click — no longer forces the tab back to preview, and focus only jumps into the
+editor when the tab actually reopens in edit mode. (Undo history and the cached
+render are still not per-tab.)
+
+### Settings dialog layout
+
+The dialog is now a fixed-height, two-column layout: the tile grid and the four
+path panels — **Extra Data Folder**, **Outputs folder**, **External theme
+file**, **System folder** — stack in the left column, and the **Theme** list
+fills the full height of the right column. The path panels are more compact and
+the content area scrolls internally.
+
+### Fixes
+
+- With a listing modal open and its list focused, `Ctrl+T` / `Ctrl+W` /
+  `Ctrl+L` and other modifier chords now reach the global handler (switching
+  listings, etc.) instead of being swallowed by the modal.
+- Repointing the dynamic tab at a different file no longer carries the previous
+  file's edit/preview mode over to the new one.
+
+---
+
 ## Version 2.0 — 2026-08-29
 
 A large cleanup-and-focus release: one editor mode, a rebuilt theme catalog,
