@@ -76,6 +76,8 @@
     <nav class="nav-row hidden" id="nav-row-2"></nav>
   </header>
   <main>
+    <!-- Open-file tabs: outside #editor-view so they stay visible on list/search/calendar views -->
+    <div id="tab-strip" class="tab-strip hidden" role="tablist" aria-label="Open files"></div>
     <!-- File list -->
     <div id="file-list-view">
       <div class="list-header">
@@ -182,7 +184,6 @@
           </svg>
         </button>
       </div>
-      <div id="tab-strip" class="tab-strip hidden" role="tablist" aria-label="Open files"></div>
       <div id="presentation-exit-bar" class="hidden">
         <span id="presentation-title"></span>
         <button class="btn btn-primary" id="btn-exit-presentation">Exit Presentation Mode</button>
