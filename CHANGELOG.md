@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Clicking an `http://` or `https://` link in the rendered preview (and README/changelog dialogs) now opens it in the system default browser instead of inside the app window; internal and anchor links are unchanged.
+
+### Added
+
+- `Ctrl+Shift+F` opens an in-document find box that highlights every match of a term or regex in the open note, with Next/Previous (Enter/Shift+Enter, or `J`/`K` outside the input), wrap-around, a match counter, Clear, and last-search restore. With no document open it still focuses workspace search.
+
 ## 0.1.2 — 2026-08-11
 
 ### Added

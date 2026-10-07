@@ -7,6 +7,7 @@ interface RecallStackNativeBridge {
   removeRecentWorkspace(path: string): Promise<void>;
   openWorkspacePath(path: string): Promise<FileSystemDirectoryHandle>;
   workspaceRootPath(): string | null;
+  openExternalUrl(url: string): Promise<void>;
   writeClipboardText(text: string): Promise<void>;
   readClipboardImage(): Promise<{ format: 'encoded' | 'rgba'; width: number; height: number; bytes: number[] } | null>;
   revealPath(path?: string | null): Promise<void>;

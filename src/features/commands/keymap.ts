@@ -162,9 +162,9 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   },
   {
     id: "navigation.search",
-    combo: "Ctrl+/ / Ctrl+Shift+F",
+    combo: "Ctrl+/",
     label: "Focus search",
-    description: "Focus the workspace search box.",
+    description: "Focus the workspace search box. Ctrl+Shift+F does the same when no document is open.",
     category: "Navigation",
   },
   {
@@ -230,6 +230,15 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     combo: "Ctrl+Z / Ctrl+Shift+Z",
     label: "Undo / redo",
     description: "Undo or redo editor changes (up to 50 steps), including list, indent, and blockquote edits.",
+    category: "Editor",
+    editorOnly: true,
+  },
+  {
+    id: "editor.find",
+    combo: "Ctrl+Shift+F",
+    label: "Find in document",
+    description:
+      "Open the find box for the current document and highlight every match (the term is a regex; invalid patterns match literally). Enter / Shift+Enter, or J / K when the input is not focused, step through matches; Clear resets; Esc or a click outside closes it. Reopening restores the last term. In the preview it switches to the source view.",
     category: "Editor",
     editorOnly: true,
   },

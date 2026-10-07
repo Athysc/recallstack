@@ -21,9 +21,11 @@ import {
 import { calendarMonth, localIsoDate } from "../features/tasks/date-picker";
 import { DAILYLOGS_ROOT, TASKS_ROOT, isGlobalTasksPath, isJournalPath, isWorkspaceTaskPath, isWorkspaceWorkingTaskPath, journalLocationForDate, journalTitleFromPath, latestJournalPathBefore } from "../features/tasks/paths";
 import { preserveExtraBlankLines } from "../services/markdown-spacing";
+import { externalHttpUrl } from "../services/external-links";
 import { CommandRegistry } from "../features/commands/registry";
 import { paletteMode, rankCommands } from "../features/commands/ranking";
 import { createLazyMarkdownEditor } from "../features/editor/lazy-markdown-editor";
+import { findMatches, indexFromPosition, stepIndex, type FindRange } from "../features/editor/find";
 import { PreviewScheduler } from "../features/editor/preview-scheduler";
 import { contentZoomScale, nextContentZoom, normalizeContentZoom, scaledMediaWidth } from "../features/editor/content-zoom";
 import { clampLine, codeBlockLine, newlinesBefore, sourceBlocksFromPreprocessed } from "../features/editor/preview-source-map";
@@ -6315,6 +6317,7 @@ type TaskLocation = {
     { id:'tasks.working-list', title:'Show Working Task Listing', category:'Tasks', keywords:['working tasks list'], shortcut:'Ctrl+W', isEnabled:needsGlobalTasks, run:openWorkingListing },
     { id:'navigation.notes-list', title:'Show Notes Listing', category:'Navigation', keywords:['notes folder list'], shortcut:'Ctrl+L', isEnabled:needsWorkspace, run:openNotesListing },
     { id:'view.theme-switcher', title:'Open Theme Switcher', category:'View', keywords:['appearance color preview'], shortcut:'Ctrl+Shift+T', isEnabled:needsWorkspace, run:openThemeSwitcher },
+    { id:'editor.find', title:'Find in Document', category:'Editor', keywords:['search','find'], shortcut:'Ctrl+Shift+F', isEnabled:needsEditor, run:() => { openFind(); } },
     { id:'view.presentation', title:'Toggle Presentation Mode', category:'View', shortcut:'F12', isEnabled:needsEditor, run:() => $id('btn-presentation').click() },
     { id:'view.zoom-in', title:'Zoom In', category:'View', shortcut:'Ctrl++', isEnabled:needsWorkspace, run:() => stepContentZoom(1) },
     { id:'view.zoom-out', title:'Zoom Out', category:'View', shortcut:'Ctrl+-', isEnabled:needsWorkspace, run:() => stepContentZoom(-1) },
@@ -6589,6 +6592,31 @@ type TaskLocation = {
       toast('Copy failed: ' + (err?.message || err), 'error');
     }
   });
+  // http(s) links in any rendered Markdown surface (preview, README/changelog
+  // dialogs) open in the system browser, never inside the app webview. Document
+  // level + capture so no other handler or default navigation can win.
+  function openExternalLink(url: string) {
+    const native = window.__recallstackNative;
+    if (native?.active) {
+      native.openExternalUrl(url).catch((err: any) => toast('Could not open link: ' + (err?.message || err), 'error'));
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  }
+  const handleExternalLinkClick = (e: any) => {
+    if (e.type === 'auxclick' && e.button !== 1) return;
+    if (e.type === 'click' && e.button !== 0) return;
+    const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+    if (!a || !a.closest('#preview-output, .readme-content')) return;
+    const url = externalHttpUrl(a.getAttribute('href'));
+    if (!url) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'click' || e.type === 'auxclick') openExternalLink(url);
+  };
+  document.addEventListener('click', handleExternalLinkClick, true);
+  document.addEventListener('auxclick', handleExternalLinkClick, true);
+
   previewOut.addEventListener('click', (e: any) => {
     const a = e.target instanceof Element ? e.target.closest('a[href^="#recallstack-open="]') : null;
     if (!a || !previewOut.contains(a)) return;
@@ -8098,6 +8126,77 @@ type TaskLocation = {
     else closeKeybindingsModal();
   }
 
+  // ── In-document find (Ctrl+Shift+F) ───────────────────────────────────────
+  // Scoped to the open document only. The term is a case-insensitive regex that
+  // falls back to a literal search when invalid (see features/editor/find.ts).
+  // The last term is kept in memory and prefilled on reopen; highlights are
+  // cleared on close and re-applied on the next open.
+  const findModal = document.createElement('div');
+  findModal.id = 'modal-find';
+  findModal.className = 'hidden';
+  findModal.innerHTML = `<div class="find-dialog" role="dialog" aria-label="Find in document"><input id="find-input" type="text" class="find-input" placeholder="Find in document (regex)" spellcheck="false" autocomplete="off" aria-label="Find in document"><span id="find-count" class="find-count" aria-live="polite"></span><button type="button" id="find-prev" class="find-btn" title="Previous match (K / Shift+Enter)">Prev</button><button type="button" id="find-next" class="find-btn" title="Next match (J / Enter)">Next</button><button type="button" id="find-clear" class="find-btn" title="Clear search">Clear</button></div>`;
+  document.body.appendChild(findModal);
+  const findInput = findModal.querySelector<HTMLInputElement>('#find-input')!;
+  const findCount = findModal.querySelector<HTMLElement>('#find-count')!;
+  let findTerm = '';
+  let findMatchList: FindRange[] = [];
+  let findActive = -1;
+
+  function renderFind(moveSelection: boolean) {
+    findCount.textContent = !findTerm ? '' : findMatchList.length ? `${findActive + 1}/${findMatchList.length}` : 'No matches';
+    findCount.classList.toggle('none', !!findTerm && findMatchList.length === 0);
+    void mdEditor.ready().then(adapter => {
+      adapter.setFindHighlight(findMatchList, moveSelection ? findActive : -1);
+    });
+  }
+  function recomputeFind(fromPos: number) {
+    findTerm = findInput.value;
+    findMatchList = findMatches(mdEditor.value, findTerm);
+    findActive = indexFromPosition(findMatchList, fromPos, 1);
+    renderFind(true);
+  }
+  function stepFind(delta: 1 | -1) {
+    if (!findMatchList.length) return;
+    findActive = stepIndex(findActive, findMatchList.length, delta);
+    renderFind(true);
+  }
+  function openFind() {
+    if (editorView.classList.contains('hidden')) return false;
+    if (!findModal.classList.contains('hidden')) { findInput.focus(); findInput.select(); return true; }
+    // Notes open in the rendered preview, where the CodeMirror pane is hidden;
+    // find highlights live in the editor, so switch to the source view first.
+    if (readingViewState === 'preview') setReadingView('edit', { focus: false });
+    findModal.classList.remove('hidden');
+    findInput.value = findTerm;
+    recomputeFind(mdEditor.selectionStart);
+    requestAnimationFrame(() => { findInput.focus(); findInput.select(); });
+    return true;
+  }
+  function closeFind() {
+    if (findModal.classList.contains('hidden')) return;
+    findModal.classList.add('hidden');
+    void mdEditor.ready().then(adapter => { adapter.clearFindHighlight(); adapter.focus(); });
+  }
+  findInput.addEventListener('input', () => recomputeFind(mdEditor.selectionStart));
+  findInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); stepFind(event.shiftKey ? -1 : 1); }
+  });
+  findModal.querySelector('#find-next')!.addEventListener('click', () => stepFind(1));
+  findModal.querySelector('#find-prev')!.addEventListener('click', () => stepFind(-1));
+  findModal.querySelector('#find-clear')!.addEventListener('click', () => {
+    findInput.value = '';
+    recomputeFind(0);
+    findInput.focus();
+  });
+  findModal.addEventListener('click', event => { if (event.target === findModal) closeFind(); });
+  findModal.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeFind(); return; }
+    // J / K step through matches, except while typing in the text input.
+    if (event.target === findInput || event.ctrlKey || event.metaKey || event.altKey) return;
+    const k = event.key.toLowerCase();
+    if (k === 'j' || k === 'k') { event.preventDefault(); stepFind(k === 'j' ? 1 : -1); }
+  });
+
   // ── Theme switcher modal (Ctrl+L, live preview) ────────────────────────────
   const themeSwitcherModal = document.createElement('div');
   themeSwitcherModal.id = 'modal-theme-switcher';
@@ -8257,7 +8356,7 @@ type TaskLocation = {
     return anyListingOpen() || !!document.querySelector(
       '.modal-overlay:not(.hidden), .settings-overlay:not(.hidden), .command-palette:not(.hidden), ' +
       '.quick-tab-switcher:not(.hidden), .listing-modal:not(.hidden), #modal-md-ref:not(.hidden), #modal-readme:not(.hidden), ' +
-      '#modal-changelog:not(.hidden), #modal-safety-tools:not(.hidden), #modal-keybindings:not(.hidden)',
+      '#modal-changelog:not(.hidden), #modal-safety-tools:not(.hidden), #modal-keybindings:not(.hidden), #modal-find:not(.hidden)',
     );
   }
   function closeTopmostOverlay() {
@@ -8266,6 +8365,7 @@ type TaskLocation = {
     if (quickTaskSwitcher.isOpen()) return quickTaskSwitcher.close();
     if (!palette.classList.contains('hidden')) return closeCommandPalette();
     if (!keybindingsModal.classList.contains('hidden')) return closeKeybindingsModal();
+    if (!findModal.classList.contains('hidden')) return closeFind();
     if (!themeSwitcherModal.classList.contains('hidden')) return closeThemeSwitcher(true);
     if (!newFileKindModal.classList.contains('hidden')) return closeNewFileKindPicker();
     const generic = document.querySelector<HTMLElement>(
@@ -8407,7 +8507,12 @@ type TaskLocation = {
     if (mod && plain && e.key === '0') { e.preventDefault(); executeCommand('view.zoom-reset'); return; }
     if (mod && plain && e.key === '/') { e.preventDefault(); executeCommand('navigation.search'); return; }
     if (mod && plain && key === 'f') { e.preventDefault(); void openSearchBufferOrPrompt(); return; }
-    if (mod && e.shiftKey && !e.altKey && key === 'f') { e.preventDefault(); executeCommand('navigation.search'); return; }
+    if (mod && e.shiftKey && !e.altKey && key === 'f') {
+      e.preventDefault();
+      // With a document open, Ctrl+Shift+F is find-in-document; otherwise it keeps its workspace-search role.
+      if (!openFind()) executeCommand('navigation.search');
+      return;
+    }
     if (mod && e.key === 'Tab') {
       e.preventDefault(); executeCommand(e.shiftKey ? 'navigation.previous-tab' : 'navigation.next-tab'); return;
     }

@@ -40,6 +40,7 @@ workspace-root/
 | **Working Task listing icon / Ctrl+W** | Same for `tasks/working/`, with a **← Task** toggle per row |
 | **Daily Journal icon / Ctrl+J** | Opens/creates today's entry in `dailylogs/` |
 | **Search box / Ctrl+/** | Full-text search across every note (3+ characters) |
+| **Ctrl+Shift+F** | Find in the open document: highlights every match; Enter / Shift+Enter (or `J` / `K`) step through them; `Esc` closes |
 | **Ctrl+K** | Keyboard-shortcut reference sheet |
 | **`I`** / **`Esc`** | A note opens in the preview; **`I`** switches to editing, **`Esc`** switches back |
 | **Ctrl+P** | Command palette — run any command, or search notes (`@`) / tags (`#`) |
@@ -65,6 +66,8 @@ Limitations for both: notes are **not** in search, the calendar, backlinks, or `
 ## The editor
 
 A note opens showing only the rendered **Preview**. Press **`I`** to edit, **`Esc`** to go back to the preview (it re-renders once). Empty notes open ready to type. **Click a spot in the preview before pressing `I`** and the caret lands on that line (the block you clicked is briefly highlighted). The preview isn't rebuilt on every keystroke while you edit, which keeps typing fast in big notes; the **Presentation** button flips back to a fresh preview first. Line numbers are always shown. Each tab remembers whether it was in edit or preview mode.
+
+**Links:** `http://` and `https://` links in the rendered preview open in your system default browser; note links open inside RecallStack.
 
 ## Saving
 

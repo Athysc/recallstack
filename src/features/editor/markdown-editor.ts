@@ -1,6 +1,8 @@
-import { Compartment, EditorSelection, EditorState, Transaction } from "@codemirror/state";
+import { Compartment, EditorSelection, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state";
 import {
   crosshairCursor,
+  Decoration,
+  type DecorationSet,
   drawSelection,
   dropCursor,
   EditorView,
@@ -66,6 +68,27 @@ const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.strong, fontWeight: "bold" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
 ]);
+
+// In-document find highlights (driven by the Ctrl+Shift+F find box).
+interface FindHighlight { ranges: readonly { from: number; to: number }[]; active: number }
+const setFindHighlight = StateEffect.define<FindHighlight | null>();
+const findMatchMark = Decoration.mark({ class: "cm-find-match" });
+const findActiveMark = Decoration.mark({ class: "cm-find-match cm-find-match-active" });
+const findField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, tr) {
+    value = value.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (!effect.is(setFindHighlight)) continue;
+      const hl = effect.value;
+      value = hl
+        ? Decoration.set(hl.ranges.map((r, i) => (i === hl.active ? findActiveMark : findMatchMark).range(r.from, r.to)))
+        : Decoration.none;
+    }
+    return value;
+  },
+  provide: field => EditorView.decorations.from(field),
+});
 
 export interface MarkdownCompletion { label: string; type?: "text" | "keyword" }
 export interface MarkdownEditorOptions {
@@ -137,7 +160,7 @@ export class MarkdownEditorAdapter {
         doc: source.textContent || "",
         extensions: [
           highlightSpecialChars(), history({ minDepth: 50 }), drawSelection(), dropCursor(), rectangularSelection(), crosshairCursor(),
-          highlightActiveLine(), bracketMatching(), foldGutter(), highlightSelectionMatches(),
+          highlightActiveLine(), bracketMatching(), foldGutter(), highlightSelectionMatches(), findField,
           syntaxHighlighting(markdownHighlightStyle, { fallback: true }),
           keymap.of([{ key: "Shift-Tab", run: indentLess }, ...historyKeymap, ...foldKeymap, ...completionKeymap, ...defaultKeymap.filter(binding => binding.key !== "Enter" && binding.key !== "Tab" && binding.key !== "Shift-Tab")]),
           autocompletion({ override: [completionSource(options.getCompletions)] }),
@@ -229,6 +252,18 @@ export class MarkdownEditorAdapter {
       effects: EditorView.scrollIntoView(pos, { y: "center" }),
     });
   }
+  /** Highlight find matches; `active` (index into `ranges`, or -1) is also selected and scrolled to. */
+  setFindHighlight(ranges: readonly { from: number; to: number }[], active: number): void {
+    const target = ranges[active];
+    this.view.dispatch({
+      effects: [
+        setFindHighlight.of({ ranges, active }),
+        ...(target ? [EditorView.scrollIntoView(target.from, { y: "center" })] : []),
+      ],
+      ...(target ? { selection: EditorSelection.single(target.from, target.to) } : {}),
+    });
+  }
+  clearFindHighlight(): void { this.view.dispatch({ effects: setFindHighlight.of(null) }); }
   focus(): void { this.view.focus(); }
   addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: AddEventListenerOptions | boolean): void {
     const target = type === "scroll" ? this.view.scrollDOM : this.view.dom;

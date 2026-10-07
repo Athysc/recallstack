@@ -120,6 +120,8 @@ export class LazyMarkdownEditorAdapter {
     for (let i = 0; i < n - 1; i++) pos += lines[i].length + 1;
     this.#selectionStart = this.#selectionEnd = Math.min(pos, this.#value.length);
   }
+  setFindHighlight(ranges: readonly { from: number; to: number }[], active: number): void { this.#adapter?.setFindHighlight(ranges, active); }
+  clearFindHighlight(): void { this.#adapter?.clearFindHighlight(); }
   focus(): void {
     if (this.#adapter) this.#adapter.focus();
     else void this.ready().then(adapter => adapter.focus());

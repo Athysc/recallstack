@@ -617,7 +617,7 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 
 | Command | Shortcut |
 |---|---|
-| Search Notes | `Ctrl+/`, `Ctrl+Shift+F`, `Ctrl+F` |
+| Search Notes | `Ctrl+/`, `Ctrl+F` *(and `Ctrl+Shift+F` when no document is open)* |
 | Open Today Journal | `Ctrl+J` |
 | Open Task quick selector | — |
 | Show Task Listing | `Ctrl+T` |
@@ -651,6 +651,7 @@ Commands are shown or enabled based on context — most **File** and **Editor** 
 | Command | Shortcut |
 |---|---|
 | Insert Markdown Link | — |
+| Find in Document | `Ctrl+Shift+F` |
 | Insert Code Block | — |
 | Insert Mermaid Block | — |
 
@@ -789,7 +790,7 @@ keys are case-insensitive.
 | `Ctrl+L` | Toggle the Notes listing modal for the current folder |
 | `Ctrl+T` | Toggle the Task listing modal |
 | `Ctrl+W` | Toggle the Working Task listing modal |
-| `Ctrl+/` *(also `Ctrl+Shift+F`)* | Focus the workspace search box |
+| `Ctrl+/` *(also `Ctrl+Shift+F` when no document is open)* | Focus the workspace search box |
 | `Ctrl+F` | Reopen buffered search results, or the quick search box |
 
 ### Views
@@ -815,6 +816,7 @@ keys are case-insensitive.
 | `Enter` on empty list item | Exit the list |
 | `Tab` | Indent selected lines (or insert 2 spaces at cursor) |
 | `Shift+Tab` | Outdent selected lines |
+| `Ctrl+Shift+F` | Find in document — highlights every match of a term/regex (invalid regex matches literally). `Enter`/`Shift+Enter` (or `J`/`K` outside the input) step through matches; **Clear** resets; `Esc` or a click outside closes it. Reopening restores the last term. From the preview it switches to the source view |
 | `Ctrl+D` | Delete the current line |
 | `Ctrl+'` | Toggle blockquote (`> `) on all selected lines |
 | `Enter` *(nowrap mode)* | Scrolls the view back to the left margin |
@@ -847,6 +849,8 @@ Press `Enter` on an **empty** list item to exit the list.
 | `` `inline code` `` | `inline code` |
 | `[label](url)` | hyperlink |
 | `[https://example.com]` | bracketed bare URL rendered as one clickable link |
+
+`http://` and `https://` links in the rendered preview open in your system default browser rather than inside RecallStack. Relative note links and RecallStack file links still open in the app.
 | `![alt](path)` | image |
 
 ### Block Elements

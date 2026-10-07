@@ -635,3 +635,53 @@ html.app-booting body { visibility: hidden; }
   border-color: color-mix(in srgb, var(--mauve) 34%, transparent);
 }
 .app-bar #btn-working-tasks:hover { background: color-mix(in srgb, var(--green) 22%, transparent); }
+
+/* ── In-document find (Ctrl+Shift+F) ──────────────────────────────────────── */
+#modal-find {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 56px;
+  background: transparent; /* keep the document and its highlights fully visible */
+}
+#modal-find.hidden { display: none; }
+.find-dialog {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  max-width: calc(100vw - 24px);
+  background: var(--mantle);
+  border: 1px solid var(--surface2);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--crust) 70%, transparent);
+}
+.find-input {
+  width: min(320px, 40vw);
+  padding: 5px 8px;
+  color: var(--text);
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  border-radius: 5px;
+  font: inherit;
+}
+.find-input:focus { outline: none; border-color: var(--blue); }
+.find-count { min-width: 56px; color: var(--subtext0); font-size: 12px; text-align: center; }
+.find-count.none { color: var(--red); }
+.find-btn {
+  padding: 4px 10px;
+  color: var(--text);
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.find-btn:hover { background: var(--surface1); }
+.find-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+#md-editor .cm-find-match { background: color-mix(in srgb, var(--yellow) 32%, transparent); border-radius: 2px; }
+#md-editor .cm-find-match-active { background: color-mix(in srgb, var(--peach, var(--yellow)) 70%, transparent); outline: 1px solid var(--yellow); }

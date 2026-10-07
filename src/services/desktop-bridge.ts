@@ -412,6 +412,8 @@ import { assertPortableName } from "./portable-names";
     // logs a "Gdk-WARNING: Error writing selection data: Broken pipe" whenever a
     // clipboard-history tool (clipman, CopyQ, Klipper, ...) reads the selection —
     // the native plugin writes via X11/Wayland directly and sidesteps that path.
+    // Opens an http(s) URL in the system default browser via the opener plugin.
+    openExternalUrl(url) { return invoke('plugin:opener|open_url', { url }); },
     writeClipboardText(text) { return invoke('plugin:clipboard-manager|write_text', { text }); },
     // Reads a raster image from the OS clipboard via the native plugin, bypassing
     // the webview entirely — WebKitGTK (Tauri on Linux) does not expose pasted

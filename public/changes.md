@@ -2,6 +2,28 @@
 
 ---
 
+## 2026-10-07
+
+### External links open in your browser
+
+Clicking an `http://` or `https://` link in the preview now opens it in your
+system default browser instead of inside the app. Note links, `#heading`
+anchors and other internal links behave as before.
+
+### Find in document (Ctrl+Shift+F)
+
+**Ctrl+Shift+F** now opens a small find box scoped to the document you have
+open, highlighting every match. The term is a regular expression (an invalid
+pattern is matched literally). **Next** / **Prev**, **Enter** / **Shift+Enter**,
+or **J** / **K** (when the input isn't focused) move between matches with
+wrap-around, and a match counter shows your position. **Clear** resets the
+search; **Esc** or a click outside closes the box and clears the highlights.
+Reopening it restores your last search. From the rendered preview it switches
+to the source view. With no document open, Ctrl+Shift+F still focuses the
+workspace search; **Ctrl+/** and **Ctrl+F** are unchanged.
+
+---
+
 ## 2026-09-03
 
 A post-2.0 working session. A configurable **System folder** replaces the old
