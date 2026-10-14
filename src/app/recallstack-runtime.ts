@@ -3340,10 +3340,12 @@ type TaskLocation = {
 
       if (sibling) {
         await activateTab(sibling.id);
-      } else if (onClosedFolder && notesHandle && !isManagedSystemWorkspace()) {
-        // No sibling tab: stay on the closed file's folder + subfolder with the
-        // nav selection intact, nothing open. The Daily Journal tab stays in the
-        // strip but does not take over.
+      } else if (onClosedFolder && notesHandle && !isManagedSystemWorkspace()
+          && tabs.some(t => !isProtectedDailyJournalTab(t))) {
+        // No sibling tab, but other documents are still open elsewhere: stay on
+        // the closed file's folder + subfolder with the nav selection intact,
+        // nothing open. When the journal is the only tab left, fall through so
+        // it becomes the active tab instead.
         showEmptyEditorState();
         renderTabStrip();
         return true;
