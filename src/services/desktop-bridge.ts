@@ -545,6 +545,7 @@ import { assertPortableName } from "./portable-names";
     externalFileHandle(path, metadata = {}) { return new NativeExternalFileHandle(path, metadata as NativeMetadata) as unknown as FileSystemFileHandle; },
     externalDirectoryHandle(path) { return new NativeExternalDirectoryHandle(path) as unknown as FileSystemDirectoryHandle; },
     listExternalFilesRecursive(path) { return invoke('external_fs_list_recursive', { path }); },
+    copyExternalToDownloads(path) { return invoke('external_fs_copy_to_downloads', { path }); },
     referencedAssets(path) { return invoke('fs_referenced_assets', { path }); },
     renamePath(from, to) { return invoke('fs_rename', { from, to }); },
     assetUrl(path) {

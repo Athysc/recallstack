@@ -44,6 +44,7 @@ interface RecallStackNativeBridge {
   externalFileHandle(path: string, metadata?: Record<string, unknown>): FileSystemFileHandle;
   externalDirectoryHandle(path: string): FileSystemDirectoryHandle;
   listExternalFilesRecursive(path: string): Promise<Array<{ name: string; path: string; isDir: boolean; size: number; modifiedAt: number; version: string }>>;
+  copyExternalToDownloads(path: string): Promise<string>;
   rebuildIndex(): Promise<number>;
   cancelIndex(): Promise<void>;
   indexHealth(): Promise<Record<string, unknown>>;

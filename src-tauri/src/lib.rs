@@ -413,6 +413,7 @@ pub fn run() {
             bridge::external_fs_list,
             bridge::external_fs_list_recursive,
             bridge::external_fs_remove,
+            bridge::external_fs_copy_to_downloads,
             bridge::close_app,
             safety::save_draft,
             safety::load_draft,

@@ -67,10 +67,12 @@ export function renderOutputFiles(
   mode: FileSortMode,
   escape: (value: string) => string,
   actions: OutputRenderActions,
+  markdownOnly = false,
 ): void {
   container.replaceChildren();
   const grouped = groupOutputFiles(files, mode);
   FILE_TYPE_GROUPS.forEach(group => {
+    if (markdownOnly && group.key !== "markdown") return;
     const entries = grouped.get(group.key)!;
     if (!entries.length) return;
     const section = document.createElement("div");
@@ -89,7 +91,7 @@ export function renderOutputFiles(
       if (!markdown) {
         card.classList.add("file-card-inbox-nonmd");
         card.tabIndex = 0;
-        card.title = "Double-click or press Enter to open";
+        card.title = "Click to save a copy to Downloads";
       }
       const icon = document.createElement("span");
       icon.className = "file-icon";
@@ -114,7 +116,7 @@ export function renderOutputFiles(
       card.append(metadata, extensionLabel);
       if (markdown) card.addEventListener("click", event => actions.openMarkdown(file, event));
       else {
-        card.addEventListener("dblclick", () => actions.openOther(file));
+        card.addEventListener("click", () => actions.openOther(file));
         card.addEventListener("keydown", event => {
           if (event.key === "Enter") { event.preventDefault(); actions.openOther(file); }
         });

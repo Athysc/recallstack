@@ -231,6 +231,7 @@ type TaskLocation = {
   let newFolderRow     = 0;      // 1 or 2 — which nav row triggered the new-folder modal
   let listLoadGeneration  = 0;      // prevents stale async list responses from repainting the UI
   let outputsMode         = false;  // true when in Outputs view
+  let outputsMarkdownOnly = false;  // Outputs filter: off (default) lists every file, on lists Markdown only
   // The configured Outputs folder — any directory on disk, not necessarily
   // inside the open workspace. Native mode: an absolute-path-backed handle
   // re-derived each time from OUTPUTS_FOLDER_PATH_KEY (see
@@ -347,6 +348,10 @@ type TaskLocation = {
   const btnNew       = $id('btn-new');
   const btnSortMtime        = $id('btn-sort-mtime');
   const btnSortAlpha        = $id('btn-sort-alpha');
+  const btnOutputsMdOnly    = $id('btn-outputs-md-only');
+  const outputsSavedModal   = $id('modal-outputs-saved');
+  const outputsSavedMsg     = $id('modal-outputs-saved-msg');
+  const outputsSavedOkBtn   = $id('modal-outputs-saved-ok');
   const titleInput   = $id('title-input');
   const btnSave      = $id('btn-save');
   const btnStampDate = $id('btn-stamp-date');
@@ -1573,6 +1578,51 @@ type TaskLocation = {
   function syncOutputsTopButton() {
     btnOutputsTop.classList.toggle('hidden', !outputsAvailable || isManagedSystemWorkspace());
     btnOutputsTop.classList.toggle('active', outputsMode);
+    btnOutputsMdOnly.classList.toggle('hidden', !outputsMode);
+  }
+
+  function setOutputsMarkdownOnly(value: boolean) {
+    outputsMarkdownOnly = value;
+    btnOutputsMdOnly.classList.toggle('active', value);
+    btnOutputsMdOnly.setAttribute('aria-pressed', String(value));
+    btnOutputsMdOnly.title = value ? 'Showing Markdown only — click to show all files' : 'Showing all files — click to show Markdown only';
+    if (outputsMode && outputsActiveFolder) loadOutputsFiles(outputsActiveFolder).catch(e => toast(e.message, 'error'));
+  }
+  btnOutputsMdOnly.addEventListener('click', () => setOutputsMarkdownOnly(!outputsMarkdownOnly));
+
+  function closeOutputsSavedModal() { outputsSavedModal.classList.add('hidden'); }
+  outputsSavedOkBtn.addEventListener('click', closeOutputsSavedModal);
+  outputsSavedModal.addEventListener('click', (e: any) => { if (e.target === outputsSavedModal) closeOutputsSavedModal(); });
+  outputsSavedModal.addEventListener('keydown', (e: any) => { if (e.key === 'Escape') closeOutputsSavedModal(); });
+
+  // Non-Markdown Outputs files aren't opened: a copy goes to the default
+  // downloads folder. Native mode copies in Rust (no bytes over IPC); browser
+  // mode falls back to a regular download.
+  async function saveOutputsFileCopy(f: any) {
+    try {
+      let message: string;
+      const path = (f.handle as { path?: string }).path;
+      if (window.__recallstackNative?.active && path) {
+        const saved = await window.__recallstackNative.copyExternalToDownloads(path);
+        message = `A copy of "${f.name}" was saved to:\n${saved}`;
+      } else {
+        const url = URL.createObjectURL(await f.handle.getFile());
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = f.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        message = `A copy of "${f.name}" was saved to your downloads folder.`;
+      }
+      outputsSavedMsg.textContent = message;
+      outputsSavedMsg.style.whiteSpace = 'pre-wrap';
+      outputsSavedModal.classList.remove('hidden');
+      outputsSavedOkBtn.focus();
+    } catch (e: any) {
+      toast('Could not save a copy: ' + (e?.message || e), 'error');
+    }
   }
 
   btnRefreshWorkspace.addEventListener('click', () => {
@@ -2043,8 +2093,8 @@ type TaskLocation = {
 
       renderOutputFiles(fileGrid, raw, sortMode, esc, {
         openMarkdown: openOutputsFile,
-        openOther: openInboxNonMdFile,
-      });
+        openOther: saveOutputsFileCopy,
+      }, outputsMarkdownOnly);
     } catch (e: any) {
       toast('Could not load outputs files: ' + e.message, 'error');
     }

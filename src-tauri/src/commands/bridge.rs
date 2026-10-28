@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use walkdir::{DirEntry, WalkDir};
 
 const PORTABLE_TEXT_FILES: [&str; 3] = ["readme.md", "changes.md", "theme.json"];
@@ -851,6 +851,61 @@ pub fn external_fs_list_recursive(path: String) -> Result<Vec<NativeEntry>, Stri
     })
 }
 
+// Picks a name in `directory` that doesn't collide, "report.pdf" ->
+// "report (1).pdf" -> "report (2).pdf" ..., and creates the file atomically
+// (create_new) so an existing download is never overwritten.
+fn create_unique_file(directory: &Path, file_name: &str) -> Result<(fs::File, PathBuf), String> {
+    let original = Path::new(file_name);
+    let stem = original.file_stem().and_then(|s| s.to_str()).unwrap_or(file_name);
+    let extension = original.extension().and_then(|s| s.to_str());
+    for attempt in 0..1000u32 {
+        let name = match (attempt, extension) {
+            (0, _) => file_name.to_string(),
+            (n, Some(ext)) => format!("{stem} ({n}).{ext}"),
+            (n, None) => format!("{stem} ({n})"),
+        };
+        let target = directory.join(name);
+        match fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+            Ok(file) => return Ok((file, target)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Err("Could not find an unused file name in the downloads folder".to_string())
+}
+
+fn copy_file_into(source: &Path, directory: &Path) -> Result<PathBuf, String> {
+    let name = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "File has no usable name".to_string())?;
+    let (mut target_file, target) = create_unique_file(directory, name)?;
+    let result = fs::File::open(source)
+        .and_then(|mut source_file| std::io::copy(&mut source_file, &mut target_file))
+        .map_err(|e| e.to_string());
+    if let Err(error) = result {
+        drop(target_file);
+        let _ = fs::remove_file(&target);
+        return Err(error);
+    }
+    Ok(target)
+}
+
+// Copies an Outputs file to the user's default downloads folder entirely in
+// Rust, so the bytes never cross the IPC bridge (external_fs_read returns a
+// JSON number array, which is slow and memory-heavy for large files).
+// Returns the absolute path of the saved copy.
+#[tauri::command(async)]
+pub fn external_fs_copy_to_downloads(app: AppHandle, path: String) -> Result<String, String> {
+    logged("external_fs_copy_to_downloads", || {
+        let source = validate_external_file(&path)?;
+        let downloads = app.path().download_dir().map_err(|e| e.to_string())?;
+        fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
+        let saved = copy_file_into(&source, &downloads)?;
+        Ok(saved.to_string_lossy().into_owned())
+    })
+}
+
 #[tauri::command(async)]
 pub fn external_fs_remove(path: String) -> Result<(), String> {
     logged("external_fs_remove", || {
@@ -875,7 +930,7 @@ pub fn close_app(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        list_external_directory, list_external_directory_recursive, markdown_asset_references,
+        copy_file_into, list_external_directory, list_external_directory_recursive, markdown_asset_references,
         portable_read_text_from, rename_directory, validate_external_directory,
         validate_external_file, validate_external_write_target, validate_portable_target,
         PORTABLE_TEXT_FILES,
@@ -1092,5 +1147,31 @@ mod tests {
         assert!(recursive.iter().all(|entry| std::path::Path::new(&entry.path).is_absolute()));
 
         fs::remove_dir_all(directory).expect("remove fixture");
+    }
+
+    #[test]
+    fn copying_to_downloads_never_overwrites_existing_files() {
+        let root = std::env::temp_dir().join(format!(
+            "recallstack-copy-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let source_dir = root.join("src");
+        let downloads = root.join("downloads");
+        fs::create_dir_all(&source_dir).expect("source dir");
+        fs::create_dir_all(&downloads).expect("downloads dir");
+        let source = source_dir.join("report.pdf");
+        fs::write(&source, b"bytes").expect("source file");
+
+        let first = copy_file_into(&source, &downloads).expect("first copy");
+        let second = copy_file_into(&source, &downloads).expect("second copy");
+        assert_eq!(first.file_name().unwrap(), "report.pdf");
+        assert_eq!(second.file_name().unwrap(), "report (1).pdf");
+        assert_eq!(fs::read(&second).expect("copy contents"), b"bytes");
+
+        fs::remove_dir_all(root).expect("remove fixture");
     }
 }

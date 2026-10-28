@@ -85,6 +85,9 @@
           <span class="list-heading" id="list-heading">Files</span>
         </div>
         <div class="list-actions">
+          <button class="btn-icon sort-btn hidden" id="btn-outputs-md-only" aria-pressed="false" title="Showing all files — click to show Markdown only">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+          </button>
           <button class="btn-icon sort-btn" id="btn-sort-mtime" title="Sort by last modified">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           </button>
@@ -503,6 +506,17 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="modal-inbox-delete-cancel">Cancel</button>
       <button class="btn btn-danger" id="modal-inbox-delete-confirm">Move to Trash</button>
+    </div>
+  </div>
+</div>
+
+<!-- Outputs Copy Saved Modal -->
+<div id="modal-outputs-saved" class="modal-overlay hidden">
+  <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-outputs-saved-title">
+    <div class="modal-title" id="modal-outputs-saved-title">Copy Saved</div>
+    <div id="modal-outputs-saved-msg" style="color:var(--subtext0);font-size:13px;line-height:1.5;margin-bottom:4px;word-break:break-all"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="modal-outputs-saved-ok">OK</button>
     </div>
   </div>
 </div>
