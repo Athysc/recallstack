@@ -1,3 +1,4 @@
+import { documentExtension, documentKind, stripDocumentExtension } from "../editor/document-kind.ts";
 import type { ListedFile } from "../../services/filesystem";
 
 export type FileSortMode = "mtime" | "alpha";
@@ -15,8 +16,13 @@ export const BROWSER_VIEWABLE_EXTS = new Set([
   "txt", "html", "htm", "xml", "json", "csv",
 ]);
 
+/** Groups whose files open in the editor rather than externally. */
+export const EDITABLE_GROUPS: ReadonlySet<string> = new Set(["markdown", "sql", "powershell"]);
+
 export const FILE_TYPE_GROUPS: readonly FileTypeGroup[] = [
   { key: "markdown", label: "Markdown", icon: "📄", exts: new Set(["md"]) },
+  { key: "sql", label: "SQL", icon: "🗄", exts: new Set(["sql"]) },
+  { key: "powershell", label: "PowerShell", icon: "⌨", exts: new Set(["ps1", "psm1", "psd1"]) },
   { key: "image", label: "Images", icon: "🖼", exts: new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "ico", "avif"]) },
   { key: "pdf", label: "PDF", icon: "📋", exts: new Set(["pdf"]) },
   { key: "audio", label: "Audio", icon: "🎵", exts: new Set(["mp3", "wav", "ogg", "flac", "aac", "m4a"]) },
@@ -126,9 +132,9 @@ export function renderInboxFileGroups(
     section.appendChild(header);
 
     entries.forEach(file => {
-      const markdown = group.key === "markdown";
+      const markdown = EDITABLE_GROUPS.has(group.key);
       const extension = `.${fileExt(file.name)}`;
-      const displayName = markdown ? file.name.replace(/\.md$/i, "") : file.name.slice(0, -extension.length) || file.name;
+      const displayName = markdown ? stripDocumentExtension(file.name) : file.name.slice(0, -extension.length) || file.name;
       const card = document.createElement("div");
       card.className = "file-card";
       if (!markdown) {
@@ -136,7 +142,7 @@ export function renderInboxFileGroups(
         card.tabIndex = 0;
         card.title = "Double-click or press Enter to open";
       }
-      card.innerHTML = `<span class="file-icon">${group.icon}</span><span class="file-name">${escape(displayName)}</span><span class="file-meta">${formatMtime(file.mtime)}</span><span class="file-ext">${escape(markdown ? ".md" : extension)}</span>${markdown ? "" : '<button class="btn-icon danger inbox-delete-btn" title="Delete file" tabindex="-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>'}`;
+      card.innerHTML = `<span class="file-icon">${group.icon}</span><span class="file-name">${escape(displayName)}</span><span class="file-meta">${formatMtime(file.mtime)}</span><span class="file-ext">${escape(extension)}</span>${markdown ? "" : '<button class="btn-icon danger inbox-delete-btn" title="Delete file" tabindex="-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>'}`;
       if (markdown) {
         card.addEventListener("click", event => actions.openMarkdown(file, event));
       } else {
@@ -168,7 +174,9 @@ export function renderNoteCards(
   files.forEach(file => {
     const card = document.createElement("div");
     card.className = "file-card";
-    card.innerHTML = `<span class="file-icon">📄</span><span class="file-name">${escape(file.name.replace(/\.md$/, ""))}</span><span class="file-meta">${formatMtime(file.mtime)}</span><span class="file-ext">.md</span>`;
+    const kind = documentKind(file.name);
+    const icon = FILE_TYPE_GROUPS.find(group => group.key === kind)!.icon;
+    card.innerHTML = `<span class="file-icon">${icon}</span><span class="file-name">${escape(stripDocumentExtension(file.name))}</span><span class="file-meta">${formatMtime(file.mtime)}</span><span class="file-ext">${documentExtension(file.name) || ".md"}</span>`;
     card.addEventListener("click", event => onOpen(file, event));
     container.appendChild(card);
   });

@@ -1,3 +1,4 @@
+import { isEditableDocumentName } from "../features/editor/document-kind.ts";
 import { nextDuplicateFilename } from "../features/tasks/filenames.ts";
 
 export interface NamedDirectory {
@@ -86,6 +87,11 @@ export async function listFiles(
 
 export const listMdFiles = (dirHandle: FileSystemDirectoryHandle): Promise<ListedFile[]> =>
   listFiles(dirHandle, true);
+
+/** Notes folders hold SQL scripts alongside Markdown; task folders stay Markdown-only (listMdFiles). */
+export async function listNoteFiles(dirHandle: FileSystemDirectoryHandle): Promise<ListedFile[]> {
+  return (await listFiles(dirHandle, false)).filter(file => isEditableDocumentName(file.name));
+}
 
 export const listAllFiles = (dirHandle: FileSystemDirectoryHandle): Promise<ListedFile[]> =>
   listFiles(dirHandle, false);

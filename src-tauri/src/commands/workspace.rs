@@ -220,9 +220,24 @@ fn relative_from_workspace(root: &Path, path: &Path) -> Result<String, String> {
         .pipe(Ok)
 }
 
+/// Editable note documents: Markdown, SQL and PowerShell (5.1 / 7) scripts.
+const NOTE_EXTENSIONS: [&str; 5] = ["md", "sql", "ps1", "psm1", "psd1"];
+
+fn is_note_path(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| {
+        NOTE_EXTENSIONS
+            .iter()
+            .any(|note_ext| ext.eq_ignore_ascii_case(note_ext))
+    })
+}
+
+fn is_note_name(name: &str) -> bool {
+    is_note_path(Path::new(name))
+}
+
 fn note_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
-    if !is_safe_relative(relative_path) || !relative_path.ends_with(".md") {
-        return Err(err("Only safe relative Markdown paths are allowed"));
+    if !is_safe_relative(relative_path) || !is_note_name(relative_path) {
+        return Err(err("Only safe relative Markdown, SQL or PowerShell paths are allowed"));
     }
     let mut candidate = data_path(root);
     if candidate.exists()
@@ -702,10 +717,7 @@ fn normalized_event_kind(kind: &EventKind) -> Option<&'static str> {
 }
 
 fn entity_kind(path: &Path) -> &'static str {
-    if path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-    {
+    if is_note_path(path) {
         "markdown"
     } else if path.extension().is_some() {
         "asset"
@@ -715,9 +727,7 @@ fn entity_kind(path: &Path) -> &'static str {
 }
 
 fn update_index_path(root: &Path, path: &Path) -> Result<(), String> {
-    if !path
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+    if !is_note_path(path)
         || path.to_string_lossy().contains(".recallstack-trash")
     {
         return Ok(());
@@ -1006,10 +1016,7 @@ pub fn list_entries(
                 .filter_map(Result::ok)
                 .filter_map(|entry| {
                     if !entry.file_type().is_file()
-                        || !entry
-                            .path()
-                            .extension()
-                            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                        || !is_note_path(entry.path())
                         || entry
                             .path()
                             .to_string_lossy()
@@ -1050,10 +1057,7 @@ pub fn list_entries(
                 let file_type = entry.file_type().ok()?;
                 let is_dir = file_type.is_dir();
                 if !is_dir
-                    && !entry
-                        .path()
-                        .extension()
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                    && !is_note_path(&entry.path())
                 {
                     return None;
                 }
@@ -1212,11 +1216,7 @@ fn reconcile_index_with(
         .into_iter()
         .filter_map(Result::ok)
         .filter(|item| item.file_type().is_file())
-        .filter(|item| {
-            item.path()
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-        })
+        .filter(|item| is_note_path(item.path()))
         .filter(|item| !item.path().to_string_lossy().contains(".recallstack-trash"))
         .map(|item| item.into_path())
         .collect::<Vec<_>>();

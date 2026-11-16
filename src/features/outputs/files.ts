@@ -1,4 +1,5 @@
-import { FILE_TYPE_GROUPS, fileExt, formatMtime, inboxFileGroup, sortFiles, type FileSortMode } from "../notes/file-list.ts";
+import { stripDocumentExtension } from "../editor/document-kind.ts";
+import { EDITABLE_GROUPS, FILE_TYPE_GROUPS, fileExt, formatMtime, inboxFileGroup, sortFiles, type FileSortMode } from "../notes/file-list.ts";
 
 type IterableDirectory = FileSystemDirectoryHandle & {
   values(): AsyncIterableIterator<FileSystemFileHandle | FileSystemDirectoryHandle>;
@@ -72,7 +73,7 @@ export function renderOutputFiles(
   container.replaceChildren();
   const grouped = groupOutputFiles(files, mode);
   FILE_TYPE_GROUPS.forEach(group => {
-    if (markdownOnly && group.key !== "markdown") return;
+    if (markdownOnly && !EDITABLE_GROUPS.has(group.key)) return;
     const entries = grouped.get(group.key)!;
     if (!entries.length) return;
     const section = document.createElement("div");
@@ -82,9 +83,9 @@ export function renderOutputFiles(
     header.innerHTML = `<span class="inbox-section-title">${group.icon} ${escape(group.label)}</span><span class="inbox-section-count">${entries.length} file${entries.length !== 1 ? "s" : ""}</span>`;
     section.appendChild(header);
     entries.forEach(file => {
-      const markdown = group.key === "markdown";
+      const markdown = EDITABLE_GROUPS.has(group.key);
       const extension = `.${fileExt(file.name)}`;
-      const displayName = markdown ? file.name.replace(/\.md$/i, "") : file.name.slice(0, -extension.length) || file.name;
+      const displayName = markdown ? stripDocumentExtension(file.name) : file.name.slice(0, -extension.length) || file.name;
       const folder = file.subPath.split("/").slice(0, -1).join("/");
       const card = document.createElement("div");
       card.className = "file-card";
@@ -112,7 +113,7 @@ export function renderOutputFiles(
       metadata.textContent = formatMtime(file.mtime);
       const extensionLabel = document.createElement("span");
       extensionLabel.className = "file-ext";
-      extensionLabel.textContent = markdown ? ".md" : extension;
+      extensionLabel.textContent = extension;
       card.append(metadata, extensionLabel);
       if (markdown) card.addEventListener("click", event => actions.openMarkdown(file, event));
       else {

@@ -1,4 +1,4 @@
-import { Compartment, EditorSelection, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state";
+import { Compartment, type Extension, EditorSelection, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state";
 import {
   crosshairCursor,
   Decoration,
@@ -15,6 +15,10 @@ import {
 import { defaultKeymap, history, historyKeymap, indentLess } from "@codemirror/commands";
 import { bracketMatching, foldGutter, foldKeymap, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
+import { sql } from "@codemirror/lang-sql";
+import { RecallStackSQL } from "./sql-dialect.ts";
+import { RecallStackPowerShell } from "./powershell-language.ts";
+import { documentKind, type DocumentKind } from "./document-kind.ts";
 import { highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap, type CompletionContext } from "@codemirror/autocomplete";
 import { tags } from "@lezer/highlight";
@@ -68,6 +72,30 @@ const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.strong, fontWeight: "bold" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
 ]);
+
+// Code languages have no markup marks, so unlike markdownHighlightStyle this maps
+// the language's own token tags to the same theme variables. It is only installed
+// (through the language compartment) while a .sql or PowerShell document is open.
+const codeHighlightStyle = HighlightStyle.define([
+  { tag: tags.keyword, color: "var(--mauve)", fontWeight: "bold" },
+  { tag: [tags.typeName, tags.standard(tags.typeName)], color: "var(--yellow)" },
+  { tag: [tags.number, tags.bool, tags.null], color: "var(--peach)" },
+  { tag: tags.string, color: "var(--green)" },
+  { tag: [tags.special(tags.string), tags.special(tags.name)], color: "var(--teal)" },
+  { tag: [tags.operator, tags.punctuation, tags.separator], color: "var(--subtext1)" },
+  { tag: [tags.lineComment, tags.blockComment, tags.comment], color: "var(--overlay1)", fontStyle: "italic" },
+  { tag: [tags.name, tags.propertyName, tags.variableName], color: "var(--blue)" },
+  { tag: [tags.standard(tags.variableName), tags.function(tags.variableName)], color: "var(--sapphire, var(--blue))" },
+  { tag: [tags.meta, tags.attributeName], color: "var(--yellow)" },
+  { tag: tags.invalid, color: "var(--red)" },
+]);
+
+function languageExtensions(kind: DocumentKind, length: number, threshold: number): Extension {
+  if (!useMarkdownExtensions(length, threshold)) return [];
+  if (kind === "sql") return [sql({ dialect: RecallStackSQL, upperCaseKeywords: false }), syntaxHighlighting(codeHighlightStyle)];
+  if (kind === "powershell") return [RecallStackPowerShell, syntaxHighlighting(codeHighlightStyle)];
+  return markdown();
+}
 
 // In-document find highlights (driven by the Ctrl+Shift+F find box).
 interface FindHighlight { ranges: readonly { from: number; to: number }[]; active: number }
@@ -135,9 +163,12 @@ export class MarkdownEditorAdapter {
   readonly #wrap = new Compartment();
   readonly #gutters = new Compartment();
   readonly #language = new Compartment();
+  readonly #completion = new Compartment();
   readonly #states = loadStates();
   readonly #largeFileThreshold: number;
   #documentKey: string | null = null;
+  #kind: DocumentKind = "markdown";
+  readonly #getCompletions: MarkdownEditorOptions["getCompletions"];
   #wordWrap: boolean;
   #lineNumbers: boolean;
   #programmatic = false;
@@ -151,6 +182,7 @@ export class MarkdownEditorAdapter {
     this.#wordWrap = options.wordWrap ?? true;
     this.#lineNumbers = options.lineNumbers ?? false;
     this.#largeFileThreshold = options.largeFileThreshold ?? 1_000_000;
+    this.#getCompletions = options.getCompletions;
     const notify = EditorView.updateListener.of(update => {
       if (update.docChanged && !this.#programmatic) this.view.dom.dispatchEvent(new Event("input"));
     });
@@ -163,10 +195,10 @@ export class MarkdownEditorAdapter {
           highlightActiveLine(), bracketMatching(), foldGutter(), highlightSelectionMatches(), findField,
           syntaxHighlighting(markdownHighlightStyle, { fallback: true }),
           keymap.of([{ key: "Shift-Tab", run: indentLess }, ...historyKeymap, ...foldKeymap, ...completionKeymap, ...defaultKeymap.filter(binding => binding.key !== "Enter" && binding.key !== "Tab" && binding.key !== "Shift-Tab")]),
-          autocompletion({ override: [completionSource(options.getCompletions)] }),
+          this.#completion.of(this.#completionExtension()),
           this.#gutters.of(this.#lineNumbers ? lineNumbers() : []),
           this.#wrap.of(this.#wordWrap ? EditorView.lineWrapping : []),
-          this.#language.of(useMarkdownExtensions(source.textContent?.length || 0, this.#largeFileThreshold) ? markdown() : []),
+          this.#language.of(languageExtensions(this.#kind, source.textContent?.length || 0, this.#largeFileThreshold)),
           notify,
           EditorView.contentAttributes.of({ "aria-label": source.dataset.placeholder || "Markdown editor", spellcheck: "false" }),
         ],
@@ -195,7 +227,7 @@ export class MarkdownEditorAdapter {
         changes: { from: 0, to: this.view.state.doc.length, insert: text },
         selection: EditorSelection.cursor(Math.min(this.selectionStart, text.length)),
         annotations: Transaction.addToHistory.of(preserveHistory),
-        effects: this.#language.reconfigure(useMarkdownExtensions(text.length, this.#largeFileThreshold) ? markdown() : []),
+        effects: this.#language.reconfigure(languageExtensions(this.#kind, text.length, this.#largeFileThreshold)),
       });
     } finally { this.#programmatic = false; }
   }
@@ -214,14 +246,27 @@ export class MarkdownEditorAdapter {
       changes: { from: 0, to: this.view.state.doc.length, insert: text },
       selection: EditorSelection.range(anchor, head),
       annotations: Transaction.addToHistory.of(true),
-      effects: this.#language.reconfigure(useMarkdownExtensions(length, this.#largeFileThreshold) ? markdown() : []),
+      effects: this.#language.reconfigure(languageExtensions(this.#kind, length, this.#largeFileThreshold)),
       scrollIntoView: true,
     });
+  }
+
+  // Markdown keeps the [[link]] / #tag completer; code documents drop the override
+  // (SQL then gets its own keyword completion; PowerShell has none).
+  #completionExtension(): Extension {
+    return this.#kind !== "markdown"
+      ? autocompletion()
+      : autocompletion({ override: [completionSource(this.#getCompletions)] });
   }
 
   openDocument(key: string, text: string, fallbackCursor = 0): void {
     this.rememberDocumentState();
     this.#documentKey = key;
+    const kind = documentKind(key);
+    if (kind !== this.#kind) {
+      this.#kind = kind;
+      this.view.dispatch({ effects: this.#completion.reconfigure(this.#completionExtension()) });
+    }
     this.setText(text, false);
     const stored = this.#states[key];
     this.setSelectionRange(stored?.anchor ?? fallbackCursor, stored?.head ?? fallbackCursor);

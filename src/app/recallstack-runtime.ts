@@ -1,4 +1,6 @@
 // Typed application composition controller for cross-feature DOM and workspace state.
+import { ensureDocumentExtension, isCodeName, isEditableDocumentName, previewFenceLanguage, stripDocumentExtension } from '../features/editor/document-kind';
+
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 import { PREFERENCE_KEYS } from "./preferences";
@@ -91,6 +93,7 @@ import {
   listAllFiles,
   listDirs,
   listMdFiles,
+  listNoteFiles,
   uniqueFilenameInDir,
   type NamedDirectory,
 } from "../services/filesystem";
@@ -143,6 +146,8 @@ import {
   type OpenImportMode,
   type SelectableFile,
 } from "../features/editor/import-files";
+
+const EDITABLE_EXT_RE = /\.(md|sql|ps1|psm1|psd1)$/i;
 
 type ViewName = "welcome" | "list" | "editor" | "search" | "calendar" | "outputs";
 type BacklinkEntry = { sourcePath: string; sourceTitle: string; anchor?: string | null; kind: string };
@@ -377,7 +382,7 @@ type TaskLocation = {
         return searchIndex
           .filter(note => !query || note.name.toLowerCase().includes(query.toLowerCase()))
           .slice(0, 50)
-          .map(note => ({ label: note.notesRelPath.replace(/\.md$/i, ''), type: 'text' }));
+          .map(note => ({ label: note.notesRelPath.replace(EDITABLE_EXT_RE, ''), type: 'text' }));
       }
       const tags = new Set<string>();
       searchIndex.forEach(note => (note.tags || []).forEach(tag => tags.add(tag)));
@@ -2116,7 +2121,7 @@ type TaskLocation = {
     if (!await autoSaveIfDirty()) return false;
     syncActiveTabFromState();
     const { tab, previousActiveId, isNewTab } = claimTabSlot(pinned, {
-      path: outputsPath, title: fileEntry.name.replace(/\.md$/i, ''), isNew: false, dirty: false,
+      path: outputsPath, title: fileEntry.name.replace(EDITABLE_EXT_RE, ''), isNew: false, dirty: false,
       isOutputsFile: true, outputsFileHandle: fileEntry.handle, outputsDirHandle: fileEntry.dirHandle,
       returnToOutputs: true,
       isExternalFile: false, externalPath: null, externalFileHandle: null,
@@ -2152,7 +2157,7 @@ type TaskLocation = {
       currentOutputsDirFh = dirHandle;
       returnToOutputs     = true;
 
-      titleInput.value = outputsPath.split('/').at(-1)!.replace(/\.md$/i, '');
+      titleInput.value = outputsPath.split('/').at(-1)!.replace(EDITABLE_EXT_RE, '');
       savedContent     = content;
       let editorContent = content;
 
@@ -2171,7 +2176,7 @@ type TaskLocation = {
       previewOut.innerHTML = '';
       previewOut.scrollTop = 0;
       previewScheduler.cancel();
-      setPreviewMarkdown(content);
+      setPreviewMarkdown(content, outputsPath);
       postProcessPreview();
 
       btnDelete.classList.remove('hidden');
@@ -2219,7 +2224,7 @@ type TaskLocation = {
     if (!await autoSaveIfDirty()) return false;
     syncActiveTabFromState();
     const { tab, previousActiveId, isNewTab } = claimTabSlot(pinned, {
-      path: pathKey, title: selection.name.replace(/\.md$/i, ''), isNew: false, dirty: false,
+      path: pathKey, title: selection.name.replace(EDITABLE_EXT_RE, ''), isNew: false, dirty: false,
       isOutputsFile: false, outputsFileHandle: null, outputsDirHandle: null, returnToOutputs: false,
       isExternalFile: true, externalPath: selection.nativePath, externalFileHandle: selection.browserHandle,
     });
@@ -2277,7 +2282,7 @@ type TaskLocation = {
       previewOut.innerHTML = '';
       previewOut.scrollTop = 0;
       previewScheduler.cancel();
-      setPreviewMarkdown(content);
+      setPreviewMarkdown(content, tab.path!);
       postProcessPreview();
 
       // Temporary files are edited in place at their original OS location and
@@ -2497,7 +2502,7 @@ type TaskLocation = {
       return;
     }
 
-    const raw = await listMdFiles(targetHandle);
+    const raw = await (isTasksFolder ? listMdFiles : listNoteFiles)(targetHandle);
     let workingTasks: any[] = [];
     if (isTasksFolder && !archiveMode) {
       try {
@@ -2706,7 +2711,7 @@ type TaskLocation = {
 
   function markdownLinkLabelForCurrentFile() {
     const name = (titleInput.value || currentPath?.split('/').at(-1)! || 'Open in RecallStack')
-      .replace(/\.md$/i, '');
+      .replace(EDITABLE_EXT_RE, '');
     return name.replace(/([\\\[\]])/g, '\\$1');
   }
 
@@ -2727,8 +2732,8 @@ type TaskLocation = {
         break;
       }
     }
-    if (!appPath || !appPath.toLowerCase().endsWith('.md')) {
-      toast('RecallStack link is not a markdown file', 'error');
+    if (!appPath || !isEditableDocumentName(appPath)) {
+      toast('RecallStack link is not a markdown, SQL or PowerShell file', 'error');
       return;
     }
 
@@ -2920,8 +2925,8 @@ type TaskLocation = {
   function tabTitleForPath(path: any, isOutputsFileFlag = false) {
     if (!path) return 'Untitled';
     const name = path.split('/').at(-1)!;
-    if (isOutputsFileFlag) return name.replace(/\.md$/i, '');
-    return isCurrentTaskPath(path) ? taskDisplayTitle(name) : name.replace(/\.md$/i, '');
+    if (isOutputsFileFlag) return name.replace(EDITABLE_EXT_RE, '');
+    return isCurrentTaskPath(path) ? taskDisplayTitle(name) : name.replace(EDITABLE_EXT_RE, '');
   }
 
   // Writes the module-level "current document" state onto the active tab record.
@@ -3166,7 +3171,7 @@ type TaskLocation = {
       currentExternalFileHandle = null;
       await syncNavToPath(notesRelPath);
       await loadAssetsForCurrentFile();
-      titleInput.value = isCurrentTaskPath(notesRelPath) ? taskDisplayTitle(notesRelPath.split('/').at(-1)!) : notesRelPath.split('/').at(-1)!.replace(/\.md$/, '');
+      titleInput.value = isCurrentTaskPath(notesRelPath) ? taskDisplayTitle(notesRelPath.split('/').at(-1)!) : notesRelPath.split('/').at(-1)!.replace(EDITABLE_EXT_RE, '');
       savedContent     = content;
       let editorContent = content;
       const draft = await recoveryDraftGet(notesRelPath);
@@ -3185,7 +3190,7 @@ type TaskLocation = {
       previewOut.innerHTML = '';
       previewOut.scrollTop = 0;
       previewScheduler.cancel();
-      setPreviewMarkdown(mdEditor.value);
+      setPreviewMarkdown(mdEditor.value, notesRelPath);
       postProcessPreview();
       refreshBacklinks().then(appendBacklinks);
       // Show restore button when viewing a file inside an archived/ subfolder
@@ -3587,7 +3592,7 @@ type TaskLocation = {
           startDate: taskMeta.startDate ?? undefined,
           completedDate: taskMeta.completedDate ?? undefined,
           dueDate: taskMeta.dueDate ?? undefined,
-        }) : (title.toLowerCase().endsWith('.md') ? title : title + '.md');
+        }) : ensureDocumentExtension(title, currentPath ?? '');
         const filenameError = portableNameError(filename);
         if (filenameError) {
           titleInput.classList.add('error');
@@ -3640,7 +3645,7 @@ type TaskLocation = {
         removeExternalChangeBanner();
         lsDraftClear(notesRelPath);
         if (origPath && origPath !== notesRelPath) lsDraftClear(origPath);
-        titleInput.value = taskFile ? taskDisplayTitle(notesRelPath.split('/').at(-1)!) : notesRelPath.split('/').at(-1)!.replace(/\.md$/i, '');
+        titleInput.value = taskFile ? taskDisplayTitle(notesRelPath.split('/').at(-1)!) : notesRelPath.split('/').at(-1)!.replace(EDITABLE_EXT_RE, '');
         const inArchived = notesRelPath.split('/').at(-2) === 'archived';
         const archiveDisabledForRoot = !inArchived && isRootLevelNotePath(notesRelPath);
         btnArchive.innerHTML = inArchived ? SVG_RESTORE : SVG_ARCHIVE;
@@ -3954,7 +3959,7 @@ type TaskLocation = {
     const content = mdEditor.value;
     const destDir = await dirHandleForParts(destParts, true);
     const sourceName = currentPath!.split(/[\\/]/).pop() || 'untitled.md';
-    const baseFilename = sourceName.toLowerCase().endsWith('.md') ? sourceName : sourceName + '.md';
+    const baseFilename = ensureDocumentExtension(sourceName, sourceName);
     const finalFilename = await uniqueFilenameInDir(destDir, baseFilename);
     const finalPath = buildImportedFilePath(destParts, finalFilename);
     await writeMdFile(finalPath, content);
@@ -4140,7 +4145,7 @@ type TaskLocation = {
     // on its next save.
     const sourcePath = currentPath;
     const filename = sourcePath.split('/').at(-1)!;
-    const desiredFilename = buildTaskFilename(filename.replace(/\.md$/i, ''), { priority: 'normal' });
+    const desiredFilename = buildTaskFilename(filename.replace(EDITABLE_EXT_RE, ''), { priority: 'normal' });
     const finalFilename = await fileExistsInDir(tasksHandle, desiredFilename)
       ? await nextDuplicateFilename(desiredFilename, candidate => fileExistsInDir(tasksHandle, candidate))
       : desiredFilename;
@@ -4168,7 +4173,7 @@ type TaskLocation = {
     previewOut.innerHTML = '';
     previewOut.scrollTop = 0;
     previewScheduler.cancel();
-    setPreviewMarkdown(newContent);
+    setPreviewMarkdown(newContent, finalRelPath);
     postProcessPreview();
 
     btnArchive.innerHTML = SVG_ARCHIVE;
@@ -4899,6 +4904,15 @@ type TaskLocation = {
     catch (error: any) { console.warn('Could not load recovery draft', error); return null; }
   }
 
+  // SQL and PowerShell files preview as a highlighted code block through the normal markdown pipeline.
+  function previewSource(text: string, path: string) {
+    const language = previewFenceLanguage(path);
+    if (!language) return text;
+    const longestRun = Math.max(2, ...(text.match(/`+/g) ?? []).map(run => run.length));
+    const fence = '`'.repeat(longestRun + 1);
+    return `${fence}${language}\n${text}\n${fence}`;
+  }
+
   function renderPreview() {
     // Edit sub-state: the preview pane is hidden and deliberately frozen — skip
     // the whole marked.parse + innerHTML rebuild + postProcess sweep on every
@@ -5199,8 +5213,8 @@ type TaskLocation = {
     }
   }
 
-  function setPreviewMarkdown(text: any) {
-    previewOut.innerHTML = `<div class="preview-zoom-surface">${renderMarkdown(text)}</div>`;
+  function setPreviewMarkdown(text: any, path: string | null = currentPath) {
+    previewOut.innerHTML = `<div class="preview-zoom-surface">${renderMarkdown(previewSource(text, path ?? ''))}</div>`;
   }
 
   // Allow [ ] / [x] at line-start without the `- ` list prefix
@@ -5611,7 +5625,7 @@ type TaskLocation = {
         editorToolbarEl.style.display = 'none';
         taskDateBar.style.display = 'none';
         // Show the presentation-only exit bar and populate the title
-        presentationTitle.textContent = (titleInput.value || '').trim().replace(/\.md$/, '');
+        presentationTitle.textContent = (titleInput.value || '').trim().replace(EDITABLE_EXT_RE, '');
         presentationExitBar.classList.remove('hidden');
         btnPresentation.classList.add('is-active');
       } else {
@@ -6709,7 +6723,7 @@ type TaskLocation = {
   });
 
   mdEditor.addEventListener('keydown', (e: any) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !isCodeName(currentPath ?? '')) {
       // In nowrap mode, reset horizontal scroll after the newline is rendered
       if (mdEditor.classList.contains('nowrap')) {
         requestAnimationFrame(() => { mdEditor.scrollLeft = 0; });
@@ -7466,7 +7480,7 @@ type TaskLocation = {
       const handles = await window.showOpenFilePicker({
         multiple: true,
         excludeAcceptAllOption: true,
-        types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }],
+        types: [{ description: 'Markdown, SQL or PowerShell', accept: { 'text/markdown': ['.md'], 'application/sql': ['.sql'], 'text/plain': ['.ps1', '.psm1', '.psd1'] } }],
       });
       await addOpenImportSelections(handles.map(handle => ({
         key: `browser-handle:${handle.name}`, name: handle.name, nativePath: null, browserHandle: handle,
@@ -7482,7 +7496,7 @@ type TaskLocation = {
   // returns the new workspace-relative path.
   async function importExternalSelectionIntoWorkspace(file: OpenImportSelection, destParts: [string, string]): Promise<string> {
     const destDir = await dirHandleForParts(destParts, true);
-    const baseFilename = file.name.toLowerCase().endsWith('.md') ? file.name : file.name + '.md';
+    const baseFilename = ensureDocumentExtension(file.name, file.name);
     const finalFilename = await uniqueFilenameInDir(destDir, baseFilename);
     const finalPath = buildImportedFilePath(destParts, finalFilename);
     const content = file.nativePath
@@ -7981,7 +7995,7 @@ type TaskLocation = {
     }
     const files = await listMdFiles(dir);
     listingRowMeta = new Map(); listingRowSeq = 0;
-    const noteName = (name: string) => name.replace(/\.md$/i, '');
+    const noteName = (name: string) => name.replace(EDITABLE_EXT_RE, '');
     return [{
       title: null,
       rows: sortListingFiles(files, sort, false, noteName).map((file: any) => {

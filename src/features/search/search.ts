@@ -1,3 +1,4 @@
+import { isEditableDocumentName } from "../editor/document-kind.ts";
 import { taskDisplayTitle } from "../tasks/filenames.ts";
 
 export interface SearchIndexEntry {
@@ -64,7 +65,7 @@ export async function indexMarkdownDirectory(
     if (entry.name.startsWith(".")) continue;
     if (entry.kind === "directory") {
       await indexMarkdownDirectory(entry, `${prefix}${entry.name}/`, isCurrent, target);
-    } else if (entry.name.endsWith(".md")) {
+    } else if (isEditableDocumentName(entry.name)) {
       try {
         const content = await (await entry.getFile()).text();
         if (isCurrent()) target.push({ notesRelPath: `${prefix}${entry.name}`, name: entry.name, content });
