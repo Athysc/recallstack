@@ -44,8 +44,10 @@ const initialBytes = [...visited].reduce((total, file) => total + statSync(file)
 // 2026-09-02: preview click-to-source-line mapping — a marked-lexer block→line
 // map plus the DOM walk that drops the editor caret where the reader clicked in
 // the preview. Raised from 376_000 on 2026-10-09: hyperlink handling changes and
-// focused document searching. Measured initial graph ~379 KB raw; ~3 KB margin.
-const budgetBytes = 382_000;
+// focused document searching. Raised from 382_000 on 2026-11-17: recursive
+// subfolder listing of Markdown/SQL/PowerShell files. Measured initial graph
+// ~382 KB raw; ~4 KB margin.
+const budgetBytes = 386_000;
 if (initialBytes > budgetBytes) {
   throw new Error(`Initial JavaScript is ${initialBytes} bytes; budget is ${budgetBytes} bytes`);
 }
