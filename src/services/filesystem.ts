@@ -10,6 +10,8 @@ export interface ListedFile {
   name: string;
   handle: FileSystemFileHandle;
   mtime: number;
+  /** Folder path relative to the listed directory ("" or absent for direct children). */
+  dir?: string;
 }
 
 type IterableDirectoryHandle = FileSystemDirectoryHandle & {
@@ -91,6 +93,28 @@ export const listMdFiles = (dirHandle: FileSystemDirectoryHandle): Promise<Liste
 /** Notes folders hold SQL scripts alongside Markdown; task folders stay Markdown-only (listMdFiles). */
 export async function listNoteFiles(dirHandle: FileSystemDirectoryHandle): Promise<ListedFile[]> {
   return (await listFiles(dirHandle, false)).filter(file => isEditableDocumentName(file.name));
+}
+
+/**
+ * Editable documents (Markdown, SQL, PowerShell) in a folder and every nested
+ * subfolder. Hidden folders and the top-level `archived/` folder (shown by the
+ * separate archive view) are skipped. Files carry their relative `dir`.
+ */
+export async function listNoteFilesRecursive(dirHandle: FileSystemDirectoryHandle): Promise<ListedFile[]> {
+  const result: ListedFile[] = [];
+  const walk = async (handle: FileSystemDirectoryHandle, dir: string): Promise<void> => {
+    for await (const entry of (handle as IterableDirectoryHandle).values()) {
+      if (entry.name.startsWith(".")) continue;
+      if (entry.kind === "directory") {
+        if (!dir && entry.name.toLowerCase() === "archived") continue;
+        await walk(entry, dir ? `${dir}/${entry.name}` : entry.name);
+      } else if (isEditableDocumentName(entry.name)) {
+        result.push({ name: entry.name, handle: entry, mtime: await entryMtime(entry), dir });
+      }
+    }
+  };
+  await walk(dirHandle, "");
+  return result;
 }
 
 export const listAllFiles = (dirHandle: FileSystemDirectoryHandle): Promise<ListedFile[]> =>

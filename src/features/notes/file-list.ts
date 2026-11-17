@@ -176,7 +176,7 @@ export function renderNoteCards(
     card.className = "file-card";
     const kind = documentKind(file.name);
     const icon = FILE_TYPE_GROUPS.find(group => group.key === kind)!.icon;
-    card.innerHTML = `<span class="file-icon">${icon}</span><span class="file-name">${escape(stripDocumentExtension(file.name))}</span><span class="file-meta">${formatMtime(file.mtime)}</span><span class="file-ext">${documentExtension(file.name) || ".md"}</span>`;
+    card.innerHTML = `<span class="file-icon">${icon}</span><span class="file-name">${escape(stripDocumentExtension(file.name))}</span>${file.dir ? `<span class="file-meta" title="${escape(file.dir)}">${escape(file.dir)}/</span>` : ""}<span class="file-meta">${formatMtime(file.mtime)}</span><span class="file-ext">${documentExtension(file.name) || ".md"}</span>`;
     card.addEventListener("click", event => onOpen(file, event));
     container.appendChild(card);
   });

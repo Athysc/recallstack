@@ -94,6 +94,7 @@ import {
   listDirs,
   listMdFiles,
   listNoteFiles,
+  listNoteFilesRecursive,
   uniqueFilenameInDir,
   type NamedDirectory,
 } from "../services/filesystem";
@@ -2502,7 +2503,7 @@ type TaskLocation = {
       return;
     }
 
-    const raw = await (isTasksFolder ? listMdFiles : listNoteFiles)(targetHandle);
+    const raw = await (isTasksFolder ? listMdFiles : (l2Active && !archiveMode ? listNoteFilesRecursive : listNoteFiles))(targetHandle);
     let workingTasks: any[] = [];
     if (isTasksFolder && !archiveMode) {
       try {
@@ -2581,7 +2582,7 @@ type TaskLocation = {
       return;
     }
 
-    renderNoteCards(fileGrid, enriched, esc, (file, event) => openFile(file.name, undefined, { pinned: isPinnedClick(event) }));
+    renderNoteCards(fileGrid, enriched, esc, (file, event) => openFile(file.name, file.dir ? `${activeFolderPath()}/${file.dir}/${file.name}` : undefined, { pinned: isPinnedClick(event) }));
   }
 
   function isRootLevelNotePath(path = currentPath) {
