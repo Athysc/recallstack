@@ -64,7 +64,7 @@ assert.doesNotMatch(
 );
 assert.match(workflow, /runs-on: windows-2022/);
 assert.match(workflow, /runs-on: ubuntu-22\.04/);
-assert.match(workflow, /runs-on: macos-14/);
+assert.match(workflow, /runs-on: macos-15/);
 assert.equal(packageJson.scripts["test:release:performance"], "node scripts/run-release-performance.mjs");
 assert.equal(packageJson.scripts["build:linux:appimage"], "node scripts/build-linux-appimage.mjs");
 assert.match(linuxAppImageRunner, /RECALLSTACK_APPIMAGE_GDK_PIXBUF_COMPAT/);
